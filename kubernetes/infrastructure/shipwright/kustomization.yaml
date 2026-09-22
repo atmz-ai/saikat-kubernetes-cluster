@@ -1,12 +1,41 @@
 # Shipwright — CRD-native image building operator (CNCF Sandbox), wraps BuildKit (rootless).
 # Pinned to v0.20.3. BuildKit v0.31.1. Tekton v1.12.2 LTS is the execution engine.
 # Triggered by Flux on git push — no external CI needed for building app images.
+#
+# TODO(consolidate-build-pipeline): This repo runs TWO components for the build
+# pipeline — Shipwright (builds) + Tekton Triggers (git push event → BuildRun) —
+# because Shipwright's own event triggering ("Shipwright Triggers", SHIP-0031) is
+# still WIP upstream. Re-checked 2026-09-22: STILL WIP, and materially so — not a
+# "wait for a GA tag" gap. Reading main.go at github.com/shipwright-io/triggers,
+# the controller starts ONLY three reconcilers (inventory, pipelineRun, customRun)
+# and there is NO HTTP/webhook server and NO GitHub provider: pkg/ has just
+# constants, filter, inventory, util — no pkg/webhooks. Build.spec.trigger is in
+# the shipped CRD but nothing consumes it. So consolidation is blocked on upstream
+# IMPLEMENTATION (the webhook handler + GitHub event matching), not on a release.
+# Consequence: `Build.spec.trigger` must NOT be adopted — it would silently do
+# nothing (BuildRuns would simply never fire). Tekton Triggers stays until the
+# upstream webhook handler exists and is released.
+#
+# Exposure removed 2026-09-22: the triggers-release Deployment's only real flag is
+# --metrics-bind-address (:8080). The upstream chart names that port "webhook" and
+# ships an Ingress, so this repo had added triggers-httproute.yaml +
+# triggers-networkpolicy.yaml on top — but nothing listens there, meaning
+# shipwright-triggers.yral.com was publicly fronting /metrics (a Prometheus scrape
+# endpoint) while its own comment claimed it received GitHub webhooks. Both files
+# are deleted. Re-add an HTTPRoute + NetworkPolicy only once the upstream webhook
+# handler actually exists. The container port is 8080 (not the chart default —
+# shipwright-triggers was pinned to the image digest built for this cluster) and the
+# Service maps 8080->8080, so re-check the port choice at that point too.
+#
+# WHEN upstream lands the webhook handler: move each app's trigger config from
+# tekton-trigger.yaml onto Build.spec.trigger, then delete Tekton Triggers — i.e.
+# tekton-triggers/, shipwright/triggers-release.yaml, and each app's EventListener +
+# TriggerBinding + TriggerTemplate. KEEP Tekton Pipelines (tekton-pipelines/):
+# Shipwright uses it as its execution engine regardless.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - webhook-certificate.yaml
   - release.yaml
   - triggers-release.yaml
-  - triggers-httproute.yaml
-  - triggers-networkpolicy.yaml
   - clusterbuildstrategy-buildkit.yaml
