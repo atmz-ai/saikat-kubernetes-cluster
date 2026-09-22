@@ -560,6 +560,8 @@ In-cluster Harbor at `harbor.yral.com` is the registry for custom-built app imag
 ### Image Building (Shipwright + BuildKit)
 In-cluster image building via Shipwright (CRD-native, CNCF Sandbox) wrapping BuildKit (rootless). Tekton Pipelines is the execution engine. Triggered by Flux on git push — no external CI needed. See `kubernetes/infrastructure/shipwright/kustomization.yaml` and `kubernetes/infrastructure/tekton-pipelines/kustomization.yaml` for version pins and compatibility notes.
 
+Two components are in play — Shipwright for builds, Tekton Triggers for the git-push → BuildRun hop — because Shipwright's own event triggering (SHIP-0031) is still WIP upstream. Verified 2026-09-22: the `shipwright-triggers` controller runs only inventory/pipelineRun/customRun reconcilers — no HTTP/webhook server and no GitHub provider exist in its source, so `Build.spec.trigger` is present in the CRD but unconsumed. **Do not adopt `Build.spec.trigger`** (it silently does nothing); Tekton Triggers stays until upstream implements the webhook handler. Full detail + migration steps: `TODO(consolidate-build-pipeline)` in `kubernetes/infrastructure/shipwright/kustomization.yaml`.
+
 **Test locally before deploying (Hard Rule):** Always build and test code changes locally before pushing to git and deploying to production. The full end-to-end workflow uses mise tasks for every step — both human operators and agents must use the same mise tooling:
 
 1. **Compile locally** — `mise run <app>-build` (release musl binary) or `mise run <app>-build-local` (debug, same code as production).

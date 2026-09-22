@@ -1,7 +1,7 @@
 # Shipwright Build CR for yral-auth.
 #
 # Defines how to build the yral-auth image from source using BuildKit.
-# Source: the monorepo (dolr-ai/yral-bare-metal-kubernetes-cluster) at apps/yral-auth/
+# Source: the monorepo (atmz-ai/saikat-kubernetes-cluster) at apps/yral-auth/
 # Strategy: buildkit (ClusterBuildStrategy, rootless BuildKit v0.31.1)
 # Output: harbor.yral.com/yral-auth/yral-auth
 #
@@ -21,9 +21,9 @@ spec:
   source:
     type: Git
     git:
-      # SSH URL so the infra SSH key (github-ssh-secret) works for both
+      # SSH URL so the machine-access SSH key (github-ssh-secret) works for both
       # the main repo clone and submodule clones (submodules use SSH URLs).
-      url: git@github.com:dolr-ai/yral-bare-metal-kubernetes-cluster.git
+      url: git@github.com:atmz-ai/saikat-kubernetes-cluster.git
       revision: main
       cloneSecret: github-ssh-secret
     # No contextDir — use the full repo as build context (needed for local path deps)
