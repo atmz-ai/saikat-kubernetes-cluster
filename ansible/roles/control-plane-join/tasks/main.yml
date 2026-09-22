@@ -1,0 +1,210 @@
+---
+- name: Join control plane node
+  block:
+    - name: Reset any stale kubeadm state before join
+      ansible.builtin.shell: |
+        kubeadm reset --force 2>/dev/null || true
+        rm -rf /var/lib/etcd /etc/kubernetes/pki/etcd /etc/kubernetes/kubelet.conf /etc/kubernetes/bootstrap-kubelet.conf
+      changed_when: true
+
+    - name: Find a v1.36.x control plane node for etcd operations
+      ansible.builtin.set_fact:
+        etcd_delegate: "{{ (groups['control_plane'] | reject('equalto', inventory_hostname) | list)[0] }}"
+
+    - name: Remove stale etcd member at this node's IP if exists
+      ansible.builtin.shell: |
+        set -o pipefail
+        ETCD_CID=$(ctr -n k8s.io containers list | grep "etcd:" | head -1 | cut -d" " -f1)
+        if [ -z "$ETCD_CID" ]; then
+          echo "No etcd container found"
+          exit 0
+        fi
+        NODE_IP="{{ ansible_facts['default_ipv4']['address'] }}"
+        STALE_ID=$(ctr -n k8s.io tasks exec --exec-id etcd-check "$ETCD_CID" \
+          etcdctl member list \
+          --endpoints=https://127.0.0.1:2379 \
+          --cacert=/etc/kubernetes/pki/etcd/ca.crt \
+          --cert=/etc/kubernetes/pki/etcd/server.crt \
+          --key=/etc/kubernetes/pki/etcd/server.key 2>/dev/null \
+          | grep "$NODE_IP" | cut -d, -f1 | tr -d " ")
+        if [ -n "$STALE_ID" ]; then
+          echo "Removing stale etcd member(s) at $NODE_IP: $STALE_ID"
+          for id in $STALE_ID; do
+            ctr -n k8s.io tasks exec --exec-id etcd-rm "$ETCD_CID" \
+              etcdctl member remove "$id" \
+              --endpoints=https://127.0.0.1:2379 \
+              --cacert=/etc/kubernetes/pki/etcd/ca.crt \
+              --cert=/etc/kubernetes/pki/etcd/server.crt \
+              --key=/etc/kubernetes/pki/etcd/server.key 2>&1
+          done
+        else
+          echo "No stale etcd member found at $NODE_IP"
+        fi
+      delegate_to: "{{ etcd_delegate }}"
+      register: stale_etcd_cleanup
+      changed_when: "'Removing stale' in stale_etcd_cleanup.stdout"
+
+    - name: Display stale etcd cleanup result
+      ansible.builtin.debug:
+        msg: "{{ stale_etcd_cleanup.stdout_lines }}"
+
+    - name: Upload control plane certificates on first control plane
+      ansible.builtin.shell: |
+        set -o pipefail
+        kubeadm init phase upload-certs --upload-certs 2>/dev/null | grep -E '^[a-f0-9]{64}$'
+      delegate_to: "{{ (groups['control_plane'] | reject('equalto', inventory_hostname) | list)[0] }}"
+      register: certificate_key
+      changed_when: true   # upload-certs always rotates the certificate key
+
+    - name: Generate control plane join command
+      ansible.builtin.shell: |
+        kubeadm token create --print-join-command --certificate-key {{ certificate_key.stdout }}
+      delegate_to: "{{ (groups['control_plane'] | reject('equalto', inventory_hostname) | list)[0] }}"
+      register: join_command
+      changed_when: true   # token create always mints a new bootstrap token
+
+    - name: Build final join command
+      ansible.builtin.set_fact:
+        join_command_final: >-
+          {{ join_command.stdout }}
+          {{ '' if '--control-plane' in join_command.stdout else '--control-plane' }}
+          {{ '' if '--apiserver-advertise-address' in join_command.stdout else '--apiserver-advertise-address=' + ansible_facts['default_ipv4']['address'] }}
+
+    - name: Join as control plane
+      ansible.builtin.command: "{{ join_command_final }}"
+      register: join_result
+      changed_when: true   # kubeadm join always rewrites node PKI + kubelet state
+
+    - name: Display join result
+      ansible.builtin.debug:
+        msg: "{{ join_result.stdout_lines }}"
+
+    - name: Create .kube directory
+      ansible.builtin.file:
+        path: /root/.kube
+        state: directory
+        mode: "0755"
+
+    - name: Copy admin.conf to .kube/config
+      ansible.builtin.copy:
+        src: /etc/kubernetes/admin.conf
+        dest: /root/.kube/config
+        remote_src: true
+        mode: "0600"
+
+- name: Query Cloudflare for existing CP A record at this IP
+  ansible.builtin.uri:
+    url: >-
+      https://api.cloudflare.com/client/v4/zones/{{ cloudflare_zone_id }}/dns_records
+      ?type=A&name={{ kubernetes_api_hostname }}&content={{ hostvars[inventory_hostname]['ansible_host'] }}
+    method: GET
+    headers:
+      Authorization: "Bearer {{ cloudflare_api_token }}"
+    return_content: true
+  delegate_to: localhost
+  register: cf_existing_cp_record
+  changed_when: false
+
+- name: Delete existing CP A record if found
+  ansible.builtin.uri:
+    url: "https://api.cloudflare.com/client/v4/zones/{{ cloudflare_zone_id }}/dns_records/{{ cf_existing_cp_record.json.result[0].id }}"
+    method: DELETE
+    headers:
+      Authorization: "Bearer {{ cloudflare_api_token }}"
+    status_code: 200
+  delegate_to: localhost
+  when: cf_existing_cp_record.json.result | length > 0
+  register: cf_cp_delete
+  changed_when: true
+
+- name: Add CP A record to Cloudflare DNS after successful join
+  ansible.builtin.uri:
+    url: "https://api.cloudflare.com/client/v4/zones/{{ cloudflare_zone_id }}/dns_records"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ cloudflare_api_token }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      type: "A"
+      name: "{{ kubernetes_api_hostname }}"
+      content: "{{ hostvars[inventory_hostname]['ansible_host'] }}"
+      ttl: 1
+      proxied: false
+    status_code: 200
+  delegate_to: localhost
+  register: control_plane_join_cf_result
+  changed_when: true
+
+- name: Display Cloudflare DNS registration result
+  ansible.builtin.debug:
+    msg: >-
+      Added A record: {{ kubernetes_api_hostname }} → {{ hostvars[inventory_hostname]['ansible_host'] }}
+      (record id: {{ control_plane_join_cf_result.json.result.id }})
+
+- name: Query Cloudflare for existing app wildcard A record at this IP
+  ansible.builtin.uri:
+    url: >-
+      https://api.cloudflare.com/client/v4/zones/{{ cloudflare_zone_id }}/dns_records
+      ?type=A&name={{ cloudflare_app_wildcard_hostname }}&content={{ hostvars[inventory_hostname]['ansible_host'] }}
+    method: GET
+    headers:
+      Authorization: "Bearer {{ cloudflare_api_token }}"
+    return_content: true
+  delegate_to: localhost
+  register: cf_existing_wildcard_record
+  changed_when: false
+
+- name: Delete existing app wildcard A record if found
+  ansible.builtin.uri:
+    url: "https://api.cloudflare.com/client/v4/zones/{{ cloudflare_zone_id }}/dns_records/{{ cf_existing_wildcard_record.json.result[0].id }}"
+    method: DELETE
+    headers:
+      Authorization: "Bearer {{ cloudflare_api_token }}"
+    status_code: 200
+  delegate_to: localhost
+  when: cf_existing_wildcard_record.json.result | length > 0
+  register: cf_wildcard_delete
+  changed_when: true
+
+- name: Add CP app wildcard A record to Cloudflare DNS after successful join
+  ansible.builtin.uri:
+    url: "https://api.cloudflare.com/client/v4/zones/{{ cloudflare_zone_id }}/dns_records"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ cloudflare_api_token }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      type: "A"
+      name: "{{ cloudflare_app_wildcard_hostname }}"
+      content: "{{ hostvars[inventory_hostname]['ansible_host'] }}"
+      ttl: 1
+      proxied: true
+    status_code: 200
+  delegate_to: localhost
+  register: control_plane_join_cf_wildcard_result
+  changed_when: true
+
+- name: Display Cloudflare app wildcard DNS registration result
+  ansible.builtin.debug:
+    msg: >-
+      Added A record: {{ cloudflare_app_wildcard_hostname }} → {{ hostvars[inventory_hostname]['ansible_host'] }}
+      (record id: {{ control_plane_join_cf_wildcard_result.json.result.id }})
+
+- name: Remove NoSchedule taint for stacked mode
+  ansible.builtin.command: >
+    kubectl taint node {{ inventory_hostname }}
+    node-role.kubernetes.io/control-plane:NoSchedule-
+  delegate_to: "{{ (groups['control_plane'] | reject('equalto', inventory_hostname) | list)[0] }}"
+  register: taint_removal_result
+  changed_when: "'untainted' in taint_removal_result.stdout"
+  failed_when: "'not found' in taint_removal_result.stderr and 'untainted' not in taint_removal_result.stdout"
+  when: stacked_mode | bool
+
+- name: Display taint removal result (stacked mode)
+  ansible.builtin.debug:
+    msg: >-
+      Stacked mode: removed NoSchedule taint from {{ inventory_hostname }}.
+      Workloads can now schedule on this control plane node.
+  when: stacked_mode | bool

@@ -1,0 +1,126 @@
+# Headlamp — Kubernetes UI
+#
+# A modern, user-friendly Kubernetes web UI.
+# Exposed at https://headlamp.yral.com via oauth2-proxy (Google Workspace SSO).
+#
+# Plugins installed:
+#   - Flux: ghcr.io/headlamp-k8s/headlamp-plugin-flux:v0.7.0
+#     Releases: https://github.com/headlamp-k8s/plugins/releases
+#     Loaded via initContainer copying from OCI image into emptyDir at /build/plugins
+#   - Trivy: ghcr.io/kubebeam/trivy-headlamp-plugin:v0.3.2
+#     Source: https://github.com/kubebeam/trivy-headlamp-plugin
+#     Visualizes Trivy Operator CRs (ClusterComplianceReport, VulnerabilityReport,
+#     ConfigAuditReport, ExposedSecretReport, InfraAssessmentReport, etc.)
+#     Requires the trivy-operator HelmRelease in kubernetes/infrastructure/trivy-operator/
+#
+# Chart: https://kubernetes-sigs.github.io/headlamp/
+# Version: check latest at https://github.com/kubernetes-sigs/headlamp/releases
+# NOTE: pinned to 0.40.0 — 0.40.1 binary removed the -session-ttl flag but the
+# chart still passes it by default, causing an immediate crash. v0.41.0 restores
+# the flag; bump to 0.41.0 once its Helm chart is published.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: headlamp
+  namespace: headlamp
+spec:
+  interval: 1h
+  chart:
+    spec:
+      chart: headlamp
+      version: "0.45.0"
+      sourceRef:
+        kind: HelmRepository
+        name: headlamp
+        namespace: headlamp
+  timeout: 5m
+  upgrade:
+    remediation:
+      retries: 3
+  # Patch the Helm-generated Deployment to mount the kubeconfig ConfigMap.
+  # The chart has no extraVolumes support, so we inject it via postRenderers.
+  postRenderers:
+    - kustomize:
+        patches:
+          - target:
+              kind: Deployment
+              name: headlamp
+            patch: |
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: headlamp
+              spec:
+                template:
+                  spec:
+                    volumes:
+                      - name: kubeconfig
+                        configMap:
+                          name: headlamp-kubeconfig
+                    containers:
+                      - name: headlamp
+                        volumeMounts:
+                          - name: kubeconfig
+                            mountPath: /headlamp-kubeconfig
+                            readOnly: true
+  values:
+    replicaCount: 1
+    # Use kubeconfig mode instead of inCluster — Headlamp auto-connects using the
+    # pod's own SA token (headlamp SA is bound to cluster-admin by the chart CRB).
+    # This bypasses the token prompt in the UI entirely; oauth2-proxy handles auth.
+    config:
+      inCluster: false
+      extraArgs:
+        - "-kubeconfig=/headlamp-kubeconfig/config"
+      # Directory where Headlamp loads plugins from; shared with initContainer below
+      pluginsDir: /build/plugins
+    # Pod must still automount the SA token so tokenFile in the kubeconfig resolves
+    automountServiceAccountToken: true
+    clusterRoleBinding:
+      create: true
+      clusterRoleName: cluster-admin
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 128Mi
+    # Plugins: copy plugin files from OCI images into the shared emptyDir
+    # before the main Headlamp container starts. Both initContainers share the
+    # same headlamp-plugins volume and run sequentially.
+    initContainers:
+      - name: headlamp-flux-plugin
+        image: ghcr.io/headlamp-k8s/headlamp-plugin-flux:v0.7.0
+        command:
+          - /bin/sh
+          - -c
+          - mkdir -p /build/plugins && cp -r /plugins/* /build/plugins/ && chown -R 100:101 /build
+        securityContext:
+          runAsNonRoot: false
+          privileged: false
+          runAsUser: 0
+          runAsGroup: 0
+        volumeMounts:
+          - name: headlamp-plugins
+            mountPath: /build/plugins
+      - name: headlamp-trivy-plugin
+        image: ghcr.io/kubebeam/trivy-headlamp-plugin:v0.3.2
+        command:
+          - /bin/sh
+          - -c
+          - cp -r /plugins/* /build/plugins/ && chown -R 100:101 /build
+        securityContext:
+          runAsNonRoot: false
+          privileged: false
+          runAsUser: 0
+          runAsGroup: 0
+        volumeMounts:
+          - name: headlamp-plugins
+            mountPath: /build/plugins
+    volumes:
+      - name: headlamp-plugins
+        emptyDir: {}
+    volumeMounts:
+      - name: headlamp-plugins
+        mountPath: /build/plugins

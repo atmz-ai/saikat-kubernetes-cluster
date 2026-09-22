@@ -1,0 +1,69 @@
+# web-gateway — shared Gateway for all cluster services
+#
+# Handles:
+#   - HTTP (port 80):  redirect to HTTPS (via HTTPRoute)
+#   - HTTPS (port 443): TLS termination for all services
+#
+# Traffic path:
+#   DNS *.yral.com / *.saikat.dev → A records for ALL node IPs (workers + CPs)
+#   → any node:80/443 (Cilium Envoy, hostNetwork mode — binds directly to host port)
+#   → Cilium mesh routes to the node hosting the destination pod
+#   → TLS terminated with Let's Encrypt wildcard cert
+#   → backend pod
+#
+# Adding a new service: create an HTTPRoute — no Gateway changes needed.
+# DNS A records (all node IPs) are managed via DNSEndpoint CRDs in
+# kubernetes/infrastructure/external-dns/.
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: web-gateway
+  namespace: kube-system
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  gatewayClassName: cilium
+  listeners:
+    - name: http
+      port: 80
+      protocol: HTTP
+      allowedRoutes:
+        namespaces:
+          from: All
+    - name: https
+      port: 443
+      protocol: HTTPS
+      hostname: "*.yral.com"
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: wildcard-yral-com-tls
+            kind: Secret
+      allowedRoutes:
+        namespaces:
+          from: All
+    - name: https-saikat-dev
+      port: 443
+      protocol: HTTPS
+      hostname: "*.saikat.dev"
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: wildcard-saikat-dev-tls
+            kind: Secret
+      allowedRoutes:
+        namespaces:
+          from: All
+    - name: https-saikat-dev-apex
+      port: 443
+      protocol: HTTPS
+      hostname: "saikat.dev"
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: wildcard-saikat-dev-tls
+            kind: Secret
+      allowedRoutes:
+        namespaces:
+          from: All

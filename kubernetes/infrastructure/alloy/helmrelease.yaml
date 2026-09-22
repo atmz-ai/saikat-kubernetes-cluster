@@ -1,0 +1,153 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: alloy
+  namespace: alloy
+spec:
+  interval: 1h
+  chart:
+    spec:
+      chart: alloy
+      version: "1.12.1"
+      sourceRef:
+        kind: HelmRepository
+        name: grafana
+        namespace: alloy
+  timeout: 1h
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    # Run as a DaemonSet so every node ships its pod logs to Loki
+    controller:
+      type: daemonset
+      # Roll 4 nodes at a time — cluster has 40 nodes so default maxUnavailable=1 is too slow
+      updateStrategy:
+        rollingUpdate:
+          maxUnavailable: 4
+      # Allow scheduling on control-plane nodes to collect their pod logs
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
+
+    # Add pods/log to the default ClusterRole so loki.source.kubernetes can
+    # call the Kubernetes API log endpoint for each pod
+    rbac:
+      extraRules:
+        - apiGroups: [""]
+          resources: ["pods/log"]
+          verbs: ["get"]
+
+    alloy:
+      resources:
+        requests:
+          # VPA target: 143m CPU / 524Mi — raised from 50m/128Mi
+          cpu: 150m
+          memory: 512Mi
+        limits:
+          # VPA upper: 314m / 1.15Gi — previous 512Mi limit was below VPA target (524Mi)
+          # Control-plane Alloy pods hit ~1.13Gi due to API server / etcd / scheduler
+          # log volume. Raised from 1536Mi to 2048Mi to give headroom. The start_time
+          # filter on loki.source.kubernetes also reduces memory by preventing
+          # historical log replay on reconnect.
+          cpu: 400m
+          memory: 2048Mi
+
+      configMap:
+        content: |
+          // Discover all Kubernetes pods via the API server
+          discovery.kubernetes "pods" {
+            role = "pod"
+          }
+
+          // Relabel pod metadata into useful Loki stream labels
+          discovery.relabel "pod_logs" {
+            targets = discovery.kubernetes.pods.targets
+
+            // Only collect logs from running or pending pods
+            rule {
+              source_labels = ["__meta_kubernetes_pod_phase"]
+              regex         = "Pending|Running"
+              action        = "keep"
+            }
+
+            rule {
+              source_labels = ["__meta_kubernetes_namespace"]
+              target_label  = "namespace"
+            }
+
+            rule {
+              source_labels = ["__meta_kubernetes_pod_name"]
+              target_label  = "pod"
+            }
+
+            rule {
+              source_labels = ["__meta_kubernetes_pod_container_name"]
+              target_label  = "container"
+            }
+
+            // Prefer app.kubernetes.io/name label for the "app" Loki label
+            rule {
+              source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_name"]
+              target_label  = "app"
+            }
+
+            // Fall back to the plain "app" pod label when app.kubernetes.io/name is
+            // absent (e.g. Flux controllers, Velero, Longhorn use plain app=<name>).
+            // Joins current "app" and "__meta_kubernetes_pod_label_app" with ";"; the
+            // regex only matches when app is still empty (leading ";").
+            rule {
+              source_labels = ["app", "__meta_kubernetes_pod_label_app"]
+              separator     = ";"
+              regex         = "^;(.+)$"
+              target_label  = "app"
+              replacement   = "$1"
+            }
+
+            rule {
+              source_labels = ["__meta_kubernetes_node_name"]
+              target_label  = "node"
+            }
+          }
+
+          // Use the Kubernetes API log endpoint — avoids filesystem glob issues
+          // that occur when a DaemonSet pod tries to read log files for pods
+          // running on other nodes via /var/log/pods/*.
+          //
+          // The API endpoint returns the ENTIRE log history of each pod (from
+          // the first log line), not just new logs since the last read. For
+          // long-running pods (weeks/months), this replays old logs on every
+          // stream open or reconnect. Loki rejects entries older than
+          // reject_old_samples_max_age (168h) with HTTP 400, causing:
+          //   - "final error sending batch, no retries left, dropping data" in Alloy
+          //   - Memory pressure from buffering large historical log batches
+          //   - Error storm in Loki ingester
+          //
+          // The loki.process stage below drops entries older than 1h before
+          // they reach loki.write, preventing the 400 errors at the source.
+          loki.source.kubernetes "pods" {
+            targets    = discovery.relabel.pod_logs.output
+            forward_to = [loki.process.filter_old.receiver]
+          }
+
+          // Drop log entries with timestamps older than 1 hour. This prevents
+          // the historical log replay from loki.source.kubernetes from reaching
+          // Loki and causing "timestamp too old" 400 errors. Only fresh logs
+          // are forwarded; old entries are silently dropped (counted in the
+          // loki_process_dropped_lines_total metric with reason "too_old").
+          loki.process "filter_old" {
+            forward_to = [loki.write.loki.receiver]
+
+            stage.drop {
+              older_than          = "1h"
+              drop_counter_reason = "too_old"
+            }
+          }
+
+          // Push logs to Loki (internal cluster DNS)
+          loki.write "loki" {
+            endpoint {
+              url = "http://loki.loki.svc.cluster.local:3100/loki/api/v1/push"
+            }
+          }

@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>com.yral.iosApp</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>com.yral.iosApp</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>com.yral.iosApp</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>yral</string>
+			</array>
+		</dict>
+	</array>
+	<key>FIREBASE_CLOUD_BASE_URL</key>
+	<string>https://us-central1-yral-mobile.cloudfunctions.net/</string>
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<false/>
+	</dict>
+	<key>UILaunchScreen</key>
+	<dict/>
+	<key>YRAL_REDIRECT_URI</key>
+	<string>com.yral.iosApp://oauth/callback</string>
+	<key>YRAL_REDIRECT_URI_SCHEME</key>
+	<string>com.yral.iosApp</string>
+</dict>
+</plist>

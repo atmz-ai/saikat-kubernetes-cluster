@@ -1,0 +1,53 @@
+[package]
+name = "yral-metadata-server"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+axum = { workspace = true, features = ["json", "macros"] }
+base64 = { workspace = true }
+candid = { workspace = true }
+chrono = { workspace = true }
+config = { workspace = true, features = ["toml"] }
+elsa = { workspace = true }
+email_address = { workspace = true }
+env_logger = { workspace = true }
+futures = { workspace = true }
+ic-agent = { workspace = true, features = ["pem"] }
+jsonwebtoken = { workspace = true, features = ["aws_lc_rs", "use_pem"] }
+log = { workspace = true }
+once_cell = { workspace = true }
+regex = { workspace = true }
+reqwest = {
+  workspace = true,
+  default-features = false,
+  features = [
+    "http2",
+    "json",
+    "rustls",
+  ]
+}
+rustls = { workspace = true, features = ["ring"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_with = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+tower = { workspace = true }
+tower-http = { workspace = true, features = ["cors", "trace"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+types = { package = "yral-metadata-types", path = "../types", features = ["verify"] }
+utoipa = { workspace = true }
+utoipa-swagger-ui = { workspace = true, features = ["axum", "reqwest"] }
+
+[dev-dependencies]
+k256 = { workspace = true }
+rand = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[features]
+default = []

@@ -1,0 +1,346 @@
+---
+# upgrade-worker role
+#
+# Safely upgrades one worker node at a time:
+#   1. Pre-flight: verify cluster is healthy before touching this node
+#   2. Upgrade system packages
+#   3. If reboot required:
+#      a. Cordon + drain (evict workloads to other nodes)
+#      b. Reboot
+#      c. Wait for SSH + kubelet to come back
+#      d. Uncordon and verify Ready
+#   4. Post-flight: verify node Ready
+#
+# NOTE: We deliberately do NOT run `kubectl delete node`. Deleting the node
+# object causes Longhorn to destroy replica.longhorn.io objects for that node,
+# forcing a full volume rebuild on rejoin. By keeping the node object alive
+# through the reboot, Longhorn simply resumes stopped replicas — no transfer,
+# no rebuild. This is the standard rolling-upgrade pattern used by GKE/EKS.
+#
+# serial: 1 in the playbook ensures only one worker is upgraded at a time,
+# keeping cluster capacity stable throughout a rolling upgrade.
+
+# ========== SETUP ==========
+
+- name: Identify kubectl delegate (any healthy control plane)
+  ansible.builtin.set_fact:
+    kubectl_delegate: "{{ groups['control_plane'][0] }}"
+
+- name: Display upgrade plan
+  ansible.builtin.debug:
+    msg: |
+      ============================================================
+      Upgrading Worker: {{ inventory_hostname }}
+      kubectl delegate: {{ kubectl_delegate }}
+      ============================================================
+
+# ========== PRE-FLIGHT ==========
+
+- name: Get Ready node count
+  ansible.builtin.shell: |
+    set -o pipefail
+    kubectl get nodes -o json | python3 -c "
+    import sys, json
+    nodes = json.load(sys.stdin)['items']
+    ready = [
+        n['metadata']['name'] for n in nodes
+        if any(
+            c['type'] == 'Ready' and c['status'] == 'True'
+            for c in n.get('status', {}).get('conditions', [])
+        )
+    ]
+    print(' '.join(ready))
+    "
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: ready_nodes
+  changed_when: false
+  delegate_to: "{{ kubectl_delegate }}"
+
+- name: Display healthy nodes before upgrade
+  ansible.builtin.debug:
+    msg: "Healthy nodes: {{ ready_nodes.stdout.split() | join(', ') }}"
+
+# ========== UPGRADE PHASE ==========
+
+- name: Unhold Kubernetes packages so dist-upgrade can update them
+  ansible.builtin.shell: apt-mark unhold kubeadm kubelet kubectl
+  args:
+    executable: /bin/bash
+  changed_when: true
+
+- name: Upgrade system packages
+  ansible.builtin.shell: |
+    set -euo pipefail
+    apt-get update -qq
+    DEBIAN_FRONTEND=noninteractive apt-get dist-upgrade -y
+  args:
+    executable: /bin/bash
+  changed_when: true
+
+- name: Check if reboot is required
+  ansible.builtin.stat:
+    path: /var/run/reboot-required
+  register: reboot_required_stat
+
+- name: Display reboot status
+  ansible.builtin.debug:
+    msg: "Reboot {{ 'REQUIRED - will drain, delete, reboot, and rejoin' if reboot_required_stat.stat.exists else 'NOT required - skipping reboot cycle' }}"
+
+# ========== DRAIN → DELETE → REBOOT (only if reboot required) ==========
+
+- name: Drain, delete, and reboot node
+  when: reboot_required_stat.stat.exists
+  block:
+
+    # ----- Drain -----
+
+    - name: Cordon node (mark unschedulable)
+      ansible.builtin.command: kubectl cordon {{ inventory_hostname }}
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      delegate_to: "{{ kubectl_delegate }}"
+      changed_when: true
+
+    # Longhorn creates a PDB (minAvailable: 1) for each instance-manager pod.
+    # Each instance-manager is pinned to its own node and cannot reschedule
+    # elsewhere — so the eviction API permanently blocks drain. Deleting the
+    # PDB before drain is safe: the pod goes down with the node regardless, and
+    # Longhorn recreates the PDB automatically when the instance-manager
+    # restarts after reboot.
+    - name: Remove Longhorn instance-manager PDB for this node to allow drain
+      ansible.builtin.shell: |
+        set -o pipefail
+        pdb=$(kubectl get pdb -n longhorn-system -o json | python3 -c "
+        import sys, json
+        data = json.load(sys.stdin)
+        for p in data['items']:
+            sel = p.get('spec', {}).get('selector', {}).get('matchLabels', {})
+            if sel.get('longhorn.io/node') == '{{ inventory_hostname }}' and 'instance-manager' in p['metadata']['name']:
+                print(p['metadata']['name'])
+                break
+        ")
+        if [ -n "$pdb" ]; then
+          kubectl delete pdb "$pdb" -n longhorn-system
+          echo "deleted $pdb"
+        else
+          echo "no instance-manager PDB found for {{ inventory_hostname }}"
+        fi
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      delegate_to: "{{ kubectl_delegate }}"
+      changed_when: "'deleted' in result.stdout"
+      register: result
+
+    # Wait until all PDBs covering pods on this node allow at least 1
+    # disruption. This prevents draining a Kafka node when the Kafka cluster
+    # is already degraded (e.g. another broker is still starting up).
+    - name: Wait for PDBs covering pods on this node to allow disruption
+      ansible.builtin.shell: |
+        set -o pipefail
+        kubectl get pods --field-selector spec.nodeName={{ inventory_hostname }} -A -o json | python3 -c "
+        import sys, json, subprocess
+        pods = json.load(sys.stdin)
+        pod_labels = []
+        for p in pods['items']:
+            pod_labels.append(p.get('metadata', {}).get('labels', {}))
+
+        pdb_resp = subprocess.run(['kubectl','get','pdb','-A','-o','json'], capture_output=True, text=True, env={'KUBECONFIG':'/etc/kubernetes/admin.conf'})
+        pdbs = json.loads(pdb_resp.stdout)
+        blocking = []
+        for pdb in pdbs['items']:
+            allowed = pdb.get('status', {}).get('disruptionsAllowed', 1)
+            if allowed > 0:
+                continue
+            sel = pdb.get('spec', {}).get('selector', {}).get('matchLabels', {})
+            for labels in pod_labels:
+                if all(labels.get(k) == v for k, v in sel.items()):
+                    blocking.append(pdb['metadata']['namespace'] + '/' + pdb['metadata']['name'])
+                    break
+        print(len(blocking))
+        if blocking:
+            import sys; print('\n'.join(blocking), file=sys.stderr)
+        "
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: blocking_pdbs
+      until: blocking_pdbs.stdout | trim | int == 0
+      retries: 60
+      delay: 15
+      changed_when: false
+      delegate_to: "{{ kubectl_delegate }}"
+
+    - name: Drain node (evict all evictable pods)
+      ansible.builtin.command: >
+        kubectl drain {{ inventory_hostname }}
+        --ignore-daemonsets
+        --delete-emptydir-data
+        --force
+        --grace-period=300
+        --timeout=600s
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      delegate_to: "{{ kubectl_delegate }}"
+      changed_when: true
+
+    # ----- Reboot -----
+    # We do NOT run `kubectl delete node`. Deleting the node causes Longhorn
+    # to destroy replica.longhorn.io objects, forcing a full volume rebuild on
+    # rejoin. Keeping the node object alive through the reboot lets Longhorn
+    # resume stopped replicas without any data transfer.
+
+    - name: Initiate reboot
+      ansible.builtin.shell: sleep 3 && /usr/sbin/shutdown -r now
+      async: 1
+      poll: 0
+      changed_when: true
+
+    - name: Wait for node to come back online
+      ansible.builtin.wait_for:
+        host: "{{ hostvars[inventory_hostname].ansible_host }}"
+        port: 22
+        state: started
+        timeout: 300
+        delay: 10
+        sleep: 10
+      delegate_to: localhost
+
+    - name: Confirm SSH is responsive after reboot
+      # wait_for_connection uses Ansible's own SSH mechanism (private_key_file
+      # from ansible.cfg), which is correct in all environments including CI
+      # where there is no SSH agent. A bare `ssh` command without -i fails
+      # with "Permission denied (publickey)" because it cannot find the key.
+      ansible.builtin.wait_for_connection:
+        timeout: 300
+        sleep: 5
+        delay: 5
+
+    - name: Wait for kubelet to be active
+      ansible.builtin.command: systemctl status kubelet --no-prompt
+      register: kubelet_status
+      until: kubelet_status.rc == 0
+      retries: 30
+      delay: 5
+      changed_when: false
+    - name: Wait for node object to be Ready
+      ansible.builtin.command: >
+        kubectl wait --for=condition=Ready node/{{ inventory_hostname }} --timeout=300s
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      delegate_to: "{{ kubectl_delegate }}"
+      changed_when: false
+
+    - name: Uncordon node (restore schedulability)
+      ansible.builtin.command: kubectl uncordon {{ inventory_hostname }}
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      delegate_to: "{{ kubectl_delegate }}"
+      changed_when: true
+
+    # ----- Longhorn post-reboot health check -----
+    # Longhorn resumes stopped replicas on the rebooted node — no rebuild needed
+    # because the node object was never deleted and replica metadata is intact.
+    # Wait for disks to become schedulable and all volumes to return to healthy.
+
+    - name: Wait for Longhorn disk to re-register as schedulable
+      ansible.builtin.shell: |
+        set -o pipefail
+        kubectl get node.longhorn.io {{ inventory_hostname }} -n longhorn-system \
+          -o json 2>/dev/null | python3 -c "
+        import sys, json
+        d = json.load(sys.stdin)
+        disks = d.get('status', {}).get('diskStatus', {})
+        not_ready = [
+            k for k, v in disks.items()
+            if v.get('storageMaximum', 0) > 0
+            and not any(
+                c.get('type') == 'Schedulable' and c.get('status') == 'True'
+                for c in v.get('conditions', [])
+            )
+        ]
+        print(len(not_ready))
+        " 2>/dev/null || echo 1
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: longhorn_disk_state
+      until: longhorn_disk_state.stdout | trim | int == 0
+      retries: 60
+      delay: 10
+      changed_when: false
+      failed_when: false
+      delegate_to: "{{ kubectl_delegate }}"
+
+    - name: Wait for Longhorn volumes with replicas on this node to return to healthy state
+      ansible.builtin.shell: |
+        set -o pipefail
+        node_vols=$(kubectl get replicas.longhorn.io -n longhorn-system -o json | python3 -c "
+        import sys, json
+        d = json.load(sys.stdin)
+        vols = set(r['spec']['volumeName'] for r in d['items'] if r['spec'].get('nodeID') == '{{ inventory_hostname }}')
+        print('\n'.join(vols))
+        ")
+        if [ -z "$node_vols" ]; then echo 0; exit 0; fi
+        kubectl get volumes.longhorn.io -n longhorn-system -o json | python3 -c "
+        import sys, json
+        node_vols = set('''$node_vols'''.split())
+        d = json.load(sys.stdin)
+        degraded = [
+            v['metadata']['name'] for v in d['items']
+            if v['metadata']['name'] in node_vols
+            and v.get('status', {}).get('state') == 'attached'
+            and v.get('status', {}).get('robustness') not in ('healthy', 'unknown')
+        ]
+        print(len(degraded))
+        "
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: degraded_volumes
+      until: degraded_volumes.stdout | trim | int == 0
+      retries: 120
+      delay: 15
+      changed_when: false
+      delegate_to: "{{ kubectl_delegate }}"
+
+# ========== VERIFICATION ==========
+
+- name: Wait for node to be Ready
+  ansible.builtin.command: >
+    kubectl wait --for=condition=Ready node/{{ inventory_hostname }} --timeout=600s
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  delegate_to: "{{ kubectl_delegate }}"
+  changed_when: false
+
+- name: Assert node is Ready
+  ansible.builtin.command: >
+    kubectl get node {{ inventory_hostname }}
+    -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}'
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: node_ready_status
+  failed_when: node_ready_status.stdout != "True"
+  changed_when: false
+  delegate_to: "{{ kubectl_delegate }}"
+
+- name: Verify kubelet and containerd are healthy
+  ansible.builtin.shell: |
+    set -o pipefail
+    systemctl status kubelet --no-prompt > /dev/null
+    systemctl status containerd --no-prompt > /dev/null
+    echo "kubelet and containerd active"
+  register: service_status
+  changed_when: false
+
+- name: Display upgrade completion
+  ansible.builtin.debug:
+    msg: |
+      ============================================================
+      ✅ Worker Upgrade Complete: {{ inventory_hostname }}
+      ============================================================
+      Rebooted:  {{ 'yes' if reboot_required_stat.stat.exists else 'no' }}
+      Status:    Ready ✓
+      Services:  {{ service_status.stdout_lines | join(', ') }}
+
+      kubectl get nodes
+      kubectl get pods -A --field-selector spec.nodeName={{ inventory_hostname }}
+      ============================================================

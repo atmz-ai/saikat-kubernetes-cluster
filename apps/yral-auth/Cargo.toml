@@ -1,0 +1,170 @@
+[package]
+name = "yral-auth"
+version = "0.1.0"
+edition = "2021"
+
+[package.metadata.leptos]
+# The name used by wasm-bindgen/cargo-leptos for the JS/WASM bundle. Defaults to the crate name
+output-name = "yral-auth"
+
+# The site root folder is where cargo-leptos generate all output. WARNING: all content of this folder will be erased on a rebuild. Use it in your server setup.
+site-root = "target/site"
+
+# The site-root relative folder where all compiled output (JS, WASM and CSS) is written
+# Defaults to pkg
+site-pkg-dir = "pkg"
+
+# [Optional] The source CSS file. If it ends with .sass or .scss then it will be compiled by dart-sass into CSS. The CSS is optimized by Lightning CSS before being written to <site-root>/<site-pkg>/app.css
+# style-file = "style/main.scss"
+
+# The tailwind input file.
+#
+# Optional, Activates the tailwind build
+tailwind-input-file = "style/tailwind.css"
+
+# Assets source dir. All files found here will be copied and synchronized to site-root.
+# The assets-dir cannot have a sub directory with the same name/path as site-pkg-dir.
+#
+# Optional. Env: LEPTOS_ASSETS_DIR.
+assets-dir = "public"
+
+# The IP and port (ex: 127.0.0.1:3000) where the server serves the content. Use it in your server setup.
+site-addr = "127.0.0.1:3000"
+
+# The port to use for automatic reload monitoring
+reload-port = 3001
+
+# The browserlist query used for optimizing the CSS.
+browserquery = "defaults"
+
+# The environment Leptos will run in, usually either "DEV" or "PROD"
+env = "DEV"
+
+# The features to use when compiling the bin target
+#
+# Optional. Can be over-ridden with the command line parameter --bin-features
+bin-features = ["ssr"]
+
+# If the --no-default-features flag should be used when compiling the bin target
+#
+# Optional. Defaults to false.
+bin-default-features = false
+
+# The features to use when compiling the lib target
+#
+# Optional. Can be over-ridden with the command line parameter --lib-features
+lib-features = ["hydrate"]
+
+# If the --no-default-features flag should be used when compiling the lib target
+#
+# Optional. Defaults to false.
+lib-default-features = false
+
+# The profile to use for the lib target when compiling for release
+#
+# Optional. Defaults to "release".
+lib-profile-release = "wasm-release"
+
+hash-files = false
+
+bin-target = "yral-auth"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "yral-auth"
+path = "src/main.rs"
+required-features = ["ssr"]
+
+[[bin]]
+name = "jwt-secret-gen"
+path = "src/jwt_secret_gen.rs"
+required-features = ["ssr"]
+
+[dependencies]
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+axum = { workspace = true, features = ["form", "json", "macros"], optional = true }
+axum-extra = { workspace = true, features = ["cookie", "cookie-private"], optional = true }
+base64 = { workspace = true }
+console_error_panic_hook = { workspace = true, optional = true }
+console_log = { workspace = true, optional = true }
+enum_dispatch = { workspace = true }
+futures = { workspace = true }
+hex = { workspace = true, optional = true }
+jsonwebtoken = { workspace = true, optional = true, features = ["aws_lc_rs", "use_pem"] }
+leptos = { workspace = true }
+leptos_axum = { workspace = true, optional = true }
+leptos_meta = { workspace = true }
+leptos_router = { workspace = true }
+log = { workspace = true }
+openidconnect = { workspace = true }
+openssl-sys = { workspace = true, features = ["vendored"], optional = true }
+p256 = { workspace = true, features = ["pkcs8"], optional = true }
+postcard = { workspace = true, features = ["use-std"] }
+rand = { workspace = true, optional = true }
+regex = { workspace = true }
+reqwest = { workspace = true, features = ["json", "rustls"] }
+rustls = { workspace = true, features = ["logging", "ring", "std", "tls12"], optional = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+sha2 = { workspace = true, optional = true }
+simple_logger = { workspace = true, optional = true }
+spacetimedb-sdk = { workspace = true, optional = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread"], optional = true }
+
+tracing = { workspace = true, optional = true }
+tracing-subscriber = { workspace = true, features = ["env-filter"], optional = true }
+url = { workspace = true, features = ["serde"] }
+uuid = { workspace = true, features = ["js", "v4"] }
+wasm-bindgen = { workspace = true, optional = true }
+web-time = { workspace = true }
+
+[dev-dependencies]
+anyhow = { workspace = true }
+jsonwebtoken = { workspace = true, features = ["aws_lc_rs", "use_pem"] }
+p256 = { workspace = true, features = ["pkcs8"] }
+rand = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt"] }
+yral-database-spacetime-bindings = { workspace = true }
+
+# getrandom v0.4 is pulled transitively by leptos_macro's uuid dep.
+# On wasm32-unknown-unknown, it needs the wasm_js feature enabled.
+# This is a target-specific dependency — only active on WASM targets.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { workspace = true, features = ["wasm_js"] }
+
+[features]
+apple-oauth = []
+google-oauth = []
+hydrate = [
+  "dep:console_error_panic_hook",
+  "dep:console_log",
+  "dep:wasm-bindgen",
+  "leptos/hydrate",
+]
+phone-auth = []
+release-bin = ["apple-oauth", "google-oauth", "phone-auth", "ssr"]
+release-lib = ["apple-oauth", "google-oauth", "hydrate", "phone-auth"]
+ssr = [
+  "dep:axum",
+  "dep:axum-extra",
+  "dep:hex",
+  "dep:jsonwebtoken",
+  "dep:leptos_axum",
+  "dep:openssl-sys",
+  "dep:p256",
+  "dep:rand",
+  "dep:rustls",
+  "dep:sha2",
+  "dep:simple_logger",
+  "dep:spacetimedb-sdk",
+  "dep:tokio",
+  "dep:tracing",
+  "dep:tracing-subscriber",
+  "leptos_meta/ssr",
+  "leptos_router/ssr",
+  "leptos/ssr",
+]

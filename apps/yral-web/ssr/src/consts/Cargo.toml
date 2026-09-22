@@ -1,0 +1,118 @@
+[package]
+name = "consts"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+axum = { workspace = true, features = ["macros"], optional = true }
+console_error_panic_hook = { workspace = true }
+console_log = { workspace = true }
+leptos = { workspace = true, features = ["nightly"] }
+leptos_axum = { workspace = true, optional = true }
+leptos_meta = { workspace = true }
+leptos_router = { workspace = true, features = ["nightly"] }
+log = { workspace = true }
+simple_logger = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "signal", "time"], optional = true }
+tower = { workspace = true, features = ["full"], optional = true }
+tower-http = { workspace = true, features = ["cors", "fs"], optional = true }
+wasm-bindgen = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true, optional = true }
+http = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+futures = { workspace = true }
+leptos-use = { workspace = true }
+codee = { workspace = true, features = ["json_serde"] }
+reqwest = { workspace = true, features = ["http2", "json", "multipart"] }
+hex = { workspace = true }
+leptos_icons = { workspace = true }
+icondata = { workspace = true }
+gloo = { workspace = true, features = ["futures", "net"] }
+once_cell = { workspace = true }
+web-time.workspace = true
+icondata_core = { workspace = true }
+serde_json = { workspace = true }
+uts2ts = { workspace = true }
+rand_chacha = { workspace = true, optional = true }
+web-sys = {
+  workspace = true,
+  features = [
+    "Clipboard",
+    "Document",
+    "Navigator",
+    "ShareData",
+    "ValidityState",
+    "Window",
+    "Worker",
+    "XmlHttpRequest",
+    "XmlHttpRequestUpload",
+  ],
+  optional = true
+}
+enum_dispatch = { workspace = true, optional = true }
+axum-extra = {
+  workspace = true,
+  features = [
+    "cookie",
+    "cookie-private",
+    "cookie-signed",
+    "typed-header",
+  ],
+  optional = true
+}
+openidconnect = { workspace = true, optional = true }
+wasm-bindgen-futures = { workspace = true }
+js-sys = { workspace = true }
+speedate = { workspace = true, optional = true }
+urlencoding = { workspace = true }
+regex = { workspace = true, optional = true }
+anyhow = { workspace = true }
+send_wrapper = { workspace = true, features = ["futures"] }
+jsonwebtoken = { workspace = true, optional = true, features = ["aws_lc_rs", "use_pem"] }
+
+
+[features]
+hydrate = [
+    "leptos/hydrate",
+    "dep:web-sys",
+    "dep:rand_chacha",
+    "speedate",
+    "send_wrapper/futures",
+]
+ssr = [
+    "dep:axum",
+    "dep:tokio",
+    "dep:tower",
+    "dep:tower-http",
+    "dep:leptos_axum",
+    "leptos/ssr",
+    "leptos_meta/ssr",
+    "leptos_router/ssr",
+    "dep:tracing",
+    "leptos-use/ssr",
+    "leptos-use/axum",
+    "reqwest/rustls",
+    "dep:enum_dispatch",
+    "axum-extra",
+    "dep:rand_chacha",
+    "speedate",
+    "dep:regex",
+]
+oauth-ssr = ["dep:openidconnect", "dep:jsonwebtoken"]
+oauth-hydrate = []
+backend-admin = []
+release-bin = [
+    "ssr",
+    "backend-admin",
+    "oauth-ssr",
+]
+release-lib = [
+    "hydrate",
+    "backend-admin",
+    "dep:openidconnect",
+    "oauth-hydrate",
+]

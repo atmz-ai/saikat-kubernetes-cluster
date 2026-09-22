@@ -1,0 +1,10 @@
+---
+# Remove Node from Kubernetes Cluster
+# Usage: ansible-playbook operations/remove-node.yml -e target_host=worker-X
+
+- name: Remove node from cluster
+  hosts: localhost
+  gather_facts: false
+
+  roles:
+    - role: node-remove

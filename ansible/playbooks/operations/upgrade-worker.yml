@@ -1,0 +1,22 @@
+---
+# Upgrade worker node(s) - system packages, reboot if required,
+# cordon → drain → reboot → uncordon → verify for each node.
+# Re-applies topology labels on every pass so workers provisioned before
+# the node-labels role existed get their region/zone labels on first upgrade.
+#
+# Usage:
+#   All workers (one at a time):
+#     ansible-playbook ansible/playbooks/operations/upgrade-worker.yml
+#
+#   Single worker:
+#     ansible-playbook ansible/playbooks/operations/upgrade-worker.yml \
+#       -e target_host=worker-1
+
+- name: Upgrade worker node(s)
+  hosts: "{{ target_host | default('worker_nodes') }}"
+  gather_facts: true
+  serial: 1
+
+  roles:
+    - role: upgrade-worker
+    - role: node-labels

@@ -1,0 +1,117 @@
+---
+- name: Install Cilium CNI using Helm
+  block:
+    - name: Add Cilium Helm repository
+      ansible.builtin.command: helm repo add cilium https://helm.cilium.io/
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: cilium_repo_add
+      changed_when: "'has been added' in cilium_repo_add.stdout"
+
+    - name: Update Helm repositories
+      ansible.builtin.command: helm repo update
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      changed_when: true
+
+    - name: Display Cilium installation parameters
+      ansible.builtin.debug:
+        msg:
+          - "Installing Cilium CNI v{{ cilium_version }} with:"
+          - "  - kube-proxy replacement: ENABLED (strict mode)"
+          - "  - Encryption: WireGuard"
+          - "  - Hubble: Enabled (Relay + UI)"
+          - "  - Ingress Controller: Enabled"
+          - "  - Gateway API: Enabled"
+          - "  - Service Mesh (Envoy): Enabled"
+          - "  - Ingress mode: NodePort 80/443 (DNS round-robin on CP IPs)"
+
+    - name: Copy Cilium values file
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../../manifests/cilium-values.yaml"
+        dest: /tmp/cilium-values.yaml
+        mode: "0644"
+
+    - name: Install or upgrade Cilium
+      ansible.builtin.command: >
+        helm upgrade --install cilium cilium/cilium
+        --version {{ cilium_version }}
+        --namespace kube-system
+        --values /tmp/cilium-values.yaml
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: cilium_install
+      changed_when: true   # helm upgrade --install always (re)applies the release
+
+    - name: Display Cilium installation output
+      ansible.builtin.debug:
+        msg: "{{ cilium_install.stdout_lines }}"
+
+    - name: Wait for Cilium agent DaemonSet to be ready
+      ansible.builtin.command: kubectl wait --for=condition=ready pod -l k8s-app=cilium -n kube-system --timeout=300s
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: cilium_ready
+      retries: 3
+      delay: 10
+      changed_when: false   # read-only wait
+
+    - name: Wait for Cilium operator deployment to be available
+      ansible.builtin.command: kubectl wait --for=condition=available deployment/cilium-operator -n kube-system --timeout=300s
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      changed_when: false   # read-only wait
+
+- name: Verify Cilium core installation
+  block:
+    - name: Get Cilium agent pods
+      ansible.builtin.command: kubectl get pods -n kube-system -l k8s-app=cilium -o wide
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: cilium_pods
+      changed_when: false
+
+    - name: Display Cilium agent pods
+      ansible.builtin.debug:
+        msg: "{{ cilium_pods.stdout_lines }}"
+
+    - name: Check WireGuard encryption status
+      ansible.builtin.shell: |
+        set -o pipefail
+        kubectl exec -n kube-system ds/cilium -- cilium-dbg status | grep -i encryption
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: cilium_encryption_status
+      changed_when: false
+      failed_when: false
+
+    - name: Display encryption status
+      ansible.builtin.debug:
+        msg: "{{ cilium_encryption_status.stdout_lines }}"
+
+    - name: Get nodes status
+      ansible.builtin.command: kubectl get nodes -o wide
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: cilium_nodes_status
+      changed_when: false
+
+    - name: Display nodes status
+      ansible.builtin.debug:
+        msg: "{{ cilium_nodes_status.stdout_lines }}"
+
+    - name: Display installation summary
+      ansible.builtin.debug:
+        msg:
+          - "✅ Cilium v{{ cilium_version }} CNI installed successfully"
+          - "✅ WireGuard encryption: {{ cilium_encryption_status.stdout | default('check manually') }}"
+          - ""
+          - "NOTE: Hubble Relay/UI and second operator replica will be Pending"
+          - "until additional nodes join. This is expected."
+          - ""
+          - "After cluster has 3 CPs + 1 worker, apply kubernetes/ manifests:"
+          - "  kubectl apply -k kubernetes/infrastructure/cert-manager"
+          - "  # wait for cert-manager pods, then:"
+          - "  kubectl apply -f kubernetes/infrastructure/cert-manager/cluster-issuers.yaml"
+          - "  kubectl apply -f kubernetes/networking/gateway.yaml"
+          - "  kubectl apply -f kubernetes/networking/routes/"

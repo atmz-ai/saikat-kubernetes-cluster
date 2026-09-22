@@ -1,0 +1,149 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: loki
+  namespace: loki
+spec:
+  interval: 1h
+  chart:
+    spec:
+      chart: loki
+      version: "7.3.0"
+      sourceRef:
+        kind: HelmRepository
+        name: grafana
+        namespace: loki
+  timeout: 10m
+  upgrade:
+    # RetryOnFailure retries failed upgrades without rollback/uninstall remediation.
+    # This is the recommended strategy for StatefulSets (per Flux docs):
+    # "RetryOnFailure is suitable for statefulsets and other workloads that cannot
+    # tolerate rollbacks and have a high rollout duration susceptible to health
+    # check timeouts and transient capacity errors."
+    # The default RemediateOnFailure strategy uses rollback, which fails with
+    # MissingRollbackTarget when there's no previous successful release (e.g.
+    # after a prune + recreate).
+    strategy:
+      name: RetryOnFailure
+      retryInterval: 30s
+  values:
+    deploymentMode: SingleBinary
+
+    loki:
+      auth_enabled: false
+      commonConfig:
+        replication_factor: 1
+      compactor:
+        # Compactor runs as part of SingleBinary; retention_enabled must be
+        # set here to activate deletion of chunks older than retention_period.
+        retention_enabled: true
+        delete_request_store: filesystem
+      limits_config:
+        # Required for the Grafana Logs Drilldown plugin's log volume histogram
+        volume_enabled: true
+        # Retain logs for 30 days; compactor enforces deletion.
+        retention_period: 720h
+        # Reject log entries with timestamps older than 7 days. This is the
+        # default but set explicitly so it's visible. Alloy's start_time filter
+        # should prevent old entries from being sent, but this acts as a safety
+        # net and produces cleaner error messages than the default.
+        reject_old_samples: true
+        reject_old_samples_max_age: 168h
+      storage:
+        # Hetzner Object Storage (S3-compatible). Chunks and index stored in S3;
+        # the Longhorn PVC is only for WAL, active index, and compactor working
+        # directory, so it can be much smaller than the old 600Gi filesystem volume.
+        type: s3
+        bucketNames:
+          chunks: saikat-kubernetes-loki-storage
+          ruler: saikat-kubernetes-loki-storage
+        s3:
+          # Endpoint, region, and bucket are plaintext (not secrets). Credentials
+          # are injected via the AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY env vars
+          # from the loki-s3-credentials SOPS Secret, using -config.expand-env=true.
+          endpoint: https://fsn1.your-objectstorage.com
+          region: fsn1
+          s3ForcePathStyle: true
+          # Credentials use env-var expansion so they never appear in the config file:
+          # https://grafana.com/docs/loki/latest/configure/#use-environment-variables-in-the-configuration
+          accessKeyId: ${AWS_ACCESS_KEY_ID}
+          secretAccessKey: ${AWS_SECRET_ACCESS_KEY}
+      schemaConfig:
+        # New schema period starting from the S3 migration date. Existing
+        # filesystem-era data (from 2024-01-01 schema) is not migrated — this
+        # starts fresh in S3. Old data is lost (it was the source of the disk
+        # pressure that took down worker-11/13/26).
+        configs:
+          - from: "2026-08-20"
+            store: tsdb
+            object_store: s3
+            schema: v13
+            index:
+              prefix: loki_index_
+              period: 24h
+
+    singleBinary:
+      replicas: 1
+      # Inject S3 credentials from the SOPS-encrypted Secret as environment
+      # variables. -config.expand-env=true enables ${VAR} substitution in the
+      # Loki config YAML so credentials never appear in the config file:
+      # https://grafana.com/docs/loki/latest/configure/#use-environment-variables-in-the-configuration
+      extraEnvFrom:
+        - secretRef:
+            name: loki-s3-credentials
+      extraArgs:
+        - -config.expand-env=true
+      persistence:
+        # Longhorn volume for WAL, active index, and compactor working directory.
+        # Chunks and the bulk of index data now live in S3 — this PVC only needs
+        # enough for the WAL (typically a few GB) and cached index files.
+        # Using the 1-replica Longhorn SC: Loki is a single instance with no
+        # app-layer replication, so storage-level HA is unnecessary overhead.
+        storageClass: longhorn-1replica
+        size: 50Gi
+      resources:
+        requests:
+          # VPA target: 1737m CPU / 2.36Gi — raised from 200m/1Gi
+          cpu: 1750m
+          memory: 2500Mi
+        limits:
+          # VPA upper: 4095m / 5.28Gi — previous 4Gi limit was below upper and caused OOM
+          cpu: 4000m
+          memory: 6Gi
+
+    # Disable scale-out components — not needed in SingleBinary mode
+    read:
+      replicas: 0
+    write:
+      replicas: 0
+    backend:
+      replicas: 0
+
+    # Disable bundled MinIO — using external S3 (Hetzner Object Storage)
+    minio:
+      enabled: false
+
+    # Disable self-monitoring to avoid circular dependencies
+    monitoring:
+      selfMonitoring:
+        enabled: false
+        grafanaAgent:
+          installOperator: false
+
+    # lokiCanary is a top-level chart value (not under monitoring:).
+    # It was incorrectly nested under monitoring: before, which caused 35 canary
+    # pods (one per worker) to run despite the intent to disable them.
+    lokiCanary:
+      enabled: false
+
+    test:
+      enabled: false
+
+    # No ingress — Loki is only accessed internally by Alloy and Grafana
+    gateway:
+      enabled: false
+
+    chunksCache:
+      enabled: false
+    resultsCache:
+      enabled: false

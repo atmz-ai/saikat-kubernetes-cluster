@@ -1,0 +1,19 @@
+---
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml
+  - collector-config.yaml
+  - iglu-resolver-config.yaml
+  - enrich-config.yaml
+  - enrichments-config.yaml
+  - collector-deployment.yaml
+  - collector-service.yaml
+  - enrich-deployment.yaml
+  - reference-grant.yaml
+  - kafka-credentials.sops.yaml
+  - maxmind-credentials.sops.yaml
+  - geoip-nginx-config.yaml
+  - geoip-server-deployment.yaml
+  - geoip-refresh-cronjob.yaml
+

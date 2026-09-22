@@ -1,0 +1,32 @@
+apiVersion: shipwright.io/v1beta1
+kind: Build
+metadata:
+  name: off-chain-agent
+  namespace: off-chain-agent
+spec:
+  source:
+    type: Git
+    git:
+      # SSH URL so the infra SSH key (github-ssh-secret) works for both
+      # the main repo clone and submodule clones (submodules use SSH URLs).
+      url: git@github.com:dolr-ai/yral-bare-metal-kubernetes-cluster.git
+      revision: main
+      cloneSecret: github-ssh-secret
+    # No contextDir — use the full repo as build context (needed for local path deps)
+    # contextDir defaults to repo root when omitted
+  strategy:
+    name: buildkit
+    kind: ClusterBuildStrategy
+  paramValues:
+    - name: dockerfile
+      value: apps/off-chain-agent/Dockerfile.buildkit
+    - name: cache
+      value: registry
+  output:
+    image: harbor.yral.com/off-chain-agent/off-chain-agent
+    pushSecret: harbor-pull-secret
+  retention:
+    succeededLimit: 3
+    failedLimit: 3
+    ttlAfterSucceeded: 1h
+    ttlAfterFailed: 24h

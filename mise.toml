@@ -1,0 +1,1939 @@
+[settings]
+# Required by the `[daemons]` section below (and `mise daemons`).
+experimental = true
+
+[tools]
+age = "latest"
+# binaryen (wasm-opt) PINNED to 131 — do NOT let `mise upgrade --bump` float
+# this ("latest" resolves to 132, which is broken; see below). SpacetimeDB
+# bundles no wasm-opt, so `spacetime build` optimises with whatever `wasm-opt`
+# is on PATH — i.e. this version. 132's output breaks the SpacetimeDB 2.10
+# wasm parser: `spacetime build` still SUCCEEDS (it only optimises), but the
+# publish pre-publish check rejects the module with "failed to parse
+# WebAssembly module: invalid leading byte (0x7e) for external kind", while
+# the un-optimized wasm parses fine (isolated via --bin-path). Re-verified
+# failing against 2.10.0 — `mise run spacetime-run` reproduces it locally via
+# the local server's pre-publish check, so no Maincloud access is needed.
+# Bump only together with a verified `spacetime build` + publish cycle.
+"aqua:WebAssembly/binaryen" = "131"
+# aws-cli — the S3 client for Hetzner Object Storage. Chosen because the
+# credentials in [env] are ALREADY in AWS's standard variable names
+# (AWS_ACCESS_KEY_ID / AWS_ENDPOINT_URL / AWS_DEFAULT_REGION, with
+# AWS_SECRET_ACCESS_KEY in fnox), so aws-cli authenticates against Hetzner
+# with no extra config: `aws s3 ls` just works. Hetzner's Object Storage is
+# S3-compatible, so any S3 client would do — this one needs no new variables
+# and no config file.
+#
+# NOTE the endpoint in [env] is a SINGLE location (fsn1). Buckets live in the
+# location they were created in, and this account has buckets in more than one
+# (fsn1 / hel1 ...), so a listing against AWS_ENDPOINT_URL shows only that
+# location's buckets. To reach another location use `--endpoint-url
+# https://<loc>.your-objectstorage.com` with the same credentials. The etcd
+# backup role does exactly this with hel1 (see ansible/inventory/hosts.yml),
+# which is why its endpoint differs from AWS_ENDPOINT_URL.
+# Read-only by default — do not mutate buckets from a shell (repo rule: the
+# declarative source is Ansible/git; see AGENTS.md "Immutable GitOps"). The one
+# carve-out is `mise run s3-abort-multipart-uploads`, which clears orphaned
+# multipart uploads on a decommissioned bucket: those are not declared state
+# (invisible to every listing, owned by no operator, present in no git source)
+# and they leak billable storage and block the bucket's deletion.
+aws-cli = "latest"
+cargo-binstall = "latest"
+"cargo:trunk" = "latest"
+flux2 = "2.9.5"
+fnox = "latest"
+gh = "latest"
+helm = "latest"
+# SpacetimeDB CLI. The release tarball names its binary `spacetimedb-cli`,
+# but the canonical, documented invocation is `spacetime` (see
+# https://spacetimedb.com/docs/cli-reference and the official installer) —
+# `rename_exe` exposes the pinned version under the canonical name so PATH
+# resolution never falls through to a stale installer-managed binary.
+# `spacetimedb-standalone` stays untouched: `spacetime start` execs it.
+"github:clockworklabs/SpacetimeDB" = { version = "latest", rename_exe = { "spacetimedb-cli" = "spacetime" } }
+kubectl = "latest"
+maestro = { version = "latest", os = ["macos"] }
+node = "latest"
+pitchfork = "latest"
+podman = "latest"
+python = "latest"
+# rclone — third S3 client, for the operations neither of the others covers:
+# `purge` (remove a prefix AND the bucket in one step), `backend
+# list-multipart-uploads` / `backend cleanup` (orphaned upload parts, which are
+# invisible to `ls` but still billed), and `backend cleanup-hidden` (old object
+# versions on a versioned bucket). aws-cli covers bucket-level admin and s5cmd
+# covers bulk object ops; rclone's value here is the backend-command surface
+# plus its native `Hetzner` provider profile.
+#
+# For Hetzner use `--s3-provider Hetzner` — rclone's docs list Hetzner as a
+# first-class provider (regions hel1/fsn1/nbg1), so no `Other` fallback is
+# needed. Credentials come from the same AWS_* variables in [env] + fnox, and
+# `--s3-endpoint` replaces `--endpoint-url`.
+#
+# Two knobs worth knowing when a bucket misbehaves (both are documented rclone
+# flags, and both change the server-side code path — useful when one listing or
+# delete implementation is at fault rather than the data):
+#   --s3-list-version 1        use ListObjects v1 instead of v2 (rclone defaults
+#                              to auto-detecting; v1 is a different code path)
+#   --s3-list-url-encode       toggle URL-encoded listings, which is more
+#                              reliable for awkward object keys
+rclone = "latest"
+ruff = "latest"
+# rush — cross-platform parallel job runner (Go, single native binary). Added
+# because parallelising shell work on macOS has no good built-in: BSD `xargs`
+# has NO -d flag (so tab-separated input can't be split safely) and GNU
+# `parallel` isn't in the mise registry at all. rush supports -d for an
+# explicit field delimiter and -j for worker count, which is what makes it
+# safe for TSV input instead of relying on whitespace splitting.
+#
+# Usage pattern for N-field TSV records ({1}/{2} are the fields per record):
+#   rush -j 64 -d '\t' 'cmd {1} {2}' < records.tsv
+# (see the mise.toml note on the three S3 clients above for why these
+# bulk-S3 maintenance jobs exist at all)
+rush = "latest"
+# Rust — latest STABLE via mise.lock resolution (committed lock pins the
+# exact resolved version per `mise lock`, so builds stay reproducible while
+# `mise run setup` on a fresh checkout pulls the newest stable).
+#
+# Stable is correct repo-wide: no #![feature] gates anywhere (SpacetimeDB's
+# `unstable` is a crate feature, stable-fine), and nightly-2026-09-08's wasm
+# codegen drifted into breaking `spacetime generate`.
+#
+# CAVEAT — mise manages rust by installing its own toolchain and exporting
+# `RUSTUP_TOOLCHAIN=stable`, which TAKES PRECEDENCE over any
+# rust-toolchain.toml. That silently bypasses apps/yral-web/rust-toolchain.toml
+# (channel = "nightly"):
+#   local build with mise active → stable
+#   container build (no mise)    → nightly
+# so the prod image compiles with a different compiler than local builds.
+# nightly is genuinely needed there for `cargo leptos watch --hot-reload`
+# (see that file for the verified reasoning — the leptos `nightly`
+# cargo-features are inert on stable and are NOT the reason).
+# TODO(unify-yral-web-toolchain): make local and container agree — either
+# pin the container to stable and drop --hot-reload, or have the yral-web
+# tasks set RUSTUP_TOOLCHAIN=nightly explicitly.
+rust = { version = "stable", targets = [
+  "wasm32-unknown-unknown",
+  "x86_64-unknown-linux-musl",
+], components = [
+  "rustfmt",
+  "clippy",
+  "rust-src",
+  "rust-analyzer",
+] }
+# s5cmd — bulk object operations against Hetzner Object Storage. Kept ALONGSIDE
+# aws-cli because they cover different halves of the API and neither does both:
+#   aws-cli → bucket-level admin (ls, versioning, policies) and one-off reads.
+#   s5cmd   → many-object operations (delete/copy/sync over 10^4–10^6 keys).
+# `aws s3 rm --recursive` issues ONE DELETE per object, so emptying a bucket
+# with ~190K objects is ~190K sequential round trips. s5cmd batches through the
+# S3 DeleteObjects API (1000 keys per request) and runs a large worker pool, so
+# the same bucket empties in a fraction of the time. Use it for bucket cleanup
+# and any bulk transfer; use aws-cli for anything bucket-scoped.
+#
+# Same credentials as aws-cli — it reads the standard AWS_* variables from
+# [env] + fnox, and takes the location endpoint via --endpoint-url exactly like
+# aws-cli (see the aws-cli note above for why the location matters).
+s5cmd = "latest"
+sops = "latest"
+sqlite = "latest"
+# NOTE: `swift` is intentionally NOT declared here. On macOS Xcode ships a
+# complete, SDK-matched toolchain (`xcrun --find swift`), and a mise-installed
+# swift.org toolchain SHADOWS it with an older release — Xcode 27's SDK passes
+# `-target-arch-variant`, which swift 6.3.3's driver does not understand, so
+# manifest compilation died with signal 11 across every SwiftPM command. We no
+# longer build Swift on Linux, so there is nothing for mise to provide.
+# If a Linux Swift toolchain is ever needed again, declare it OS-scoped:
+#   swift = { version = "...", os = ["linux"] }
+
+# System packages — project-specific build dependencies (apt on Debian/Ubuntu).
+# Applied with: mise bootstrap packages apply --yes
+# OS-filtered — apt entries are ignored on macOS, brew entries on Linux, etc.
+# Machine-baseline packages (build-essential, curl, git, etc.) live in ~/.dotfiles/mise.linux.toml.
+[bootstrap.packages]
+"apt:bind9-dnsutils" = "latest"
+"apt:libssl-dev" = "latest"
+"apt:musl-tools" = "latest"
+"apt:pkg-config" = "latest"
+
+[env]
+_.path = ".venv/bin"
+APP_ENV = "development"
+LEPTOS_ENV = "development"
+# fnox age decryption — private key extracted by mise run bootstrap
+# Uses {{config_root}} so the path resolves to the repo root regardless of cwd
+FNOX_AGE_KEY_FILE = "{{config_root}}/.saikat-machine-access-ed25519"
+# Cargo + cargo-binstall cache dirs — shared across all projects via $HOME.
+# Without these, mise's rust/rustup backend sets CARGO_HOME/RUSTUP_HOME to a
+# literal `./undefined/` at the cwd (repo root), duplicating caches per project.
+CARGO_HOME = "{{env.HOME}}/.cargo"
+RUSTUP_HOME = "{{env.HOME}}/.rustup"
+CARGO_BINSTALL_DIR = "{{env.HOME}}/.local/share/cargo-binstall"
+# Plaintext (non-sensitive) values — declared directly, no .env file needed.
+AWS_ACCESS_KEY_ID = "XO5X9A1W8AMHY3DSTKMS"
+AWS_ENDPOINT_URL = "https://fsn1.your-objectstorage.com"
+AWS_DEFAULT_REGION = "fsn1"
+KUBECONFIG = "{{env.HOME}}/.kube/config"
+# SpacetimeDB Maincloud (SaaS) — DB identity/name for the yral-database-spacetime
+# module. The Maincloud base URL is fixed; the DB name matches `spacetime.json`.
+# Plaintext only (no secrets here); the admin token (if needed for write
+# reducers from a cluster service) lives in fnox. See AGENTS.md
+# "External Service Config & Secrets".
+SPACETIMEDB_MAINCLOUD_URL = "https://maincloud.spacetimedb.com"
+SPACETIMEDB_DB_NAME = "yral-database-spacetime-4lbo7"
+
+# ── yral-auth ─────────────────────────────────────────────────────────────
+# SpacetimeDB config (KV store + identity token for REST calls).
+# The admin token is the yral-auth JWT — SpacetimeDB derives an admin Identity
+# from the iss + sub claims. Stored in fnox.toml as SPACETIMEDB_ADMIN_TOKEN.
+# SPACETIMEDB_URL is the name yral-auth's SpacetimeKV expects (same value as
+# SPACETIMEDB_MAINCLOUD_URL).
+SPACETIMEDB_URL = "https://maincloud.spacetimedb.com"
+# Plaintext (non-sensitive) values — public OAuth identifiers and public keys.
+GOOGLE_CLIENT_ID = "804814798298-taifmq3k6olk9bjr1cqb9gfnp1mssqqb.apps.googleusercontent.com"
+APPLE_CLIENT_ID = "com.yral.yral-auth"
+APPLE_TEAM_ID = "2UL556KNXC"
+APPLE_KEY_ID = "9DWVYWDYD8"
+# Public keys (used for verification by other services — not secrets)
+JWT_PUB_EC_PEM = '''
+-----BEGIN PUBLIC KEY-----
+MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEoqN3/0RNfrnrnYGxKBgy/qHnmITr
++6ucjxStx7tjA30QJZlWzo0atxmY8y9dUR+eKQI0SnbQds4xLEU8+JGm8Q==
+-----END PUBLIC KEY-----'''
+CLIENT_JWT_PUB_ED_PEM = '''
+-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEAKpZNfPOONR9AXiaGmHv8AHemm4SNK0uh+mf523ho5KU=
+-----END PUBLIC KEY-----'''
+
+# ── off-chain-agent ──────────────────────────────────────────────────────
+RUST_LOG = "info"
+OFF_CHAIN_AGENT_URL = "http://localhost:50051/"
+
+# ── yral-web ───────────────────────────────────────────────────────────
+# LEPTOS_SITE_ADDR is set per-daemon in the [daemons] section (prod: 8080,
+# dev: 8081).
+LEPTOS_HASH_FILES = "true"
+# Plaintext (non-sensitive) values — public OAuth identifiers.
+# These are the production redirect URLs; the dev daemons override them in
+# [daemons.yral-web-dev].
+GOOGLE_REDIRECT_URL = "http://127.0.0.1:8080/auth/google_redirect"
+YRAL_AUTH_REDIRECT_URL = "http://127.0.0.1:8080/auth/yral_redirect"
+# Yral-auth client ID (same as yral-auth's GOOGLE_CLIENT_ID)
+YRAL_AUTH_CLIENT_ID = "804814798298-taifmq3k6olk9bjr1cqb9gfnp1mssqqb.apps.googleusercontent.com"
+
+# ── yral-metadata ─────────────────────────────────────────────────────────
+# Bind address for the Axum server
+BIND_ADDRESS = "0.0.0.0:7000"
+
+# ── yral-ios (App Store Connect identifiers — not secret) ─────────────────
+# yral-ios TestFlight/App Store upload path: xcodebuild archive →
+# xcodebuild -exportArchive → xcrun altool. Secrets for this chain live in
+# fnox.toml [secrets]; only these non-secret identifiers live here.
+# Key GT9767YMH6: created 2026-09-01 (old key J52D7789G2 revoked
+YRAL_ASC_KEY_ID = "GT9767YMH6"
+YRAL_ASC_ISSUER_ID = "6ddd2cf0-9212-47e6-9f69-69cb16412c45"
+# Apple Developer team (same as the legacy app's manual signing).
+YRAL_APPLE_TEAM_ID = "2UL556KNXC"
+# Bundle id is fixed: com.yral.iosApp (TestFlight and App Store are channels
+# on the same ASC app record).
+
+[tasks.bootstrap]
+description = "Create .venv, install Python tooling, and extract infra SSH key from vault"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+
+python -m venv .venv && ./.venv/bin/pip install --upgrade pip && ./.venv/bin/pip install -e . && ./.venv/bin/ansible-galaxy collection install -r ansible/requirements.yml -p ansible/collections
+
+# Validate the vault password once, up front. A missing/empty/incorrect password
+# (e.g. GitHub PRs from Dependabot/Renovate, which never receive repo secrets)
+# must degrade to warn-and-skip below — NOT crash the whole bootstrap with a
+# traceback deep inside a Python one-liner.
+# Sets: bootstrap_vault_ok=true|false
+bootstrap_vault_ok=false
+if [ -s ansible/.vault_pass ] && \
+   ./.venv/bin/ansible-vault view ansible/inventory/group_vars/all/vault.yml --vault-password-file ansible/.vault_pass > /dev/null 2>&1; then
+  bootstrap_vault_ok=true
+  echo '  ✓ Vault password valid — ansible/.vault_pass decrypts the vault'
+else
+  echo '  ⚠ Vault password missing or does not decrypt ansible/inventory/group_vars/all/vault.yml'
+  echo '    → skipping ALL vault extractions (infra SSH key, kubeconfig, fnox age key).'
+  echo '    → CI runs from Dependabot/Renovate PRs are expected to land here (no secrets).'
+  echo '    → locally: check ansible/.vault_pass contains the real vault password.'
+fi
+
+# Extract saikat-machine-access SSH private key from Ansible vault → ./.saikat-machine-access-ed25519 (repo-local, gitignored)
+# Used by fnox (age provider) and ansible.cfg (private_key_file), and installed
+# as the machine's default SSH identity below. Idempotent — skips if already present.
+if [ "$bootstrap_vault_ok" = true ] && [ ! -f .saikat-machine-access-ed25519 ]; then
+  ./.venv/bin/ansible-vault view ansible/inventory/group_vars/all/vault.yml --vault-password-file ansible/.vault_pass | \
+    ./.venv/bin/python -c "import sys, yaml; print(yaml.safe_load(sys.stdin)['vault_saikat_machine_access_ssh_private_key'])" \
+    > .saikat-machine-access-ed25519
+  chmod 600 .saikat-machine-access-ed25519
+  echo '  ✓ Extracted saikat-machine-access SSH key to .saikat-machine-access-ed25519'
+elif [ -f .saikat-machine-access-ed25519 ]; then
+  echo '  ✓ Saikat machine-access SSH key already at .saikat-machine-access-ed25519'
+fi
+
+# Install the saikat-machine-access SSH key as the machine's DEFAULT identity (~/.ssh/id_ed25519),
+# deliberately OVERWRITING any existing key (operator decision 2026-09-01: this
+# vault key is the adopted identity for everything — GitHub + every node provider;
+# see ansible/inventory/group_vars/all/vars.yml "single key for everything"). ssh,
+# git, and ansible then pick it up automatically — locally AND on the CI runner,
+# which is what lets the submodule clone below authenticate with no CI-specific
+# setup.
+if [ -f .saikat-machine-access-ed25519 ]; then
+  mkdir -p ~/.ssh && chmod 700 ~/.ssh
+  cp .saikat-machine-access-ed25519 ~/.ssh/id_ed25519
+  chmod 600 ~/.ssh/id_ed25519
+  # Regenerate the matching .pub — a stale .pub from a previous key makes SSH
+  # reject the pair ("contents do not match public").
+  ssh-keygen -y -f ~/.ssh/id_ed25519 > ~/.ssh/id_ed25519.pub
+  chmod 644 ~/.ssh/id_ed25519.pub
+  echo '  ✓ Installed saikat-machine-access SSH key as ~/.ssh/id_ed25519 (default machine identity)'
+fi
+
+# Initialize git submodules (app source repos). SSH URLs (git@github.com:...)
+# resolve via the default identity installed above. accept-new handles a fresh
+# CI runner (github.com not yet in known_hosts) while still refusing CHANGED
+# host keys (TOFU).
+GIT_SSH_COMMAND="ssh -o StrictHostKeyChecking=accept-new" git submodule update --init --recursive
+
+# Extract kubeconfig from Ansible vault → ~/.kube/config (idempotent — skips if already present)
+if [ "$bootstrap_vault_ok" = true ] && [ ! -f ~/.kube/config ]; then
+  mkdir -p ~/.kube
+  ./.venv/bin/ansible-vault view ansible/inventory/group_vars/all/vault.yml --vault-password-file ansible/.vault_pass | \
+    ./.venv/bin/python -c "import sys, yaml; print(yaml.safe_load(sys.stdin)['vault_kubeconfig'])" \
+    > ~/.kube/config
+  chmod 600 ~/.kube/config
+  echo '  ✓ Extracted kubeconfig to ~/.kube/config'
+elif [ -f ~/.kube/config ]; then
+  echo '  ✓ Kubeconfig already at ~/.kube/config'
+fi
+'''
+
+[tasks.ansible-vault-decrypt]
+description = "Decrypt ansible/inventory/group_vars/all/vault.yml for editing"
+run = "./.venv/bin/ansible-vault decrypt ansible/inventory/group_vars/all/vault.yml"
+
+[tasks.ansible-vault-encrypt]
+description = "Re-encrypt ansible/inventory/group_vars/all/vault.yml after editing"
+run = "./.venv/bin/ansible-vault encrypt ansible/inventory/group_vars/all/vault.yml"
+
+[tasks.ansible-vault-view]
+description = "View a value from Ansible vault (usage: mise run ansible-vault-view -- <yaml key>)"
+run = '''
+./.venv/bin/ansible-vault view ansible/inventory/group_vars/all/vault.yml | \
+  ./.venv/bin/python -c "import sys, yaml; print(yaml.safe_load(sys.stdin)[sys.argv[1]])" "$@"
+'''
+
+[tasks.ansible-playbook]
+description = "Run an Ansible playbook (usage: mise run ansible-playbook -- ansible/playbooks/operations/<playbook>.yml [-e target_host=...])"
+run = "./.venv/bin/ansible-playbook"
+
+[tasks.ansible-lint]
+description = "Lint Ansible playbooks and roles (runs ansible-lint on ansible/playbooks/operations/)"
+run = "./.venv/bin/ansible-lint ansible/playbooks/operations/"
+
+[tasks.sops-decrypt]
+description = "Decrypt a SOPS file (usage: mise run sops-decrypt -- kubernetes/path/to/file.sops.yaml)"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+KEYFILE=$(mktemp)
+ansible-vault view ansible/inventory/group_vars/all/vault.yml | grep 'AGE-SECRET-KEY' | tr -d '[:space:]' > "$KEYFILE"
+SOPS_AGE_KEY_FILE="$KEYFILE" sops --decrypt "$@"
+rm -f "$KEYFILE"
+'''
+
+[tasks.sops-encrypt]
+description = "Encrypt a plain YAML file as SOPS in-place (usage: mise run sops-encrypt -- kubernetes/path/to/file.sops.yaml)"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+KEYFILE=$(mktemp)
+ansible-vault view ansible/inventory/group_vars/all/vault.yml | grep 'AGE-SECRET-KEY' | tr -d '[:space:]' > "$KEYFILE"
+SOPS_AGE_KEY_FILE="$KEYFILE" sops --encrypt --in-place "$@"
+rm -f "$KEYFILE"
+'''
+
+[tasks.sops-edit]
+description = "Edit a SOPS file in-place (usage: mise run sops-edit -- kubernetes/path/to/file.sops.yaml)"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+KEYFILE=$(mktemp)
+ansible-vault view ansible/inventory/group_vars/all/vault.yml | grep 'AGE-SECRET-KEY' | tr -d '[:space:]' > "$KEYFILE"
+SOPS_AGE_KEY_FILE="$KEYFILE" sops "$@"
+rm -f "$KEYFILE"
+'''
+
+[tasks.setup]
+description = "Install system packages, repo toolchain, and Python tooling (secrets already in fnox.toml)"
+run = "mise bootstrap packages apply --yes && mise install && mise run bootstrap && echo 'Environment is ready'"
+
+# ── Hetzner Object Storage maintenance ──────────────────────────────────────
+# Abort orphaned multipart uploads. These are NOT objects: they are incomplete
+# `CreateMultipartUpload` sessions whose chunks occupy billable space, are
+# invisible to every listing (`ls`, `du`, and the Hetzner console all miss
+# them), and block `DeleteBucket` forever. They accumulate here from
+# litestream-style continuous chunked writers that restart without ever
+# completing a session. Clearing them is a prerequisite for retiring a bucket.
+#
+# Why this is a task and not a one-liner: AbortMultipartUpload is a
+# one-per-upload API with NO batch form (DeleteObjects accepts only Key and
+# VersionId per object — there is no UploadId field), so parallelism is the
+# only lever available. Hetzner's Ceph RGW caps throughput at ~25 aborts/sec
+# regardless of worker count (measured: -j 64 and -j 200 both ~40s per 1000),
+# so the runtime is bound by server round-trips, not by local concurrency.
+#
+# Two AWS CLI behaviours this works around, both verified:
+#   * `--max-items 1000` AUTO-PAGINATES internally, so a pass really does
+#     collect 1000 uploads (a raw single page returns only ~260 for the same
+#     bucket). It also appends the pagination NextToken as a trailing line in
+#     --output text mode, which parses as a bogus single-field record.
+#   * hence the `awk -F'\t' 'NF==2'` filter: it keeps only genuine
+#     key<TAB>uploadId pairs and correctly reports 0 for a bucket with no
+#     pending uploads (without it, an empty bucket reports 1 phantom upload).
+#
+# Counts come from real per-abort exit statuses (the OK/FAIL echo is gated on
+# the abort's exit code), never from the number of records listed.
+#
+# Transient failures are expected and self-healing. postgres-1-backup produced
+# 320 failures in two chunks that ran ~5x slower than normal (255s and 236s vs
+# ~45s), then recovered on its own — the failed sessions are simply re-listed
+# by the next chunk and aborted there. The final abort count (0 remaining on a
+# re-run) is the real success signal, not the exit code: this task exits
+# non-zero if ANY abort ever failed, so a "task failed" line after a long run
+# usually just means re-run it (it is idempotent — a re-run over a clean bucket
+# reports 0 and exits 0).
+#
+# ── Retiring a bucket end-to-end (verified on postgres-1-backup) ────────────
+#   1. mise run s3-abort-multipart-uploads -- <bucket> <endpoint>   # this task
+#   2. delete the objects (s5cmd rm --recursive / rclone purge)
+#   3. s5cmd --endpoint-url <endpoint> rb s3://<bucket>
+#
+# Step 3 can fail with `BucketNotEmpty: 409` on a SINGLE object that LIST
+# reports but that does not actually exist — a Ceph RGW bucket-index entry whose
+# backing RADOS object is gone. It is not data loss work to recover: HeadObject
+# 404s, GetObject fails, and BOTH DeleteObject and the DeleteObjects batch path
+# (aws/s5cmd/rclone all tried) return success while the entry survives listing.
+# Versioning is off (`get-bucket-versioning` empty, the entry shows as a
+# Version with VersionId null), so there is no delete marker to clear.
+#
+# The repair is to make the index entry consistent by writing the key back,
+# after which a normal delete takes effect:
+#   printf 'repair' > /tmp/repair.txt
+#   aws s3api put-object --bucket <bucket> --key '<ghost key>' --body /tmp/repair.txt --endpoint-url <endpoint>
+#   aws s3api delete-object --bucket <bucket> --key '<ghost key>' --endpoint-url <endpoint>
+#   s5cmd --endpoint-url <endpoint> rb s3://<bucket>
+# (On postgres-1-backup the ghost was yral-ai-chat/yral_chat.db/0000/
+#  000000000000c81e-000000000000c81e.ltx — PUT then DELETE cleared it and the
+#  bucket deleted on the first try.)
+[tasks.s3-abort-multipart-uploads]
+description = "Abort orphaned multipart uploads on a bucket (usage: mise run s3-abort-multipart-uploads -- <bucket> [endpoint] [max_chunks] [jobs])"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+
+bucket="${1:-}"
+endpoint="${2:-${AWS_ENDPOINT_URL:-}}"
+max_chunks="${3:-100000}"
+jobs="${4:-64}"
+
+if [ -z "$bucket" ] || [ -z "$endpoint" ]; then
+  echo "usage: mise run s3-abort-multipart-uploads -- <bucket> [endpoint] [max_chunks] [jobs]" >&2
+  exit 2
+fi
+
+# aws-cli picks up AWS_ACCESS_KEY_ID / AWS_DEFAULT_REGION / AWS_ENDPOINT_URL from
+# [env], but the secret lives only in fnox — inject it so the task also works
+# under a bare `mise run` and not just inside `mise x -- fnox exec --`.
+export AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY:-$(fnox get AWS_SECRET_ACCESS_KEY 2>/dev/null || true)}"
+if [ -z "$AWS_SECRET_ACCESS_KEY" ]; then
+  echo "AWS_SECRET_ACCESS_KEY unavailable - is fnox configured? (mise run bootstrap)" >&2
+  exit 2
+fi
+
+workdir=$(mktemp -d)
+trap 'rm -rf "$workdir"' EXIT
+records="$workdir/records.tsv"
+results="$workdir/results.txt"
+
+total_aborted=0
+total_failed=0
+emptied=0
+started_at=$(date +%s)
+echo "bucket=$bucket endpoint=$endpoint jobs=$jobs max_chunks=$max_chunks"
+
+for ((chunk = 1; chunk <= max_chunks; chunk++)); do
+  if ! aws s3api list-multipart-uploads \
+      --bucket "$bucket" --max-items 1000 \
+      --query 'Uploads[].[Key,UploadId]' --output text \
+      --endpoint-url "$endpoint" > "$workdir/page.txt" 2> "$workdir/page.err"; then
+    echo "listing failed on chunk $chunk: $(cat "$workdir/page.err")" >&2
+    exit 1
+  fi
+
+  awk -F'\t' 'NF==2' "$workdir/page.txt" > "$records"
+  listed=$(wc -l < "$records" | tr -d ' ')
+
+  if [ "$listed" -eq 0 ]; then
+    echo "no pending multipart uploads - nothing left to abort"
+    emptied=1
+    break
+  fi
+
+  chunk_started=$(date +%s)
+  rush -j "$jobs" -d '\t' \
+    "aws s3api abort-multipart-upload --bucket $bucket --key {1} --upload-id {2} --endpoint-url $endpoint >/dev/null 2>&1 && echo OK || echo FAIL" \
+    < "$records" > "$results"
+  chunk_elapsed=$(( $(date +%s) - chunk_started ))
+
+  # grep -c exits 1 on zero matches, which set -e would treat as a failure
+  aborted=$(grep -c '^OK$' "$results" || true)
+  failed=$((listed - aborted))
+  total_aborted=$((total_aborted + aborted))
+  total_failed=$((total_failed + failed))
+
+  echo "chunk $chunk: listed=$listed aborted=$aborted failed=$failed | cumulative aborted=$total_aborted failed=$total_failed | chunk=${chunk_elapsed}s elapsed=$(( $(date +%s) - started_at ))s"
+done
+
+echo "=== DONE: aborted=$total_aborted failed=$total_failed elapsed=$(( $(date +%s) - started_at ))s ==="
+
+# Success is "no uploads remain", NOT "no abort ever failed". Transient
+# failures are expected (ChunkedEncoding/throttling under load) and self-heal:
+# the failed sessions are re-listed by a later chunk and aborted there. Gating
+# on total_failed would report a fully successful run as a task failure.
+if [ "$emptied" -eq 1 ]; then
+  if [ "$total_failed" -gt 0 ]; then
+    echo "note: $total_failed transient failures were recovered by later chunks"
+  fi
+  exit 0
+fi
+
+echo "stopped after $max_chunks chunks with uploads still pending - re-run to continue" >&2
+exit 1
+'''
+
+# Fully retire a bucket: abort orphaned multipart uploads, delete every object,
+# then delete the bucket. This is the three-step recipe from the note above,
+# collapsed into one command so a bucket can be reclaimed without remembering
+# the order or the Ceph ghost-object repair.
+#
+# Step 1 delegates to s3-abort-multipart-uploads rather than reimplementing the
+# chunked abort loop — that loop is the part with the accumulated hard-won
+# detail (the NextToken phantom record, the exit-code semantics), and it should
+# exist in exactly one place.
+#
+# Step 2 uses `s5cmd rm --all-versions "s3://bucket/*"`, NOT plain `rm`. Per
+# s5cmd's own help: `*` matches across `/` (so nested keys are included) and
+# --all-versions is documented as "delete all versions of all objects in the
+# bucket" — which is what clears old versions and delete markers. Plain `rm`
+# leaves those behind on a versioned bucket, and they block DeleteBucket at
+# step 3 just as surely as real objects do.
+#
+# Step 3 handles the Ceph RGW ghost index entry described in the note above: a
+# key that LIST reports but that does not exist (HeadObject 404s; every delete
+# path returns success while the entry survives listing). Any key still listed
+# after step 2 is exactly that case, so it is repaired by rewriting the key to
+# make the index entry consistent and then deleting it again.
+#
+# DESTRUCTIVE AND IRREVERSIBLE. Because a typo in a bucket name would destroy a
+# live bucket (this account holds e.g. a control-plane backup sink), the task
+# requires the bucket name to be typed back unless `-y` is passed for
+# non-interactive use, and it refuses outright when there is no TTY and no -y.
+[tasks.s3-retire-bucket]
+description = "Delete every object in a bucket and the bucket itself (usage: mise run s3-retire-bucket -- <bucket> [endpoint] [-y])"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+
+bucket="${1:-}"
+endpoint="${2:-${AWS_ENDPOINT_URL:-}}"
+assume_yes="${3:-}"
+
+if [ -z "$bucket" ] || [ -z "$endpoint" ]; then
+  echo "usage: mise run s3-retire-bucket -- <bucket> [endpoint] [-y]" >&2
+  exit 2
+fi
+
+# Same secret injection as s3-abort-multipart-uploads: aws-cli and s5cmd both
+# read the standard AWS_* variables, but only the secret lives in fnox.
+export AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY:-$(fnox get AWS_SECRET_ACCESS_KEY 2>/dev/null || true)}"
+if [ -z "$AWS_SECRET_ACCESS_KEY" ]; then
+  echo "AWS_SECRET_ACCESS_KEY unavailable - is fnox configured? (mise run bootstrap)" >&2
+  exit 2
+fi
+
+# aws-cli's interactive pager hijacks output into the alternate buffer, which
+# hides everything this task prints.
+export AWS_PAGER=""
+
+echo "bucket=$bucket endpoint=$endpoint"
+
+if [ "$assume_yes" != "-y" ] && [ "$assume_yes" != "--yes" ]; then
+  echo "This PERMANENTLY deletes every object in '$bucket' and then the bucket itself."
+  if [ ! -t 0 ]; then
+    echo "refusing: no TTY to confirm on - pass -y as the third argument to proceed non-interactively" >&2
+    exit 2
+  fi
+  read -r -p "Type the bucket name to confirm: " typed
+  if [ "$typed" != "$bucket" ]; then
+    echo "aborted - '$typed' does not match '$bucket'" >&2
+    exit 2
+  fi
+fi
+
+echo "=== step 1/3: abort orphaned multipart uploads ==="
+mise run s3-abort-multipart-uploads -- "$bucket" "$endpoint"
+
+echo "=== step 2/3: delete all object versions ==="
+# s5cmd is run DIRECTLY, not captured into a shell variable: capturing adds a
+# second, larger buffer on top of the tool's own, so a long delete prints nothing
+# until it finishes and the operator cannot follow along at all.
+#
+# Output is left at s5cmd's default verbosity (one line per deleted object) and
+# must never be quieted with --log error. Note that s5cmd buffers its own stdout
+# internally, so on a long delete the lines arrive in bursts rather than
+# instantly — that is the tool's behaviour, not something added here. For a
+# definitive liveness check while it runs, confirm the first listed key is
+# advancing: `aws s3api list-objects-v2 --bucket <b> --max-keys 1`. The complete
+# per-object log is emitted by the time the command returns.
+#
+# s5cmd rm exits 1 with "no object found" when the pattern matches nothing, which
+# is the normal case for an already-empty bucket (e.g. its only content was the
+# uploads step 1 just aborted). That is not fatal, so the exit code is reported
+# and the task continues to step 3, whose `rb` is the real gate: DeleteBucket
+# fails with BucketNotEmpty if any object or version survived, so a genuine
+# deletion failure still fails the task — with s5cmd's own error already visible
+# in the log above it.
+set +e
+s5cmd --endpoint-url "$endpoint" rm --all-versions "s3://$bucket/*"
+rm_status=$?
+set -e
+if [ "$rm_status" -ne 0 ]; then
+  echo "note: s5cmd rm exited $rm_status (an empty bucket reports 'no object found'); step 3 verifies"
+fi
+
+# Anything still listed after an --all-versions delete is a ghost index entry
+# (see the note on s3-abort-multipart-uploads above). Rewrite then delete.
+#
+# list-objects-v2 --output text emits the literal string "None" when the bucket
+# has no objects left, so it must be filtered out — otherwise the repair loop
+# "repairs" a key literally named None (a spurious PUT+DELETE on every run).
+# stderr is NOT redirected: if the listing fails, the reason should be visible in
+# the log rather than swallowed (the task still fails at step 3's verification).
+workdir=$(mktemp -d)
+trap 'rm -rf "$workdir"' EXIT
+aws --no-cli-pager s3api list-objects-v2 --bucket "$bucket" \
+  --query 'Contents[].Key' --output text \
+  --endpoint-url "$endpoint" | grep -vx 'None' > "$workdir/remaining.txt" || true
+
+repaired=0
+while IFS= read -r key; do
+  [ -z "$key" ] && continue
+  printf 'repair' > "$workdir/placeholder"
+  aws --no-cli-pager s3api put-object --bucket "$bucket" --key "$key" \
+    --body "$workdir/placeholder" --endpoint-url "$endpoint" >/dev/null 2>&1
+  aws --no-cli-pager s3api delete-object --bucket "$bucket" --key "$key" \
+    --endpoint-url "$endpoint" >/dev/null 2>&1
+  echo "  repaired ghost object: $key"
+  repaired=$((repaired + 1))
+done < "$workdir/remaining.txt"
+[ "$repaired" -gt 0 ] && echo "  repaired $repaired ghost object(s)"
+
+echo "=== step 3/3: delete the bucket ==="
+# Retried on BucketNotEmpty because that 409 is EXPECTED, not an error, right
+# after a mass version delete: Ceph's bucket index lags the deletions, so for a
+# short window every listing reports the bucket empty while DeleteBucket still
+# refuses. Verified on ansuman-yral — after deleting ~395k versions, all three
+# listings showed 0 objects / 0 versions / 0 delete markers yet `rb` returned
+# BucketNotEmpty; it exited 0 on the next attempt with nothing else changed.
+#
+# Every attempt is logged. The loop is bounded so a genuinely non-empty bucket
+# still fails the task (a real leftover — e.g. an object the ghost-repair above
+# could not clear — reports the same 409 every time).
+rb_attempt=1
+rb_max_attempts=10
+rb_delay_seconds=6
+while :; do
+  echo "  rb attempt $rb_attempt/$rb_max_attempts"
+  if s5cmd --endpoint-url "$endpoint" rb "s3://$bucket"; then
+    break
+  fi
+  if [ "$rb_attempt" -ge "$rb_max_attempts" ]; then
+    echo "bucket '$bucket' could not be deleted after $rb_max_attempts attempts" >&2
+    exit 1
+  fi
+  rb_attempt=$((rb_attempt + 1))
+  sleep "$rb_delay_seconds"
+done
+
+if aws --no-cli-pager s3api head-bucket --bucket "$bucket" --endpoint-url "$endpoint" >/dev/null 2>&1; then
+  echo "bucket '$bucket' still exists - deletion did not take effect" >&2
+  exit 1
+fi
+echo "=== DONE: '$bucket' retired (every object deleted, bucket removed) ==="
+'''
+
+# ── API version hygiene ─────────────────────────────────────────────────────
+# Report manifests whose apiVersion+kind the cluster no longer SERVES.
+#
+# Why this exists: whether an apiVersion is served is decided by the CRD that
+# defines it, and a channel/version change can silently stop serving a version we
+# still use. Not hypothetical — switching the Gateway API CRDs from the
+# experimental to the standard channel dropped `v1alpha2`, and every Kafka
+# TLSRoute using it stopped applying with "the server could not find the
+# requested resource". Version strings are no signal on their own: `v1alpha1`
+# looks old but is correct for Tekton's ClusterInterceptor, which serves it and
+# nothing else.
+#
+# Sources of truth, and why the obvious one is wrong:
+#   CRDs               -> spec.versions[].served   (authoritative)
+#   built-in resources -> kubectl api-resources    (authoritative for these)
+#   NOT api-resources for CRDs: it lists only the PREFERRED version per resource,
+#   so a CRD serving both v1 and v1beta1 (ReferenceGrant) reports only v1, and
+#   every v1beta1 manifest becomes a false positive.
+#
+# Deliberately dependency-free (stdlib only, regex rather than a YAML parser):
+# apiVersion/kind are top-level scalars, so regex is safe, and PyYAML is NOT
+# guaranteed — the fleet workflow runs only fleet-bootstrap, which never
+# populates the root .venv.
+#
+# Requires a working kubeconfig (`mise run bootstrap` extracts it from the vault).
+# Read-only: `kubectl get crd` and `kubectl api-resources` only.
+[tasks.check-api-versions]
+description = "Fail if any manifest uses an apiVersion the cluster no longer serves (requires kubeconfig)"
+run = '''
+#!/usr/bin/env python3
+"""Fail if any manifest uses an apiVersion the cluster no longer serves."""
+import json
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+MANIFEST_ROOT = Path("kubernetes")
+
+# apiVersions consumed by tooling, not applied to the API server.
+NON_RESOURCE_GROUPS = {"kustomize.config.k8s.io"}
+
+# Top-level `apiVersion:` / `kind:` only — column 0, no leading whitespace.
+# That is what keeps this safe without a YAML parser.
+API_VERSION_RE = re.compile(r"^apiVersion:[ \t]*(\S+)[ \t]*$", re.M)
+KIND_RE = re.compile(r"^kind:[ \t]*(\S+)[ \t]*$", re.M)
+
+
+def declared_pairs():
+    """(apiVersion, kind) -> set of files, from manifests under kubernetes/."""
+    pairs = {}
+    for path in sorted(MANIFEST_ROOT.rglob("*.yaml")):
+        # SOPS files are ciphertext; their apiVersion/kind are opaque blobs.
+        if path.name.endswith(".sops.yaml"):
+            continue
+        text = path.read_text(errors="replace")
+        # Pair positionally: within a document they appear apiVersion then kind.
+        for api_version, kind in zip(
+            API_VERSION_RE.findall(text), KIND_RE.findall(text)
+        ):
+            group = api_version.split("/")[0] if "/" in api_version else ""
+            if group in NON_RESOURCE_GROUPS:
+                continue
+            pairs.setdefault((api_version, kind), set()).add(str(path))
+    return pairs
+
+
+def served_pairs():
+    """Every (apiVersion, kind) the cluster serves."""
+    served = set()
+
+    crds = json.loads(
+        subprocess.run(
+            ["kubectl", "get", "crd", "-o", "json"],
+            capture_output=True, text=True, check=True,
+        ).stdout
+    )
+    for crd in crds["items"]:
+        spec = crd["spec"]
+        kind = spec["names"]["kind"]
+        for version in spec.get("versions", []):
+            if version.get("served"):
+                served.add((f"{spec['group']}/{version['name']}", kind))
+
+    resources = subprocess.run(
+        ["kubectl", "api-resources", "--no-headers", "--verbs=list"],
+        capture_output=True, text=True, check=True,
+    ).stdout
+    for line in resources.splitlines():
+        # Columns are whitespace-padded and SHORTNAMES can be EMPTY (e.g.
+        # `secrets`), so positional splitting misreads the row. NAMESPACED is
+        # always literally true/false and sits immediately before KIND, with
+        # APIVERSION immediately before it — anchor on that instead.
+        fields = line.split()
+        if "true" not in fields and "false" not in fields:
+            continue
+        idx = next(i for i, f in enumerate(fields) if f in ("true", "false"))
+        if idx >= 2:
+            served.add((fields[idx - 1], fields[idx + 1]))
+
+    return served
+
+
+def main():
+    declared = declared_pairs()
+    served = served_pairs()
+    missing = [
+        (api_version, kind, sorted(files))
+        for (api_version, kind), files in sorted(declared.items())
+        if (api_version, kind) not in served
+    ]
+
+    if not missing:
+        print(f"OK: all {len(declared)} declared apiVersion+kind pairs are served")
+        return 0
+
+    print(
+        f"OUTDATED API VERSIONS: {len(missing)} of {len(declared)} declared "
+        "pairs are NOT served by the cluster.\n"
+    )
+    for api_version, kind, files in missing:
+        print(f"  {api_version}  ({kind})")
+        for path in files:
+            print(f"      {path}")
+    print(
+        "\nEach entry above will fail to apply. Check which versions the "
+        "resource now serves:\n"
+        "  kubectl get crd <crd> -o jsonpath='{range .spec.versions[*]}"
+        "{.name} served={.served}{\"\\n\"}{end}'"
+    )
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+'''
+
+# ── SpacetimeDB ─────────────────────────────────────────────────────────────
+# The yral-database-spacetime module is a SpacetimeDB wasm module (cdylib),
+# not a containerized Rust service. The loop is: build (wasm) → generate
+# (client bindings) → test → run (local publish) → publish (Maincloud) →
+# validate. No -image/-image-run tasks (Maincloud deploy = `spacetime publish`).
+#
+# Config layering (per SpacetimeDB docs):
+#   spacetime.json     → production defaults (server: maincloud, checked in)
+#   spacetime.dev.json → dev overrides (server: local, checked in)
+# `publish`/`generate`/`dev` read these automatically. `build` does NOT (it
+# needs `-p` explicitly). `spacetime dev` implicitly uses `--env dev`, which
+# loads spacetime.dev.json on top of spacetime.json.
+# The wasm32-unknown-unknown target is installed by mise's rust toolchain.
+
+[tasks.spacetime-build]
+description = "Build the yral-database-spacetime wasm module (release)"
+run = "spacetime build -p apps/yral-database-spacetime"
+
+[tasks.spacetime-generate]
+description = "Regenerate Rust client bindings from the live Maincloud database schema (reads spacetime.json). Must be run after spacetime-publish to reflect schema changes."
+run = "spacetime generate"
+
+[tasks.spacetime-test]
+description = "Run yral-database-spacetime tests"
+dir = "apps/yral-database-spacetime"
+run = "cargo test"
+
+[tasks.spacetime-run]
+description = "Start local SpacetimeDB server and publish the module locally (--env dev reads spacetime.dev.json → local server)"
+depends = ["spacetime-build"]
+daemons = ["spacetimedb"]
+run = "spacetime publish --env dev --yes"
+
+[tasks.spacetime-dev]
+description = "Start SpacetimeDB server and run dev mode (build, generate bindings, publish, watch for changes)"
+daemons = ["spacetimedb"]
+run = "spacetime dev"
+
+[tasks.spacetime-stop]
+description = "Stop SpacetimeDB server"
+run = "mise daemons stop spacetimedb spacetimedb-dev"
+
+# No --yes: maincloud publish is production — we MUST read the migration plan
+# and breaking-change warnings interactively before accepting. Never
+# auto-accept data-destructive prompts on Maincloud.
+[tasks.spacetime-publish]
+description = "Publish to SpacetimeDB Maincloud (interactive — reads migration plan), then regenerate client bindings. Order: build → publish → generate."
+depends = ["spacetime-build"]
+run = "spacetime publish && mise run spacetime-generate"
+
+[tasks.spacetime-validate]
+description = "Validate yral-database-spacetime on Maincloud (read-only checks: tables, row counts, procedure calls)"
+run = '''
+echo "=== Tables ==="
+TABLES_OUT=$(spacetime sql --server maincloud $SPACETIMEDB_DB_NAME "SELECT table_name, table_access FROM st_table WHERE table_type = 'user'")
+echo "$TABLES_OUT"
+echo ""
+echo "=== Row counts ==="
+# Parse table names from the query output (quoted first column), then count each.
+TABLES=$(echo "$TABLES_OUT" | awk -F'|' '/^ "/ {gsub(/[" \t]/, "", $1); print $1}')
+for t in $TABLES; do
+  echo -n "$t: "
+  spacetime sql --server maincloud $SPACETIMEDB_DB_NAME "SELECT count(*) AS cnt FROM $t"
+done
+'''
+
+[tasks.spacetime-all]
+description = "Full yral-database-spacetime workflow: build → generate → test → run → publish → validate"
+run = '''
+mise run spacetime-build
+mise run spacetime-generate
+mise run spacetime-test
+mise run spacetime-run
+mise run spacetime-publish
+mise run spacetime-validate
+'''
+
+# ── yral-auth ────────────────────────────────────────────────────────────────
+
+[tasks.yral-auth-build]
+description = "Build yral-auth (release + WASM client). Linux/WSL: musl x86_64 (mimics prod). macOS: native arm64."
+dir = "apps/yral-auth"
+run = '''
+if [[ "$(uname)" == "Darwin" ]]; then
+  cargo leptos build --release --lib-features release-lib --bin-features release-bin
+else
+  LEPTOS_BIN_TARGET_TRIPLE=x86_64-unknown-linux-musl \
+    cargo leptos build --release --lib-features release-lib --bin-features release-bin
+fi
+'''
+
+[tasks.yral-auth-run]
+description = "Run yral-auth locally (release binary, port 8080)"
+depends = ["yral-auth-build"]
+daemons = ["yral-auth"]
+run = "echo 'yral-auth daemon started (mise daemons logs yral-auth to follow)'"
+
+[tasks.yral-auth-test]
+description = "Run yral-auth tests (uses local SpacetimeDB dev server; injects JWT_EC_PEM via fnox)"
+dir = "apps/yral-auth"
+daemons = ["spacetimedb-dev"]
+env = { SPACETIMEDB_URL = "http://127.0.0.1:3000" }
+run = "fnox exec -- cargo test --features ssr --bins --lib -- --test-threads=1"
+
+[tasks.yral-auth-image]
+description = "Build the yral-auth container image locally (podman)"
+run = "podman build -f apps/yral-auth/Dockerfile.buildkit -t test/yral-auth --platform linux/amd64 ."
+
+[tasks.yral-auth-image-run]
+description = "Run the yral-auth container image locally (podman, port 8080)"
+depends = ["yral-auth-image"]
+daemons = ["yral-auth-container"]
+run = "echo 'yral-auth-container daemon started (mise daemons logs yral-auth-container to follow)'"
+
+[tasks.yral-auth-stop]
+description = "Stop yral-auth dev server and container"
+run = "mise daemons stop yral-auth yral-auth-container"
+
+[tasks.yral-auth-all]
+description = "Full yral-auth workflow: build → test → image → image-run → validate → stop"
+run = '''
+mise run yral-auth-build
+mise run yral-auth-run
+mise run yral-auth-test
+mise run yral-auth-image
+mise run yral-auth-image-run
+'''
+
+[tasks.yral-auth-validate]
+description = "Validate yral-auth on prod (read-only kubectl checks)"
+run = '''
+echo "=== Pods ==="
+kubectl -n yral-auth get pods -l app=yral-auth -o wide
+echo ""
+echo "=== Health ==="
+kubectl -n yral-auth get pods -l app=yral-auth -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.containerStatuses[0].ready}{"\n"}{end}'
+echo ""
+echo "=== Recent logs (last 20 lines, first pod) ==="
+FIRST_POD=$(kubectl -n yral-auth get pods -l app=yral-auth -o jsonpath='{.items[0].metadata.name}')
+kubectl -n yral-auth logs "$FIRST_POD" --tail=20
+'''
+
+# ── yral-web ─────────────────────────────────────────────────────────────
+
+[tasks.yral-web-bootstrap]
+description = "Install yral-web build prerequisites (cargo-leptos, musl+wasm targets, npm deps)"
+depends = ["bootstrap"]
+run = '''
+rustup install
+cargo binstall cargo-leptos --no-confirm
+cd apps/yral-web && npm install
+'''
+
+[tasks.yral-web-build]
+description = "Build yral-web (release + WASM client). Linux/WSL: musl x86_64 (mimics prod). macOS: native arm64."
+# yral-web's bin uses the custom `prod-release` profile (lto, debug=1) — the
+# profile rides INSIDE target/<triple>/prod-release/ on musl, plain release/
+# native.
+dir = "apps/yral-web"
+run = '''
+if [[ "$(uname)" == "Darwin" ]]; then
+  cargo leptos --manifest-path ssr/Cargo.toml build --release
+else
+  LEPTOS_BIN_TARGET_TRIPLE=x86_64-unknown-linux-musl \
+    cargo leptos --manifest-path ssr/Cargo.toml build --release
+fi
+'''
+
+[tasks.yral-web-run]
+description = "Run yral-web locally (release binary, port 8080)"
+depends = ["yral-web-build"]
+daemons = ["yral-web"]
+run = "echo 'yral-web daemon started (mise daemons logs yral-web to follow)'"
+
+[tasks.yral-web-watch]
+description = "Run yral-web with hot reload via cargo leptos watch (debug, port 8080)"
+dir = "apps/yral-web"
+run = "fnox exec -- cargo leptos --manifest-path ssr/Cargo.toml watch --hot-reload --bin-features ssr,oauth-ssr"
+env = { LEPTOS_SITE_ADDR = "0.0.0.0:8080" }
+
+[tasks.yral-web-test]
+description = "Run yral-web tests (ssr feature + fnox secrets; uses local SpacetimeDB dev server for yral-auth integration tests)"
+dir = "apps/yral-web"
+daemons = ["spacetimedb-dev"]
+env = { SPACETIMEDB_URL = "http://127.0.0.1:3000" }
+run = "fnox exec -- cargo test --features ssr --bins --lib -- --test-threads=1"
+
+[tasks.yral-web-image]
+description = "Build the yral-web container image locally (podman)"
+run = "podman build -f apps/yral-web/Dockerfile.buildkit -t test/yral-web --platform linux/amd64 ."
+
+[tasks.yral-web-image-run]
+description = "Run the yral-web container image locally (podman, port 8080)"
+depends = ["yral-web-image"]
+daemons = ["yral-web-container"]
+run = "echo 'yral-web-container daemon started (mise daemons logs yral-web-container to follow)'"
+
+[tasks.yral-web-stop]
+description = "Stop yral-web dev server, watch, and container"
+run = "mise daemons stop yral-web yral-web-watch yral-web-container"
+
+[tasks.yral-web-all]
+description = "Full yral-web workflow: build → test → image → image-run → validate → stop"
+run = '''
+mise run yral-web-build
+mise run yral-web-run
+mise run yral-web-test
+mise run yral-web-image
+mise run yral-web-image-run
+'''
+
+[tasks.yral-web-validate]
+description = "Validate yral-web on prod (read-only kubectl checks)"
+run = '''
+echo "=== Pods ==="
+kubectl -n yral-web get pods -l app=yral-web -o wide
+echo ""
+echo "=== Health ==="
+kubectl -n yral-web get pods -l app=yral-web -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.containerStatuses[0].ready}{"\n"}{end}'
+echo ""
+echo "=== Recent logs (last 20 lines, first pod) ==="
+FIRST_POD=$(kubectl -n yral-web get pods -l app=yral-web -o jsonpath='{.items[0].metadata.name}')
+kubectl -n yral-web logs "$FIRST_POD" --tail=20
+'''
+
+# ── hello-world ─────────────────────────────────────────────────────────────
+# The `leptos-tutorial-builder-syntax` app (and the `hello-world` daemon that
+# pointed at it) were removed in cf6691f9, so this app has no source or Trunk
+# config left — only a stale untracked dist/. Its hello-world-build/-run/-stop
+# tasks were dropped with the migration to [daemons] rather than carried over,
+# since they could never have worked (the old `-run` started a daemon named
+# `hello-world`, which never existed while the daemon that did was named
+# `leptos-tutorial-builder-syntax`). Re-create all three if the app returns.
+
+# ── yral-metadata ───────────────────────────────────────────────────────────
+
+[tasks.yral-metadata-build]
+description = "Build yral-metadata server (release). Linux/WSL: musl x86_64 (mimics prod). macOS: native arm64."
+run = '''
+if [[ "$(uname)" == "Darwin" ]]; then
+  cargo build --release -p yral-metadata-server
+else
+  cargo build --release --target x86_64-unknown-linux-musl -p yral-metadata-server
+fi
+'''
+
+[tasks.yral-metadata-run]
+description = "Run yral-metadata locally (release binary, port 7000)"
+depends = ["yral-metadata-build"]
+daemons = ["yral-metadata"]
+run = "echo 'yral-metadata daemon started (mise daemons logs yral-metadata to follow)'"
+
+[tasks.yral-metadata-test]
+description = "Run yral-metadata tests"
+run = "cargo test -p yral-metadata-server -p yral-metadata-client -p yral-metadata-types"
+
+[tasks.yral-metadata-image]
+description = "Build the yral-metadata container image locally (podman)"
+run = "podman build -f apps/yral-metadata/Dockerfile.buildkit -t test/yral-metadata --platform linux/amd64 ."
+
+[tasks.yral-metadata-image-run]
+description = "Run the yral-metadata container image locally (podman, port 7000)"
+depends = ["yral-metadata-image"]
+daemons = ["yral-metadata-container"]
+run = "echo 'yral-metadata-container daemon started (mise daemons logs yral-metadata-container to follow)'"
+
+[tasks.yral-metadata-stop]
+description = "Stop yral-metadata dev server and container"
+run = "mise daemons stop yral-metadata yral-metadata-container"
+
+[tasks.yral-metadata-all]
+description = "Full yral-metadata workflow: build → run → test → image → image-run"
+run = '''
+mise run yral-metadata-build
+mise run yral-metadata-run
+mise run yral-metadata-test
+mise run yral-metadata-image
+mise run yral-metadata-image-run
+'''
+
+[tasks.yral-metadata-validate]
+description = "Validate yral-metadata on prod (read-only kubectl checks)"
+run = '''
+echo "=== Pods ==="
+kubectl -n yral-metadata get pods -l app=yral-metadata -o wide
+echo ""
+echo "=== Health ==="
+kubectl -n yral-metadata get pods -l app=yral-metadata -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.containerStatuses[0].ready}{"\n"}{end}'
+echo ""
+echo "=== Recent logs (last 20 lines, first pod) ==="
+FIRST_POD=$(kubectl -n yral-metadata get pods -l app=yral-metadata -o jsonpath='{.items[0].metadata.name}')
+kubectl -n yral-metadata logs "$FIRST_POD" --tail=20
+'''
+
+# ── off-chain-agent ─────────────────────────────────────────────────────────
+
+[tasks.off-chain-agent-build]
+description = "Build off-chain-agent (release). Linux/WSL: musl x86_64 (mimics prod). macOS: native arm64 (Linux ELF can't exec on Darwin)."
+run = '''
+if [[ "$(uname)" == "Darwin" ]]; then
+  cargo build --release -p off-chain-agent
+else
+  cargo build --release --target x86_64-unknown-linux-musl -p off-chain-agent
+fi
+'''
+
+[tasks.off-chain-agent-run]
+description = "Run off-chain-agent locally (release binary, port 50051)"
+depends = ["off-chain-agent-build"]
+daemons = ["off-chain-agent"]
+run = "echo 'off-chain-agent daemon started (mise daemons logs off-chain-agent to follow)'"
+
+[tasks.off-chain-agent-test]
+description = "Run off-chain-agent tests"
+run = "cargo test -p off-chain-agent"
+
+[tasks.off-chain-agent-image]
+description = "Build the off-chain-agent container image locally (podman)"
+run = "podman build -f apps/off-chain-agent/Dockerfile.buildkit -t test/off-chain-agent --platform linux/amd64 ."
+
+[tasks.off-chain-agent-image-run]
+description = "Run the off-chain-agent container image locally (podman, port 50051)"
+depends = ["off-chain-agent-image"]
+daemons = ["off-chain-agent-container"]
+run = "echo 'off-chain-agent-container daemon started (mise daemons logs off-chain-agent-container to follow)'"
+
+[tasks.off-chain-agent-stop]
+description = "Stop off-chain-agent dev server and container"
+run = "mise daemons stop off-chain-agent off-chain-agent-container"
+
+[tasks.off-chain-agent-all]
+description = "Full off-chain-agent workflow: build → run → test → image → image-run"
+run = '''
+mise run off-chain-agent-build
+mise run off-chain-agent-run
+mise run off-chain-agent-test
+mise run off-chain-agent-image
+mise run off-chain-agent-image-run
+'''
+
+[tasks.off-chain-agent-validate]
+description = "Validate off-chain-agent on prod (read-only kubectl checks)"
+run = '''
+echo "=== Pods ==="
+kubectl -n off-chain-agent get pods -l app=off-chain-agent -o wide
+echo ""
+echo "=== Health ==="
+kubectl -n off-chain-agent get pods -l app=off-chain-agent -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.containerStatuses[0].ready}{"\n"}{end}'
+echo ""
+echo "=== Recent logs (last 20 lines, first pod) ==="
+FIRST_POD=$(kubectl -n off-chain-agent get pods -l app=off-chain-agent -o jsonpath='{.items[0].metadata.name}')
+kubectl -n off-chain-agent logs "$FIRST_POD" --tail=20
+'''
+
+# ── yral-ios ────────────────────────────────────────────────────────────────
+# Native Swift/SwiftUI iOS app (single SPM package + thin Xcode shell).
+# Apple-canonical tooling only: xcodebuild + xcrun altool. No CocoaPods, no
+# fastlane, no Ruby gems.
+# Prerequisites (not managed by mise — system-level):
+#   - Xcode 26 (iOS 18 deployment target; simulator + device)
+# First-time setup:  mise install && mise run yral-ios-setup
+# Signing secrets (dist cert p12, provisioning profile, cert password, ASC
+# p8) live in fnox.toml [secrets] — same source for local and CI (CI runs
+# `mise run bootstrap` to extract the age key, then everything flows from
+# fnox exactly like local).
+
+[tasks.yral-ios-setup]
+description = "Resolve SPM dependencies for the YralApp package"
+dir = "apps/yral-ios/packages/YralApp"
+run = "swift package resolve"
+
+# The Firebase config plist is GITIGNORED (it contains the project's Google
+# Cloud API key — flagged by secret scanning when committed). The yral-ios-build
+# and yral-ios-upload-testflight tasks self-inject it inline from the fnox
+# secret (YRAL_IOS_FIREBASE_PLIST_BASE64): their guard re-execs under
+# `fnox exec` when secrets are absent, so plain `mise run <task>` works.
+# Rotate the API key: rotate in GCP console → update the fnox secret
+# (exact command documented on the secret's fnox.toml entry).
+[tasks.yral-ios-sync-rishi-openapi]
+description = "Fetch the LIVE OpenAPI spec from agent.rishi.yral.com (byte-verbatim) into the SPM target — the generator plugin consumes it at build time. Offline → keeps the committed snapshot (the spec is a build INPUT, never hand-edited; spec defects are fixed by PR to yral-rishi-agent)."
+dir = "apps/yral-ios/packages/YralApp"
+run = '''
+curl -fsSL --max-time 30 https://agent.rishi.yral.com/openapi.json \
+  -o Sources/YralApp/openapi.json \
+  || echo 'WARN: live spec unreachable — building against the committed snapshot (offline mode)'
+'''
+
+[tasks.yral-ios-build]
+description = "Build the iosApp target for the iOS Simulator (Debug, unsigned). Self-injects the Firebase plist from fnox (no fnox exec prefix needed)."
+dir = "apps/yral-ios"
+depends = ["yral-ios-sync-rishi-openapi"]
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Self-inject: re-exec under fnox exec when secrets are absent (plain
+# `mise run yral-ios-build` just works; fnox is the secrets source — mise
+# [env] is committed plaintext, so secrets never live there).
+if [ -z "${YRAL_IOS_FIREBASE_PLIST_BASE64:-}" ]; then
+  exec fnox exec -- mise run yral-ios-build
+fi
+
+# GoogleService-Info.plist is gitignored and materialized from the fnox
+# secret. ATOMIC write: temp file → plutil lint → mv — a failed inject can
+# never leave a corrupt (0-byte) plist behind for xcodebuild/Xcode to choke
+# on ("unable to read input file as a property list").
+PLIST_TMP=$(mktemp)
+trap 'rm -f "$PLIST_TMP"' EXIT
+printf '%s' "$YRAL_IOS_FIREBASE_PLIST_BASE64" | base64 -d > "$PLIST_TMP"
+plutil -lint "$PLIST_TMP"
+mv "$PLIST_TMP" iosApp/GoogleService-Info.plist
+
+xcodebuild build \
+  -project iosApp.xcodeproj \
+  -scheme iosApp \
+  -destination 'generic/platform=iOS Simulator' \
+  -configuration Debug \
+  CODE_SIGNING_ALLOWED=NO \
+  -skipPackagePluginValidation
+'''
+
+[tasks.yral-ios-test]
+description = "Run the YralApp SPM package unit tests (Swift Testing)"
+dir = "apps/yral-ios/packages/YralApp"
+depends = ["yral-ios-sync-rishi-openapi"]
+run = "swift test"
+
+[tasks.yral-ios-lint]
+description = "Lint the YralApp SPM package with swift-format (Apple's first-party formatter and linter, shipped in the Xcode toolchain)."
+dir = "apps/yral-ios"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+
+# `swift format` (note the space) is the toolchain-provided entry point — Swift 6
+# ships swift-format inside Xcode 16+, so there is nothing to install via mise.
+# No .swift-format config: we use the toolchain defaults verbatim. That is what
+# makes this consistent with format-on-save, which goes through SourceKit-LSP
+# and therefore applies the SAME defaults (plus the editor's indentation).
+#
+# The codebase is 2-space indented to match swift-format's default. VS Code's
+# `editor.detectIndentation` (default true) matches whatever a file already
+# uses, so saves stay self-consistent in both editors.
+#
+# --strict makes warnings fail the gate. Only the two hand-written trees are
+# passed: the generated OpenAPI sources live under .build/plugins/outputs/, so
+# they are never traversed (their warnings are fixed upstream — see the Zero
+# Warnings rule, not suppressed here).
+swift format lint --strict --recursive \
+  packages/YralApp/Sources packages/YralApp/Tests
+'''
+
+[tasks.yral-ios-checks]
+description = "CI-equivalent check suite: lint + package tests + simulator build (same task local and CI run)"
+depends = ["yral-ios-lint", "yral-ios-test", "yral-ios-build"]
+run = "echo 'yral-ios checks: all green'"
+
+[tasks.yral-ios-clean]
+description = "Clean SPM and Xcode build outputs (incl. the fnox-injected Firebase plist)"
+dir = "apps/yral-ios"
+run = '''
+swift package --package-path packages/YralApp clean
+rm -rf packages/YralApp/.build build
+rm -rf iosApp.xcodeproj/xcuserdata
+rm -f iosApp/GoogleService-Info.plist
+'''
+
+# Upload task is wrapped with `fnox exec --` so the four signing secrets in
+# fnox.toml are injected into the script's environment (same mechanism as
+# yral-auth-test; see fnox.toml [secrets] for the key names). mise [env]
+# provides the non-secret identifiers (ASC key/issuer, Apple team id).
+[tasks.yral-ios-upload-testflight]
+description = "Archive (Release, App Store signing) and upload to TestFlight via altool. Self-injects secrets from fnox (no fnox exec prefix needed)."
+dir = "apps/yral-ios"
+depends = ["yral-ios-checks"]
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Self-inject: re-exec under fnox exec when secrets are absent. Inside the
+# re-exec: YRAL_IOS_DIST_CERT_P12_BASE64, YRAL_IOS_DIST_PROFILE_BASE64,
+# YRAL_IOS_CERT_PASSWORD, APP_STORE_CONNECT_API_KEY_BASE64,
+# YRAL_IOS_FIREBASE_PLIST_BASE64 (fnox.toml), YRAL_ASC_KEY_ID,
+# YRAL_ASC_ISSUER_ID, YRAL_APPLE_TEAM_ID (mise [env]).
+if [ -z "${YRAL_IOS_FIREBASE_PLIST_BASE64:-}" ]; then
+  exec fnox exec -- mise run yral-ios-upload-testflight
+fi
+
+# The Firebase plist is a required bundle resource — materialize it
+# ATOMICALLY (temp → plutil lint → mv): a failed inject must never leave
+# a corrupt 0-byte plist for xcodebuild/Xcode to choke on.
+PLIST_TMP=$(mktemp)
+printf '%s' "$YRAL_IOS_FIREBASE_PLIST_BASE64" | base64 -d > "$PLIST_TMP"
+plutil -lint "$PLIST_TMP"
+mv "$PLIST_TMP" iosApp/GoogleService-Info.plist
+
+WORKDIR="build/signing"
+mkdir -p "$WORKDIR" ~/Library/MobileDevice/Provisioning\ Profiles
+
+echo "${YRAL_IOS_DIST_CERT_P12_BASE64}" | base64 --decode > "$WORKDIR/Yral-Dist.p12"
+echo "${YRAL_IOS_DIST_PROFILE_BASE64}" | base64 --decode > "$WORKDIR/Yral-Distribution.mobileprovision"
+cp "$WORKDIR/Yral-Distribution.mobileprovision" ~/Library/MobileDevice/Provisioning\ Profiles/
+
+# Build keychain: isolated, auto-unlocked for this session, no partition-list
+# prompts (CI-standard form). The p12 stored in fnox is already in the
+# legacy PKCS12 format macOS `security import` requires — see the secret's
+# entry in fnox.toml for how to recreate it correctly.
+# Delete FIRST: the keychain persists across runs, and importing the p12
+# into the STALE one fails with SecKeychainItemImport: "User canceled the
+# operation" (partition-list denial) — the task must be idempotent.
+security delete-keychain ~/Library/Keychains/yralios-build.keychain-db 2>/dev/null || true
+security create-keychain -p "" yralios-build.keychain || true
+security import "$WORKDIR/Yral-Dist.p12" -k ~/Library/Keychains/yralios-build.keychain -P "$YRAL_IOS_CERT_PASSWORD" -A
+# Append the build keychain to the search list WITHOUT dropping the system
+# ones — `-s` rewrites the whole list, so name the standard keychains
+# explicitly (login + System). Dropping login breaks cert-chain trust
+# (errSecInternalComponent: "unable to build chain to self-signed root").
+security list-keychains -s ~/Library/Keychains/yralios-build.keychain ~/Library/Keychains/login.keychain-db /Library/Keychains/System.keychain
+security set-keychain-settings -lut 21600s ~/Library/Keychains/yralios-build.keychain
+security unlock-keychain -p "" ~/Library/Keychains/yralios-build.keychain
+security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "" yralios-build.keychain
+
+rm -rf build/YralApp.xcarchive build/ipa
+# No CODE_SIGN_* / PROVISIONING_PROFILE_* CLI overrides here: CLI overrides
+# propagate to EVERY target in the graph and make SPM package targets fail
+# with "does not support provisioning profiles". Manual signing lives on the
+# iosApp target's Release configuration in project.pbxproj (see that file).
+xcodebuild archive \
+  -project iosApp.xcodeproj \
+  -scheme iosApp \
+  -destination 'generic/platform=iOS' \
+  -archivePath build/YralApp.xcarchive \
+  -configuration Release \
+  -skipPackagePluginValidation \
+  -quiet
+
+cat > build/ExportOptions.plist <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>method</key>
+  <string>app-store</string>
+  <key>teamID</key>
+  <string>$YRAL_APPLE_TEAM_ID</string>
+  <key>signingCertificate</key>
+  <string>Apple Distribution</string>
+  <key>provisioningProfiles</key>
+  <dict>
+    <key>com.yral.iosApp</key>
+    <string>Yral-Distribution</string>
+  </dict>
+</dict>
+</plist>
+EOF
+
+xcodebuild -exportArchive \
+  -archivePath build/YralApp.xcarchive \
+  -exportOptionsPlist build/ExportOptions.plist \
+  -exportPath build/ipa
+
+# altool resolves the ASC API key by file convention:
+# ./private_keys/AuthKey_<KEY_ID>.p8 (also ~/.private_keys etc.)
+mkdir -p private_keys
+echo "$APP_STORE_CONNECT_API_KEY_BASE64" | base64 --decode > "private_keys/AuthKey_${YRAL_ASC_KEY_ID}.p8"
+
+IPA_PATH=$(ls -t build/ipa/*.ipa | head -n 1)
+echo "Uploading $IPA_PATH via altool"
+xcrun altool --upload-app \
+  --type ios \
+  --file "$IPA_PATH" \
+  --apiKey "$YRAL_ASC_KEY_ID" \
+  --apiIssuer "$YRAL_ASC_ISSUER_ID"
+
+# Upload dSYMs to Crashlytics from the archive (upload-symbols ships inside the
+# SPM checkout of the firebase-ios-sdk, resolved during the archive).
+UPLOAD_SYMBOLS_SCRIPT=$(ls -t "$HOME"/Library/Developer/Xcode/DerivedData/*/SourcePackages/checkouts/firebase-ios-sdk/Crashlytics/upload-symbols 2>/dev/null | head -n 1)
+if [[ -n "$UPLOAD_SYMBOLS_SCRIPT" && -f "$UPLOAD_SYMBOLS_SCRIPT" && -d build/YralApp.xcarchive/dSYMs ]]; then
+  "$UPLOAD_SYMBOLS_SCRIPT" -gsp iosApp/GoogleService-Info.plist -p ios build/YralApp.xcarchive/dSYMs
+else
+  echo '  ⚠ Crashlytics upload-symbols script or dSYMs not found — skipping dSYM upload' >&2
+fi
+'''
+# The task self-injects (guard re-execs via fnox exec) — plain
+# `mise run yral-ios-upload-testflight` works from any shell.
+
+# ─── my-website (Leptos SSR app, islands architecture) ────────────────────────
+
+[tasks.my-website-build]
+description = "Build my-website (release + WASM client). Linux/WSL: musl x86_64 (mimics prod). macOS: native arm64."
+dir = "apps/my-website"
+run = '''
+if [[ "$(uname)" == "Darwin" ]]; then
+  cargo leptos build --release
+else
+  LEPTOS_BIN_TARGET_TRIPLE=x86_64-unknown-linux-musl \
+    cargo leptos build --release
+fi
+'''
+
+[tasks.my-website-run]
+description = "Run my-website locally (release binary, port 8081)"
+depends = ["my-website-build"]
+daemons = ["my-website"]
+run = "echo 'my-website daemon started (mise daemons logs my-website to follow)'"
+
+[tasks.my-website-watch]
+description = "Run my-website with hot reload via cargo leptos watch (debug, port 8080)"
+dir = "apps/my-website"
+run = "cargo leptos watch --hot-reload"
+env = { LEPTOS_SITE_ADDR = "0.0.0.0:8080" }
+
+[tasks.my-website-test]
+description = "Run my-website tests"
+dir = "apps/my-website"
+run = "cargo test --features ssr --bins --lib"
+
+[tasks.my-website-image]
+description = "Build the my-website container image locally (podman)"
+run = "podman build -f apps/my-website/Dockerfile.buildkit -t test/my-website --platform linux/amd64 ."
+
+[tasks.my-website-image-run]
+description = "Run the my-website container image locally (podman, port 8080)"
+depends = ["my-website-image"]
+daemons = ["my-website-container"]
+run = "echo 'my-website-container daemon started (mise daemons logs my-website-container to follow)'"
+
+[tasks.my-website-stop]
+description = "Stop my-website dev server and container"
+run = "mise daemons stop my-website my-website-container"
+
+[tasks.my-website-validate]
+description = "Validate my-website on prod (read-only kubectl checks)"
+run = '''
+echo "=== Pods ==="
+kubectl -n my-website get pods -l app=my-website -o wide
+echo ""
+echo "=== Health ==="
+kubectl -n my-website get pods -l app=my-website -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.containerStatuses[0].ready}{"\n"}{end}'
+echo ""
+echo "=== Recent logs (last 20 lines, first pod) ==="
+FIRST_POD=$(kubectl -n my-website get pods -l app=my-website -o jsonpath='{.items[0].metadata.name}')
+kubectl -n my-website logs "$FIRST_POD" --tail=20
+'''
+
+# ── hetzner-bare-metal-fleet ────────────────────────────────────────────────
+# Bare-metal fleet automation (apps/hetzner-bare-metal-fleet) — Ansible for the
+# standalone Hetzner servers (provisioning, weekly maintenance, temporary team
+# SSH access). This is an in-repo directory (NOT a submodule) since 2026-09-02.
+# The fleet shares the parent repo's Ansible vault (same password, same
+# saikat-machine-access SSH key material): the fleet's ansible.cfg points at
+# ../../ansible/.vault_pass and the connection key at ../../.saikat-machine-access-ed25519
+# (the fleet dir is 2 levels below the repo root), both created by `mise run
+# bootstrap` (this file's root bootstrap task). The weekly maintenance cron also
+# runs as a GitHub workflow (.github/workflows/fleet-maintenance.yml) —
+# provisioning and SSH-access grants are mise tasks ONLY (local operator actions).
+#
+# All fleet tasks run with cwd = apps/hetzner-bare-metal-fleet so the fleet's
+# own ansible.cfg (inventory, roles_path, vault password) is picked up by Ansible
+# automatically. Extra args after `--` are forwarded to ansible-playbook
+# (e.g. `mise run fleet-maintenance -- --limit rishi-1`).
+# The .venv is created on demand: every fleet-* task depends on fleet-bootstrap.
+
+[tasks.fleet-bootstrap]
+description = "Create the fleet .venv, install Ansible, and extract the infra SSH key (idempotent)"
+dir = "apps/hetzner-bare-metal-fleet"
+# sources/outputs are relative to the task's dir (the fleet subdirectory) and may
+# use ".." to reach the parent repo root (see mise docs on task sources/outputs).
+# ../../ansible/.vault_pass in sources re-triggers when the vault password changes.
+sources = ["ansible/requirements.yml", "../../ansible/.vault_pass"]
+outputs = [".venv", "../../.saikat-machine-access-ed25519"]
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Create the fleet venv and install Python tooling (idempotent — venv module updates in place)
+# Dependencies come from the ROOT pyproject.toml (../../), the single source of
+# truth for Python deps repo-wide — the fleet does not keep its own list, so a
+# Dependabot pip bump at the root covers this venv too.
+python -m venv .venv && ./.venv/bin/pip install --upgrade pip && ./.venv/bin/pip install -e ../../ && ./.venv/bin/ansible-galaxy collection install -r ansible/requirements.yml -p ansible/collections
+
+# Extract the saikat-machine-access SSH private key from the fleet's Ansible vault → ../../.saikat-machine-access-ed25519
+# (the parent repo root, gitignored). Same key material as the parent vault — the root
+# `bootstrap` task extracts the same key when run; this block makes fleet-bootstrap
+# self-sufficient (CI runs only fleet tasks, never the full root bootstrap).
+# Idempotent — skips if the key already exists. Resilient to a missing/wrong vault
+# password — prints a warning instead of failing.
+if [ ! -f ../../.saikat-machine-access-ed25519 ]; then
+  if ./.venv/bin/ansible-vault view ansible/inventory/group_vars/all/vault.yml --vault-password-file ../../ansible/.vault_pass 2>/dev/null | \
+     ./.venv/bin/python -c "import sys, yaml; print(yaml.safe_load(sys.stdin)['vault_saikat_machine_access_ssh_private_key'])" \
+     > ../../.saikat-machine-access-ed25519 2>/dev/null; then
+    chmod 600 ../../.saikat-machine-access-ed25519
+    echo '  ✓ Extracted saikat-machine-access SSH key to ../../.saikat-machine-access-ed25519'
+  else
+    rm -f ../../.saikat-machine-access-ed25519
+    echo '  ⚠ Vault decryption failed — check ../../ansible/.vault_pass (parent repo: mise run setup)'
+  fi
+else
+  echo '  ✓ Saikat machine-access SSH key already at ../../.saikat-machine-access-ed25519'
+fi
+'''
+
+[tasks.fleet-maintenance]
+description = "Weekly fleet maintenance (usage: mise run fleet-maintenance -- --limit <host|bare_metal> [-e enable_reboot=false])"
+dir = "apps/hetzner-bare-metal-fleet"
+depends = ["fleet-bootstrap"]
+run = "./.venv/bin/ansible-playbook ansible/playbooks/weekly-update.yml"
+
+[tasks.fleet-provision]
+description = "Provision a bare-metal host (usage: mise run fleet-provision -- --limit <host> [-e force_provision=true] [-e skip_rescue_activation=true])"
+dir = "apps/hetzner-bare-metal-fleet"
+depends = ["fleet-bootstrap"]
+run = "./.venv/bin/ansible-playbook ansible/playbooks/provision.yml"
+
+[tasks.fleet-ssh-access]
+description = "Grant temporary SSH access (usage: mise run fleet-ssh-access -- --limit <host|group> -e team_member_name=<name>)"
+dir = "apps/hetzner-bare-metal-fleet"
+depends = ["fleet-bootstrap"]
+run = "./.venv/bin/ansible-playbook ansible/playbooks/ssh-access.yml"
+
+[tasks.fleet-lint]
+description = "Lint the fleet Ansible playbooks and roles with ansible-lint"
+dir = "apps/hetzner-bare-metal-fleet"
+depends = ["fleet-bootstrap"]
+run = "./.venv/bin/ansible-lint ansible/"
+
+[tasks.fleet-validate]
+description = "Validate the fleet inventory decrypts and hosts resolve (read-only)"
+dir = "apps/hetzner-bare-metal-fleet"
+depends = ["fleet-bootstrap"]
+run = "./.venv/bin/ansible-inventory --graph"
+
+[tasks.fleet-vault-decrypt]
+description = "Decrypt the fleet Ansible vault (apps/hetzner-bare-metal-fleet) for editing"
+dir = "apps/hetzner-bare-metal-fleet"
+depends = ["fleet-bootstrap"]
+run = "./.venv/bin/ansible-vault decrypt ansible/inventory/group_vars/all/vault.yml"
+
+[tasks.fleet-vault-encrypt]
+description = "Re-encrypt the fleet Ansible vault after editing"
+dir = "apps/hetzner-bare-metal-fleet"
+depends = ["fleet-bootstrap"]
+run = "./.venv/bin/ansible-vault encrypt ansible/inventory/group_vars/all/vault.yml"
+
+[tasks.fleet-vault-view]
+description = "View a value from the fleet Ansible vault (usage: mise run fleet-vault-view -- <yaml key>)"
+dir = "apps/hetzner-bare-metal-fleet"
+depends = ["fleet-bootstrap"]
+run = '''
+./.venv/bin/ansible-vault view ansible/inventory/group_vars/all/vault.yml | \
+  ./.venv/bin/python -c "import sys, yaml; print(yaml.safe_load(sys.stdin)[sys.argv[1]])" "$@"
+'''
+
+# ── yral-rishi-agent (agent.rishi.yral.com backend) ─────────────────────────
+# The repo's CI pins ruff==0.15.14 (as of 2026-09-08); we bump to latest in
+# mise (0.16.6) and have asked Rishi to bump his CI to match — parity comes
+# from HIS bump, not from us pinning his old version. Until he does, his CI
+# is the authority for PRs: if our newer ruff flags extra findings, those are
+# his to fix (or his CI bump fixes parity); we do NOT sweep his repo with our
+# newer lint (scope discipline — we only fix what we need, not the code he
+# maintains). Same commands as his CI either way.
+
+[tasks.yral-rishi-agent-lint]
+description = "Run yral-rishi-agent's CI lint commands (ruff check + format --check at our latest ruff; his CI pin governs PRs)"
+dir = "apps/yral-rishi-agent"
+run = '''
+ruff check app/ infra/
+ruff format --check app/ infra/
+'''
+
+[tasks.yral-rishi-agent-lint-fix]
+description = "Apply ruff's formatting/import fixes to yral-rishi-agent (run before committing; verify with yral-rishi-agent-lint)"
+dir = "apps/yral-rishi-agent"
+run = '''
+ruff check --fix app/ infra/
+ruff format app/ infra/
+'''
+
+# Test env mirrors the repo's CI test job: python -m venv + pip install of
+# requirements.txt + requirements-test.txt + pytest — the SAME mechanism the
+# root bootstrap uses for Ansible (NO uv anywhere in this repo; a stray
+# uv.lock that uv commands once created at the root was removed — uv is
+# not part of this repo's toolchain).
+# Integration tests (tests/integration/) need testcontainers+Docker and
+# SKIP gracefully without them — CI runs them with a real Postgres.
+[tasks.yral-rishi-agent-test-bootstrap]
+description = "Create the yral-rishi-agent test venv (.venv, gitignored) with CI's dependency set"
+dir = "apps/yral-rishi-agent"
+run = '''
+python -m venv .venv
+./.venv/bin/pip install --upgrade pip
+./.venv/bin/pip install -r requirements.txt -r requirements-test.txt pytest
+'''
+
+[tasks.yral-rishi-agent-test]
+description = "Run yral-rishi-agent's test suite (venv from yral-rishi-agent-test-bootstrap; integration tests skip without Docker)"
+dir = "apps/yral-rishi-agent"
+depends = ["yral-rishi-agent-test-bootstrap"]
+run = "./.venv/bin/python -m pytest tests/ -v"
+
+# ── Dev: local SpacetimeDB + yral-auth + yral-web ────────────────────────
+# These tasks build the binaries and start the dev stack. The `dev` daemon group
+# (see [daemon_groups]) manages the daemons, and each daemon's own `depends`
+# supplies the ordering: spacetimedb-dev → yral-auth-dev → yral-web-dev.
+# Nothing auto-starts on shell entry — `pitchfork activate` is no longer used.
+
+[tasks.dev-build]
+description = "Build all dev binaries (yral-auth + yral-web + spacetime module)"
+run = '''
+mise run yral-auth-build
+mise run yral-web-build
+mise run spacetime-build
+'''
+
+[tasks.dev-start]
+description = "Start all dev servers (SpacetimeDB local + yral-auth + yral-web)"
+depends = ["dev-build"]
+run = "mise daemons start dev"
+
+[tasks.dev-stop]
+description = "Stop all dev servers"
+run = "mise daemons stop dev"
+
+[tasks.dev-status]
+description = "Show status of all daemons"
+run = "mise daemons ls"
+
+[tasks.test-spacetime-jwt]
+description = "Run only the JWT→SpacetimeDB identity integration tests (injects JWT_EC_PEM via fnox; SpacetimeDB is started by the daemons option)"
+dir = "apps/yral-auth"
+daemons = ["spacetimedb-dev"]
+run = "fnox exec -- cargo test -p yral-auth --features ssr spacetime::integration_tests -- --test-threads=1"
+
+# ── Daemons ─────────────────────────────────────────────────────────────────
+# Long-running dev processes, managed by mise (`mise daemons ...`) on top of
+# pitchfork. See the top-of-file note for why pitchfork remains a required
+# dependency and how per-task startup replaced shell-entry auto-start.
+#
+# Usage:
+#   mise daemons ls                       # list declared + tracked daemons
+#   mise daemons start yral-auth          # start one (and its depends)
+#   mise daemons stop yral-auth           # stop one
+#   mise daemons logs yral-auth           # follow its logs
+#   mise daemons start dev                # start the `dev` group
+#   mise daemons stop                     # stop everything this project tracks
+#   mise daemons urls                     # ports + proxy hostnames
+#   mise daemons tui                      # pitchfork dashboard
+#
+# Prefer the `<app>-run` tasks over `mise daemons start` directly: the tasks add
+# the `depends = ["<app>-build"]` they need. A task that requires a daemon just
+# declares it (`daemons = ["<name>"]`) and mise starts it and waits for readiness
+# before the task body runs; already-running daemons are reused.
+
+# ── my-website dev server (Leptos release binary, port 8081) ────────────────
+# Build first with: mise run my-website-build (the -run task depends on it).
+
+[daemons.my-website]
+# Binary path is OS-conditional at start: Linux/WSL builds musl (mimics prod),
+# macOS builds native arm64 (Linux ELF can't exec on Darwin).
+run = '''
+if [[ "$(uname)" == "Darwin" ]]; then
+  exec ./../../target/release/my-website
+else
+  exec ./../../target/x86_64-unknown-linux-musl/release/my-website
+fi
+'''
+dir = "apps/my-website"
+ready_http = "http://localhost:8081/"
+stop_signal = "SIGINT"
+env = { LEPTOS_SITE_ADDR = "0.0.0.0:8081" }
+
+# ── my-website container (podman) ───────────────────────────────────────────
+# Build first with: mise run my-website-image
+
+[daemons.my-website-container]
+run = "exec podman run --rm -p 8080:8080 test/my-website"
+
+# ── off-chain-agent dev server (release binary, port 50051) ────────────────
+# Runs the NATIVE binary (arm64 on macOS, gnu on Linux/WSL) with env vars from
+# mise + secrets from fnox. Build first with: mise run off-chain-agent-build.
+# The binary is built at the workspace-root target/ by the mise task, so the
+# path is relative to dir ("apps/off-chain-agent") and points up to it.
+
+[daemons.off-chain-agent]
+run = '''
+if [[ "$(uname)" == "Darwin" ]]; then
+  exec fnox exec -- ../../target/release/icp-off-chain-agent
+else
+  exec fnox exec -- ../../target/x86_64-unknown-linux-musl/release/icp-off-chain-agent
+fi
+'''
+dir = "apps/off-chain-agent"
+ready_http = "http://localhost:50051/healthz"
+stop_signal = "SIGINT"
+
+# ── off-chain-agent container (podman) ──────────────────────────────────────
+# Build first with: mise run off-chain-agent-image
+
+[daemons.off-chain-agent-container]
+run = '''
+exec fnox exec -- podman run --rm \
+  -e APP_ENV -e RUST_LOG \
+  -e OFF_CHAIN_AGENT_URL \
+  -e SPACETIMEDB_URL -e SPACETIMEDB_DB_NAME -e SPACETIMEDB_ADMIN_TOKEN \
+  -e JWT_PUB_EC_PEM \
+  -e GRPC_AUTH_TOKEN \
+  -e NAITIK_MULTI_SERVICE_API_JWT_TOKEN \
+  -p 50051:50051 test/off-chain-agent
+'''
+dir = "apps/off-chain-agent"
+ready_http = "http://localhost:50051/healthz"
+stop_signal = "SIGINT"
+
+# ── SpacetimeDB standalone server (port 3000) ──────────────────────────────
+# Local SpacetimeDB instance for the yral-database-spacetime module. Required by
+# `spacetime dev` (which publishes to http://127.0.0.1:3000). In-memory mode —
+# data is lost on restart, which is fine for dev. No JWT keys, so this is the
+# plain server for tasks that don't need authenticated identity.
+
+[daemons.spacetimedb]
+run = "exec spacetime start --in-memory --listen-addr 127.0.0.1:3000"
+ready_http = "http://127.0.0.1:3000/v1/health"
+stop_signal = "SIGINT"
+retry = 3
+
+# ── SpacetimeDB local dev (in-memory + JWT keys, auto-publishes module) ─────
+# Used by the `dev` group and by the yral-auth/yral-web dev tasks. Starts the
+# local server, publishes the module (via the on_ready hook below), and stays
+# running. Data is lost on restart (in-memory).
+#
+# JWT key configuration: the local server verifies JWTs using yral-auth's public
+# ES256 key (JWT_PUB_EC_PEM from [env] above). The PEM is written to a temp file
+# before starting, then passed via --jwt-pub-key-path, which makes
+# yral-auth-minted JWTs valid SpacetimeDB tokens — the server derives a
+# deterministic Identity from the iss + sub claims. The private key (JWT_EC_PEM)
+# lives in fnox.toml (age-encrypted) and is read via `fnox get`.
+
+[daemons.spacetimedb-dev]
+# NOTE: the mktemp template's X's must be the LAST characters. Trailing them
+# with ".pem" makes mktemp treat the whole string as a literal name — it then
+# creates that one fixed path, and every restart after the first fails with
+# "mkstemp failed ... File exists" (which is why the daemon would not start
+# after an unclean stop). The extension was cosmetic: `spacetime start` reads
+# the PEM content, not the filename. The key files are also cleaned up on exit
+# so they don't linger in /tmp carrying the JWT signing key.
+run = '''
+JWT_PUB_FILE=$(mktemp /tmp/spacetimedb-jwt-pub-XXXXXX) && \
+JWT_PRIV_FILE=$(mktemp /tmp/spacetimedb-jwt-priv-XXXXXX) && \
+trap 'rm -f "$JWT_PUB_FILE" "$JWT_PRIV_FILE"' EXIT && \
+printf '%s' "$JWT_PUB_EC_PEM" > "$JWT_PUB_FILE" && \
+chmod 600 "$JWT_PUB_FILE" "$JWT_PRIV_FILE" && \
+fnox get JWT_EC_PEM --non-interactive > "$JWT_PRIV_FILE" && \
+exec spacetime start --in-memory --listen-addr 127.0.0.1:3000 --non-interactive --jwt-pub-key-path "$JWT_PUB_FILE" --jwt-priv-key-path "$JWT_PRIV_FILE"
+'''
+ready_http = "http://127.0.0.1:3000/v1/health"
+stop_signal = "SIGINT"
+retry = 3
+
+[daemons.spacetimedb-dev.hooks]
+# Publish the module to the local server once it's ready.
+# --env dev loads spacetime.dev.json (server: local) on top of spacetime.json.
+on_ready = "spacetime build -p apps/yral-database-spacetime && spacetime publish --env dev --yes --server local yral-database-spacetime-4lbo7"
+
+# ── yral-auth prod-config dev server (release binary, port 8080) ───────────
+# Runs against the prod SpacetimeDB config. Build first with: mise run
+# yral-auth-build. fnox exec loads the age-encrypted secrets from fnox.toml;
+# dir makes mise load the app's environment.
+
+[daemons.yral-auth]
+# Binary path is OS-conditional at start. Root target/ only —
+# apps/yral-auth/target is a stale pre-monorepo leftover.
+run = '''
+if [[ "$(uname)" == "Darwin" ]]; then
+  exec fnox exec -- ./target/release/yral-auth
+else
+  exec fnox exec -- ./target/x86_64-unknown-linux-musl/release/yral-auth
+fi
+'''
+dir = "apps/yral-auth"
+ready_http = "http://localhost:8080/healthz"
+stop_signal = "SIGINT"
+env = { LEPTOS_SITE_ADDR = "0.0.0.0:8080" }
+
+# ── yral-auth container (podman) ───────────────────────────────────────────
+# Build first with: mise run yral-auth-image
+
+[daemons.yral-auth-container]
+run = '''
+exec fnox exec -- podman run --rm \
+  -e APP_ENV -e GOOGLE_CLIENT_ID -e GOOGLE_CLIENT_SECRET \
+  -e APPLE_CLIENT_ID -e APPLE_TEAM_ID -e APPLE_KEY_ID -e APPLE_AUTH_KEY_PEM \
+  -e JWT_EC_PEM -e JWT_PUB_EC_PEM \
+  -e CLIENT_JWT_ED_PEM -e CLIENT_JWT_PUB_ED_PEM \
+  -e COOKIE_KEY -e WHATSAPP_API_KEY \
+  -p 8080:8080 test/yral-auth
+'''
+dir = "apps/yral-auth"
+ready_http = "http://localhost:8080/healthz"
+stop_signal = "SIGINT"
+
+# ── yral-auth dev (local SpacetimeDB, port 8080) ───────────────────────────
+# Dev variant: points SPACETIMEDB_URL at the local server (127.0.0.1:3000) and
+# depends on spacetimedb-dev being ready (the module is published via its
+# on_ready hook). Build first with: mise run yral-auth-build.
+
+[daemons.yral-auth-dev]
+run = '''
+if [[ "$(uname)" == "Darwin" ]]; then
+  exec fnox exec -- ./target/release/yral-auth
+else
+  exec fnox exec -- ./target/x86_64-unknown-linux-musl/release/yral-auth
+fi
+'''
+dir = "apps/yral-auth"
+ready_http = "http://localhost:8080/healthz"
+stop_signal = "SIGINT"
+depends = ["spacetimedb-dev"]
+env = { LEPTOS_SITE_ADDR = "0.0.0.0:8080", SPACETIMEDB_URL = "http://127.0.0.1:3000", SPACETIMEDB_DB_NAME = "yral-database-spacetime-4lbo7" }
+
+# ── yral-metadata dev server (release binary, port 7000) ───────────────────
+# Build first with: mise run yral-metadata-build
+
+[daemons.yral-metadata]
+# Binary path is OS-conditional at start. Root target/ only —
+# apps/yral-metadata/target is a stale leftover.
+run = '''
+if [[ "$(uname)" == "Darwin" ]]; then
+  exec fnox exec -- ../../target/release/yral-metadata-server
+else
+  exec fnox exec -- ../../target/x86_64-unknown-linux-musl/release/yral-metadata-server
+fi
+'''
+dir = "apps/yral-metadata"
+ready_http = "http://localhost:7000/healthz"
+stop_signal = "SIGINT"
+
+# ── yral-metadata container (podman) ────────────────────────────────────────
+# Build first with: mise run yral-metadata-image
+
+[daemons.yral-metadata-container]
+run = '''
+exec fnox exec -- podman run --rm \
+  -e APP_ENV -e RUST_LOG -e BIND_ADDRESS \
+  -e JWT_PUBLIC_KEY -e YRAL_AUTH_PUBLIC_KEY -e BACKEND_ADMIN_IDENTITY \
+  -p 7000:7000 test/yral-metadata
+'''
+dir = "apps/yral-metadata"
+ready_http = "http://localhost:7000/healthz"
+stop_signal = "SIGINT"
+
+# ── yral-web dev server (release binary, port 8080) ───────────────────────
+# Build first with: mise run yral-web-build
+
+[daemons.yral-web]
+# Binary path is OS-conditional at start. The musl build lands under the custom
+# `prod-release` profile dir (yral-web's bin-profile-release), the native macOS
+# build under plain release/.
+run = '''
+if [[ "$(uname)" == "Darwin" ]]; then
+  exec fnox exec -- ../../target/release/yral-web
+else
+  exec fnox exec -- ../../target/x86_64-unknown-linux-musl/prod-release/yral-web
+fi
+'''
+dir = "apps/yral-web"
+ready_http = "http://localhost:8080/healthz"
+stop_signal = "SIGINT"
+env = { LEPTOS_SITE_ADDR = "0.0.0.0:8080", LEPTOS_SITE_ROOT = "../../target/site" }
+
+# ── yral-web container (podman) ──────────────────────────────────────────
+# Build first with: mise run yral-web-image
+
+[daemons.yral-web-container]
+# fnox exec decrypts secrets into the env so podman's -e VAR (without =value)
+# copies them from the parent process into the container.
+run = '''
+exec fnox exec -- podman run --rm \
+  -e APP_ENV -e LEPTOS_ENV -e LEPTOS_SITE_ADDR -e LEPTOS_HASH_FILES \
+  -e GOOGLE_CLIENT_ID -e GOOGLE_REDIRECT_URL -e YRAL_AUTH_REDIRECT_URL \
+  -e YRAL_AUTH_CLIENT_ID \
+  -e COOKIE_KEY -e HON_WORKER_JWT -e BACKEND_ADMIN_IDENTITY \
+  -e HETZNER_S3_ACCESS_KEY -e HETZNER_S3_SECRET_KEY \
+  -e GRPC_AUTH_TOKEN -e YRAL_AUTH_CLIENT_SECRET -e YRAL_AUTH_MIGRATION_ES256_PEM \
+  -p 8080:8080 test/yral-web
+'''
+dir = "apps/yral-web"
+ready_http = "http://localhost:8080/healthz"
+stop_signal = "SIGINT"
+
+# ── yral-web dev (local SpacetimeDB, port 8081) ─────────────────────────
+# Dev variant: points SPACETIMEDB_URL at the local server and uses port 8081 to
+# avoid the conflict with yral-auth-dev on 8080. Build first with:
+# mise run yral-web-build.
+
+[daemons.yral-web-dev]
+run = "exec fnox exec -- ../../target/x86_64-unknown-linux-musl/prod-release/yral-web"
+dir = "apps/yral-web"
+ready_http = "http://localhost:8081/healthz"
+stop_signal = "SIGINT"
+depends = ["spacetimedb-dev", "yral-auth-dev"]
+env = { LEPTOS_SITE_ADDR = "0.0.0.0:8081", LEPTOS_SITE_ROOT = "../../target/site", SPACETIMEDB_URL = "http://127.0.0.1:3000", SPACETIMEDB_DB_NAME = "yral-database-spacetime-4lbo7", GOOGLE_REDIRECT_URL = "http://127.0.0.1:8081/auth/google_redirect", YRAL_AUTH_REDIRECT_URL = "http://127.0.0.1:8081/auth/yral_redirect" }
+
+# ── yral-web watch (cargo leptos watch, hot reload, debug) ──────────────
+# Rebuilds server + WASM on file change and live-reloads the browser. Uses debug
+# profiles (fast rebuilds) and needs no pre-build — cargo leptos watch builds and
+# serves. fnox exec loads the age-encrypted secrets from fnox.toml.
+
+[daemons.yral-web-watch]
+run = "exec fnox exec -- cargo leptos --manifest-path ssr/Cargo.toml watch --hot-reload --bin-features ssr,oauth-ssr"
+dir = "apps/yral-web"
+ready_output = "Serving at"
+stop_signal = "SIGINT"
+env = { LEPTOS_SITE_ADDR = "0.0.0.0:8080" }
+
+# ── Groups ──────────────────────────────────────────────────────────────────
+# Named subsets, usable wherever a daemon name is accepted:
+#   mise daemons start dev      |  mise daemons stop --group dev
+# Dependency order inside `dev` is handled by each daemon's own `depends`:
+# spacetimedb-dev → (publishes the module via its on_ready hook) → yral-auth-dev
+# → yral-web-dev.
+
+[daemon_groups]
+dev = ["spacetimedb-dev", "yral-auth-dev", "yral-web-dev"]

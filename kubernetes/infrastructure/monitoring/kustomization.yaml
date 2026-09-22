@@ -1,0 +1,23 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml
+  - helmrepository.yaml
+  - helmrelease.yaml
+  - flux-cluster-dashboard.yaml
+  - flux-control-plane-dashboard.yaml
+  - flux-logs-dashboard.yaml
+  - flux-podmonitor.yaml
+  - kafka-connect-podmonitor.yaml
+  - kafka-exporter-servicemonitor.yaml
+  - kafka-pipeline-dashboard.yaml
+  # Alerting: Google Chat notifications for resource saturation events.
+  - alerting-google-chat-secret.sops.yaml
+  - alerting-contact-point.yaml
+  - alerting-notification-policy.yaml
+  - alerting-rules-resource-saturation.yaml
+  - alertmanager-config.sops.yaml
+  # Alertmanager → Google Chat webhook relay: translates Alertmanager's native
+  # JSON webhook format to Google Chat's {"text": "..."} expected format.
+  - alertmanager-google-chat-relay-configmap.yaml
+  - alertmanager-google-chat-relay.yaml

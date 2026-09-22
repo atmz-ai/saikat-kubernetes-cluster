@@ -1,0 +1,17 @@
+{
+    "rust-analyzer.linkedProjects": [
+        "./Cargo.toml",
+    ],
+    // Swift extension: the YralApp package lives at
+    // apps/yral-ios/packages/YralApp — without this, SourceKit-LSP finds no
+    // package (the workspace root has no Package.swift) and every opened
+    // Swift file shows spurious "no such module" errors.
+    // https://docs.swift.org/vscode/documentation/userdocs/settings#Multiple-packages-in-workspace-folder
+    "swift.searchSubfoldersForPackages": true,
+    "vs-kubernetes": {
+        "vs-kubernetes.crd-code-completion": "enabled"
+    },
+    "better-todo-tree.tree.scanMode": "workspace",
+    "better-todo-tree.tree.showBadges": true,
+    "better-todo-tree.tree.showCountsInTree": true,
+}

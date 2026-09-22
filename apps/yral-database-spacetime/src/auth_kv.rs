@@ -1,0 +1,88 @@
+//! Auth key-value store.
+//!
+//! yral-auth stores 5 families of key-value data in SpacetimeDB:
+//!
+//! | Key | Value | Purpose |
+//! |---|---|---|
+//! | `{provider}-login-{sub}` | user_id | OAuth identity → user id |
+//! | `user:{user_id}` | `"1"` | revocation flag — see below |
+//! | `ai-account:{bot_id}` | owner user_id | bot → owner reverse lookup |
+//! | `{owner}-ai-accounts` | `["bot-id", …]` | owner's bot list |
+//! | `internal-login-{client_id}` | user_id | backend service identities |
+//!
+//! `user:{user_id}` is checked ONLY for key existence (`has_key`) — never
+//! its value. Present = the identity may be granted tokens; absent =
+//! revoked ("unknown user"). This makes key deletion the revocation
+//! mechanism, and means overwriting the value with `""` revokes nothing.
+//!
+//! This is a simple String→String KV store. The table is private (not public)
+//! — only yral-auth (via the admin identity) reads and writes it. All
+//! reducers check `ADMINS`. Procedures are not used (yral-auth calls reducers
+//! via REST for writes, and a procedure for reads).
+//!
+//! ## Usage
+//! yral-auth calls these via the SpacetimeDB REST API:
+//! - `POST /v1/database/{db}/call/kv_set` — write a key-value pair
+//! - `POST /v1/database/{db}/call/kv_get` — read a value by key (procedure)
+//! - `POST /v1/database/{db}/call/kv_delete` — delete a key
+//!
+//! Key existence checks use `kv_get` and check for `None`. No separate
+//! `kv_has` procedure is needed.
+//!
+//! All calls are authenticated with yral-auth's admin JWT (the yral-auth
+//! `id_token` passed as the SpacetimeDB token).
+
+use spacetimedb::{ReducerContext, SpacetimeType, Table};
+
+/// A simple key-value entry for auth data.
+/// Key is the logical key (e.g. `<principal>`, `{provider}-login-{sub_id}`).
+/// Value is the stored string (JWK, principal text, etc.).
+#[spacetimedb::table(accessor = auth_kv, private)]
+pub struct AuthKvEntry {
+    #[primary_key]
+    pub key: String,
+    pub value: String,
+}
+
+/// Result of `kv_get` — `None` if the key doesn't exist.
+#[derive(SpacetimeType, Clone, Debug)]
+pub struct KvGetResult {
+    pub value: Option<String>,
+}
+
+/// Set a key-value pair. Admin-only (yral-auth is the only writer).
+#[spacetimedb::reducer]
+pub fn kv_set(ctx: &ReducerContext, key: String, value: String) -> Result<(), String> {
+    if !crate::constants::ADMINS.contains(&ctx.sender()) {
+        return Err("Unauthorized".to_string());
+    }
+    // Upsert: delete if exists, then insert.
+    ctx.db.auth_kv().key().delete(key.clone());
+    ctx.db.auth_kv().insert(AuthKvEntry { key, value });
+    Ok(())
+}
+
+/// Delete a key. Admin-only.
+#[spacetimedb::reducer]
+pub fn kv_delete(ctx: &ReducerContext, key: String) -> Result<(), String> {
+    if !crate::constants::ADMINS.contains(&ctx.sender()) {
+        return Err("Unauthorized".to_string());
+    }
+    ctx.db.auth_kv().key().delete(key);
+    Ok(())
+}
+
+/// Get a value by key. Returns `KvGetResult { value: Option<String> }`.
+/// Called via REST by yral-auth.
+#[spacetimedb::procedure]
+pub fn kv_get(ctx: &mut spacetimedb::ProcedureContext, key: String) -> KvGetResult {
+    ctx.with_tx(|tx| {
+        let value = tx
+            .db
+            .auth_kv()
+            .key()
+            .find(key.clone())
+            .map(|entry| entry.value);
+        KvGetResult { value }
+    })
+}

@@ -1,0 +1,23 @@
+---
+# Add Worker Node to Kubernetes Cluster
+# Usage: ansible-playbook operations/add-worker.yml -e target_host=worker-X
+
+- name: Add worker node (provision, configure, join)
+  # target_host is always passed explicitly at run time (-e target_host=worker-X);
+  # the default exists only so ansible-lint syntax-check can resolve the hosts keyword.
+  hosts: "{{ target_host | default('worker_nodes') }}"
+  gather_facts: false
+  serial: 1
+
+  roles:
+    - role: provision
+    - role: base-system
+    - role: resolv-cleanup
+    - role: sysctl-tuning
+    - role: storage-longhorn
+    - role: ssh-hardening
+    - role: containerd
+    - role: kubernetes
+    - role: worker-join
+    - role: node-labels
+    - role: cloudflare-dns

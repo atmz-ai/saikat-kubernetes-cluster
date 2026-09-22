@@ -1,0 +1,117 @@
+# Kafka Connect cluster for event pipeline sinks
+#
+# Image: custom-built from quay.io/strimzi/kafka:0.50.1-kafka-4.1.1 +
+# Confluent S3 connector JAR. Built by GitHub Actions workflow on changes to
+# docker/kafka-connect-plugins/Dockerfile.
+#
+# Authentication: SASL_PLAINTEXT SCRAM-SHA-512 via spec.authentication — Strimzi
+# injects security.protocol, sasl.mechanism, and sasl.jaas.config automatically
+# for both the worker bootstrap connection and the default consumer/producer config.
+# Do NOT set those in spec.config; the substitution does not work at bootstrap time.
+#
+# EnvVarConfigProvider: uses the Apache Kafka native provider
+# (org.apache.kafka.common.config.provider.EnvVarConfigProvider) so that
+# KafkaConnector configs can reference ${env:VAR_NAME} for S3 credentials.
+# Strimzi's own EnvVarConfigProvider was removed in 0.46.0.
+#
+# 2 replicas for connector task distribution. Pinned to falkenstein nodes
+# (required, not preferred) to colocate with Kafka and the FSN1 S3 bucket.
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaConnect
+metadata:
+  name: connect-cluster
+  namespace: kafka-connect
+  annotations:
+    # Allow KafkaConnector CRs in this namespace to manage connectors.
+    strimzi.io/use-connector-resources: "true"
+    secret.reloader.stakater.com/reload: "connect-credentials"
+spec:
+  replicas: 2
+  # Built by .github/workflows/build-kafka-connect-plugins.yml
+  # Base: quay.io/strimzi/kafka:0.50.1-kafka-4.1.1 + Confluent S3 connector JAR
+  image: ghcr.io/dolr-ai/kafka-connect-plugins:latest
+  bootstrapServers: kafka-cluster-kafka-bootstrap.kafka.svc.cluster.local:9092
+
+  # v1 API top-level fields (replacing deprecated spec.config equivalents)
+  groupId: connect-cluster
+  configStorageTopic: connect-configs
+  offsetStorageTopic: connect-offsets
+  statusStorageTopic: connect-status
+
+  # Strimzi injects security.protocol, sasl.mechanism, and sasl.jaas.config
+  # automatically from this block — do NOT set them in spec.config.
+  authentication:
+    type: scram-sha-512
+    username: kafka-connect
+    passwordSecret:
+      secretName: connect-credentials
+      password: kafka-connect-password
+
+  config:
+    # Apache Kafka native EnvVarConfigProvider — allows connector configs to
+    # reference ${env:VAR_NAME} (e.g. S3 credentials in the S3 sink connector).
+    config.providers: env
+    config.providers.env.class: org.apache.kafka.common.config.provider.EnvVarConfigProvider
+    # Replication for Connect internal topics
+    config.storage.replication.factor: 3
+    offset.storage.replication.factor: 3
+    status.storage.replication.factor: 3
+    offset.flush.interval.ms: 60000
+
+  template:
+    pod:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: topology.kubernetes.io/region
+                    operator: In
+                    values:
+                      - falkenstein
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    strimzi.io/cluster: connect-cluster
+                topologyKey: kubernetes.io/hostname
+    connectContainer:
+      env:
+        # Hetzner S3 credentials for the S3 Sink connector
+        - name: AWS_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: connect-credentials
+              key: aws-access-key-id
+        - name: AWS_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: connect-credentials
+              key: aws-secret-access-key
+
+  metricsConfig:
+    # JMX Prometheus exporter — Strimzi opens port 9404 (named "prometheus") on
+    # each Connect worker pod so Prometheus can scrape connector/task metrics.
+    type: jmxPrometheusExporter
+    valueFrom:
+      configMapKeyRef:
+        name: kafka-connect-metrics-config
+        key: connect-metrics-config.yml
+
+  jvmOptions:
+    # Cap JVM heap at 2 GiB — leaves ~1 GiB headroom within the 3 GiB container
+    # limit for off-heap (direct memory, metaspace, thread stacks, JNI).
+    # Without this, the JVM can expand to fill the container limit and trigger OOM alerts.
+    "-Xmx": "2g"
+    "-Xms": "1g"
+
+  resources:
+    requests:
+      cpu: 500m
+      memory: 2Gi
+    limits:
+      cpu: 2000m
+      memory: 3Gi

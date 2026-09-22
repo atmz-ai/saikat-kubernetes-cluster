@@ -1,0 +1,202 @@
+---
+- name: Clear stale fact cache files for this host
+  ansible.builtin.find:
+    paths: /tmp/ansible_facts
+    patterns: "*{{ inventory_hostname }}*"
+  register: provision_fact_cache_files
+  delegate_to: localhost
+
+- name: Delete stale fact cache files
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ provision_fact_cache_files.files }}"
+  delegate_to: localhost
+
+- name: Clear in-memory facts before reprovisioning
+  ansible.builtin.meta: clear_facts
+
+- name: Set server IP from inventory
+  ansible.builtin.set_fact:
+    provision_server_ip: "{{ ansible_host }}"
+  run_once: true
+
+- name: Display server information
+  ansible.builtin.debug:
+    msg: |
+      ============================================================
+      Provisioning Server: {{ inventory_hostname }}
+      IP Address: {{ provision_server_ip }}
+      ============================================================
+  run_once: true
+
+- name: Provision server (install Ubuntu from Hetzner rescue)
+  run_once: true
+  block:
+    - name: Fetch SSH keys from Hetzner API
+      ansible.builtin.uri:
+        url: "https://robot-ws.your-server.de/key"
+        method: GET
+        user: "{{ hetzner_robot_api_user }}"
+        password: "{{ hetzner_robot_api_password }}"
+        force_basic_auth: true
+        return_content: true
+      register: provision_hetzner_keys_response
+      delegate_to: localhost
+
+    - name: Build SSH key fingerprint mapping
+      ansible.builtin.set_fact:
+        provision_key_fingerprints: "{{ provision_key_fingerprints | default([]) + [item.key.fingerprint] }}"
+      loop: "{{ provision_hetzner_keys_response.json }}"
+      when:
+        - item.key.name | lower in provision_hetzner_ssh_keys or
+          (item.key.name | lower).split() | intersect(provision_hetzner_ssh_keys) | length > 0
+      loop_control:
+        label: "{{ item.key.name }}"
+
+    - name: Fail if SSH keys not found
+      ansible.builtin.fail:
+        msg: "Required SSH keys not found in Hetzner account. Please add: {{ provision_hetzner_ssh_keys }}"
+      when: provision_key_fingerprints is not defined or provision_key_fingerprints | length == 0
+
+    - name: Display SSH keys to be used
+      ansible.builtin.debug:
+        msg: "Using {{ provision_key_fingerprints | length }} SSH keys for rescue mode"
+
+    - name: Build authorized_key query string
+      ansible.builtin.set_fact:
+        provision_authorized_keys_query: "{{ provision_key_fingerprints | map('regex_replace', '^(.*)$', 'authorized_key[]=\\1') | join('&') }}"
+
+    - name: Activate rescue mode
+      ansible.builtin.uri:
+        url: "https://robot-ws.your-server.de/boot/{{ provision_server_ip }}/rescue?{{ provision_authorized_keys_query }}"
+        method: POST
+        user: "{{ hetzner_robot_api_user }}"
+        password: "{{ hetzner_robot_api_password }}"
+        force_basic_auth: true
+        body_format: form-urlencoded
+        body:
+          os: linux
+          arch: 64
+        return_content: true
+      register: provision_rescue_response
+      delegate_to: localhost
+
+    - name: Display rescue mode activation
+      ansible.builtin.debug:
+        msg: "✅ Rescue mode activated for {{ provision_server_ip }}"
+
+    - name: Trigger hardware reset
+      ansible.builtin.uri:
+        url: "https://robot-ws.your-server.de/reset/{{ provision_server_ip }}"
+        method: POST
+        user: "{{ hetzner_robot_api_user }}"
+        password: "{{ hetzner_robot_api_password }}"
+        force_basic_auth: true
+        body_format: form-urlencoded
+        body:
+          type: hw
+        status_code: [200, 201]
+      register: provision_reset_response
+      delegate_to: localhost
+
+    - name: Wait for server to boot into rescue mode
+      ansible.builtin.wait_for:
+        host: "{{ provision_server_ip }}"
+        port: 22
+        delay: 30
+        timeout: 300
+        state: started
+      delegate_to: localhost
+
+    - name: Verify rescue system is booted
+      ansible.builtin.shell: |
+        ssh -i {{ ansible_private_key_file }} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 \
+          root@{{ provision_server_ip }} \
+          "test -f /root/.oldroot/nfs/install/installimage && echo 'rescue_ready'"
+      register: provision_rescue_check
+      retries: 12
+      delay: 5
+      until: provision_rescue_check.stdout == 'rescue_ready'
+      changed_when: false
+      delegate_to: localhost
+
+    - name: Detect drive type
+      ansible.builtin.shell: |
+        ssh -i {{ ansible_private_key_file }} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+          root@{{ provision_server_ip }} \
+          "lsblk -d -o NAME 2>/dev/null"
+      register: provision_drive_list
+      changed_when: false
+      delegate_to: localhost
+
+    - name: Determine drive to use
+      ansible.builtin.set_fact:
+        provision_drive_to_use: "{{ 'nvme0n1' if 'nvme0n1' in provision_drive_list.stdout else 'sda' }}"
+
+    - name: Display drive information
+      ansible.builtin.debug:
+        msg: "Detected drive type: {{ provision_drive_to_use }}"
+
+    - name: Copy installation script to rescue system
+      ansible.builtin.shell: |
+        scp -i {{ ansible_private_key_file }} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+          {{ role_path }}/files/init.sh \
+          root@{{ provision_server_ip }}:/root/init.sh
+      changed_when: true
+      delegate_to: localhost
+
+    - name: Run Ubuntu installation script
+      ansible.builtin.shell: |
+        ssh -i {{ ansible_private_key_file }} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+          root@{{ provision_server_ip }} \
+          "MACHINE_HOSTNAME='{{ inventory_hostname }}' \
+          DRIVE_TO_USE='{{ provision_drive_to_use }}' \
+          OS_PARTITION_SIZE='{{ provision_os_partition_size }}' \
+          bash /root/init.sh"
+      register: provision_install_output
+      failed_when: false
+      changed_when: true
+      delegate_to: localhost
+
+    - name: Check installation success
+      ansible.builtin.fail:
+        msg: "Installation failed - INSTALLATION COMPLETE marker not found"
+      when: "'INSTALLATION COMPLETE' not in provision_install_output.stdout"
+
+    - name: Reboot server into Ubuntu
+      ansible.builtin.shell: |
+        ssh -i {{ ansible_private_key_file }} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+          root@{{ provision_server_ip }} "reboot" || true
+      changed_when: true
+      delegate_to: localhost
+
+    - name: Wait for server to reboot
+      ansible.builtin.wait_for:
+        host: "{{ provision_server_ip }}"
+        port: 22
+        delay: 60
+        timeout: 600
+        state: started
+      delegate_to: localhost
+
+    - name: Verify Ubuntu is running
+      ansible.builtin.shell: |
+        set -o pipefail
+        ssh -i {{ ansible_private_key_file }} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 \
+          root@{{ provision_server_ip }} \
+          "cat /etc/os-release | grep Ubuntu"
+      args:
+        # pipefail is bash-only; the shell module defaults to /bin/sh
+        # (dash) which rejects it. Runs on the CI/local controller, where
+        # /bin/sh is also dash on Ubuntu runners.
+        executable: /bin/bash
+      register: provision_ubuntu_check
+      retries: 24
+      delay: 5
+      until: provision_ubuntu_check.rc == 0
+      delegate_to: localhost
+      changed_when: false
+
+- name: Refresh facts after OS reinstall
+  ansible.builtin.setup:

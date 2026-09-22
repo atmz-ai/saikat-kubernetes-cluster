@@ -1,0 +1,71 @@
+# Ansible
+*.retry
+.vault_pass
+ansible/.vault_pass
+ansible/group_vars/all/.vault_pass
+# Collections installed into workspace path - generated, do not commit
+ansible/collections/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+# Python venv managed by mise (tasks.bootstrap)
+.venv/
+# Build artefact of `pip install -e .` (tasks.bootstrap / fleet-bootstrap), which
+# makes the root pyproject.toml an editable install in each venv. Regenerated on
+# every bootstrap, so it must never be committed.
+*.egg-info/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# fnox local overrides (secrets, machine-specific)
+fnox.local.toml
+
+# Saikat machine-access SSH private key (extracted from Ansible vault by mise run bootstrap)
+.saikat-machine-access-ed25519
+
+# Generated .env (one-off from fnox export, e.g. yral-auth-image-run)
+.env
+
+# pitchfork local overrides (machine-specific)
+pitchfork.local.toml
+
+# mise local overrides (secrets, machine-specific)
+mise.local.toml
+
+# yral-ios — Xcode build artifacts and per-user IDE state (never commit)
+apps/yral-ios/build/
+apps/yral-ios/private_keys/
+apps/yral-ios/iosApp.xcodeproj/xcuserdata/
+apps/yral-ios/iosApp.xcodeproj/project.xcworkspace/xcuserdata/
+apps/yral-ios/packages/YralApp/.build/
+apps/yral-ios/packages/YralApp/.swiftpm/
+apps/yral-ios/DerivedData/
+# Firebase config — contains the GCP API key (secret-scanning). Injected
+# from fnox at build time (YRAL_IOS_FIREBASE_PLIST_BASE64).
+apps/yral-ios/iosApp/GoogleService-Info.plist
+
+# Temporary files
+*.log
+*.tmp
+/tmp/
+target/
+dist/
+
+# cargo-leptos regenerates this at the repo root on every build (a
+# repo-root relative copy of the per-app configs). It was deliberately
+# removed in 404720d6; the build recreates it, so ignore it rather than
+# let it be re-committed each time a Leptos build runs.
+/tailwind.config.js
+
+spacetime.local.json
+*.pem
+.build

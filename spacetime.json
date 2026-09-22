@@ -1,0 +1,14 @@
+{
+  "dev": {
+    "run": ""
+  },
+  "generate": [
+    {
+      "out-dir": "./apps/yral-database-spacetime/bindings/src/generated",
+      "language": "rust"
+    }
+  ],
+  "server": "maincloud",
+  "database": "yral-database-spacetime-4lbo7",
+  "module-path": "./apps/yral-database-spacetime"
+}

@@ -1,0 +1,248 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: kube-prometheus-stack
+  namespace: monitoring
+  annotations:
+    # Force new generation to retry upgrade after Grafana alerting-rules YAML fix
+    retrigger: "grafana-alerting-yaml-fix"
+spec:
+  interval: 1h
+  chart:
+    spec:
+      chart: kube-prometheus-stack
+      version: "91.4.1"
+      sourceRef:
+        kind: HelmRepository
+        name: prometheus-community
+        namespace: monitoring
+  timeout: 10m
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    # kube-proxy is replaced by Cilium (kubeProxyReplacement: true,
+    # kubeadm --skip-phases=addon/kube-proxy). There is no kube-proxy
+    # DaemonSet and never will be — the chart's default kube-proxy Service/
+    # ServiceMonitor/KubeProxyDown rule would fire forever (empty endpoints).
+    kubeProxy:
+      enabled: false
+    defaultRules:
+      rules:
+        kubeProxy: false
+      # Per-rule disable (NOT the rules.etcd group kill-switch): only
+      # etcdMemberCommunicationSlow is replaced — the chart's customRules
+      # only override for/severity, not the 150ms expression, and this
+      # cluster's two-DC etcd makes 150ms fire forever on the ~200ms
+      # inter-DC baseline. Redeclared at 400ms in
+      # additionalPrometheusRulesMap.etcd-cross-dc-tuning below; the other
+      # etcd alerts (MembersDown, NoLeader, FailedProposals, …) stay on
+      # their defaults.
+      disabled:
+        etcdMemberCommunicationSlow: true
+    # etcd scraping: the loopback-only :2381 metrics port is unreachable from
+    # Prometheus (nodes have public IPs only, no private LAN). Scrape the
+    # existing mTLS-protected client port :2379 instead — the same surface the
+    # API servers already use. TLS material comes from the etcd-client-cert
+    # Secret (kubernetes.io/tls type with ca.crt/tls.crt/tls.key), created by
+    # the control-plane-metrics Ansible role from kubeadm's healthcheck client
+    # certificate. serverName stays empty: Prometheus then verifies the
+    # presented cert against the scrape URL host (the node IP), which kubeadm
+    # includes in every etcd server cert's SANs.
+    kubeEtcd:
+      service:
+        port: 2379
+        targetPort: 2379
+      serviceMonitor:
+        scheme: https
+        # TLS material MUST live under `tlsConfig`, and as SECRET REFERENCES —
+        # the chart template renders only `.Values.kubeEtcd.serviceMonitor.tlsConfig`
+        # (see templates/exporters/kube-etcd/servicemonitor.yaml), so keys at
+        # this level are silently DROPPED. Declaring caFile/certFile/keyFile
+        # here produced a ServiceMonitor with nothing but
+        # `insecureSkipVerify: false`, Prometheus had no CA to verify the etcd
+        # server cert against, and every one of the 7 targets failed with
+        # "x509: certificate signed by unknown authority" — which surfaced as
+        # TargetDown + etcdMembersDown + etcdInsufficientMembers ("members are
+        # down (7)", "insufficient members (0)") on a cluster whose etcd was
+        # entirely healthy. The alerts were reporting a broken SCRAPE, not a
+        # broken etcd.
+        #
+        # The etcd-client-cert Secret (kubernetes.io/tls: ca.crt/tls.crt/
+        # tls.key) is created by the control-plane-metrics Ansible role from
+        # kubeadm's healthcheck client certificate.
+        #
+        # serverName stays empty: Prometheus then verifies the presented cert
+        # against the scrape URL host (the node IP), which kubeadm includes in
+        # every etcd server cert's SANs.
+        tlsConfig:
+          insecureSkipVerify: false
+          serverName: ""
+          # NOTE the asymmetric shapes — this is the operator's API, not ours:
+          # `ca` and `cert` are SecretOrConfigMap (wrapped in `secret:`), but
+          # `keySecret` is a bare SecretKeySelector (name/key at this level).
+          # Nesting keySecret under `secret:` fails admission with
+          # "spec.endpoints[0].tlsConfig.keySecret.key: Required value".
+          ca:
+            secret:
+              name: etcd-client-cert
+              key: ca.crt
+          cert:
+            secret:
+              name: etcd-client-cert
+              key: tls.crt
+          keySecret:
+            name: etcd-client-cert
+            key: tls.key
+
+    # etcdMemberCommunicationSlow threshold override — DOCUMENTED DEVIATION
+    # from the chart default (150ms/10m): this cluster's etcd spans two DCs
+    # by design (5 CP in Helsinki + 2 in Falkenstein; AGENTS.md "Kubernetes
+    # Cluster"), so every member's peer RTT includes inter-DC latency.
+    # Observed steady-state p99: ~200ms (verified 3-day history, 2026-09-07);
+    # the default fired continuously for 3 days on healthy cross-DC traffic.
+    #
+    # THE CHECK STAYS ACTIVE: the chart hardcodes >0.15 in the expression
+    # (customRules only tune for/severity), so the chart's 150ms copy is
+    # disabled via defaultRules.disabled and the SAME alert is redeclared
+    # below — identical expression, for, and severity; only 0.15 → 0.4.
+    # 400ms (2x the observed baseline) still catches real regressions
+    # (packet loss, route flaps, cross-DC congestion typically push RTT
+    # to 500ms+ or timeouts) while keeping the baseline quiet.
+    additionalPrometheusRulesMap:
+      etcd-cross-dc-tuning:
+        groups:
+          - name: etcd-cross-dc
+            rules:
+              - alert: etcdMemberCommunicationSlow
+                expr: histogram_quantile(0.99, rate(etcd_network_peer_round_trip_time_seconds_bucket{job=~".*etcd.*"}[5m])) > 0.4
+                for: 10m
+                labels:
+                  severity: warning
+                annotations:
+                  summary: "etcd peer communication slow (cross-DC cluster)"
+                  description: "p99 peer RTT to member {{ $labels.To }} above 400ms for 10m — the two-DC baseline is ~200ms; sustained 400ms+ indicates a real network regression, not inter-DC latency."
+
+    grafana:
+      # Inject Google Chat webhook URL as an env var so the alerting
+      # provisioning ConfigMap can reference it as $GOOGLE_CHAT_WEBHOOK_URL.
+      envFromSecret: "monitoring-google-chat-secrets"
+
+      # Auth proxy: oauth2-proxy handles authentication.
+      # Grafana trusts X-Auth-Request-Email header forwarded by oauth2-proxy.
+      # The login form and basic auth are disabled — no admin password needed.
+      grafana.ini:
+        server:
+          # Required: Grafana uses root_url for post-login redirects.
+          # Without this, auth.proxy sign-in redirects to a blank domain and loops back to /login.
+          root_url: https://grafana.yral.com
+        users:
+          # All users who reach Grafana are already gated by the developer-admin Google group
+          # via oauth2-proxy, so auto-assigning Admin is appropriate.
+          auto_assign_org_role: Admin
+        auth.proxy:
+          enabled: true
+          # oauth2-proxy --pass-user-headers=true forwards X-Forwarded-Email to the upstream.
+          # (--set-xauthrequest only sets X-Auth-Request-* on the response, not the upstream request)
+          header_name: X-Forwarded-Email
+          header_property: email
+          auto_sign_up: true
+        auth:
+          disable_login_form: true
+        auth.basic:
+          enabled: false
+
+      # Disable default admin secret — login is disabled anyway.
+      admin:
+        existingSecret: ""
+        userKey: ""
+        passwordKey: ""
+
+      # No persistent storage — dashboards and datasources come from ConfigMaps.
+      persistence:
+        enabled: false
+
+      # Stakater Reloader watches this Deployment and rolls it when any referenced
+      # ConfigMap or Secret changes (e.g. the grafana-datasource ConfigMap).
+      # skipReload stops the sidecar from POSTing to Grafana's reload API (which
+      # always 401s because basic auth is disabled); Reloader restarts the pod instead.
+      podAnnotations:
+        reloader.stakater.com/auto: "true"
+        # Explicitly list the sidecar-discovered alert ConfigMaps so Reloader restarts
+        # the pod when they change. The alerts sidecar cannot call the reload API
+        # (basic auth is disabled), so pod restart is the correct reload mechanism.
+        configmap.reloader.stakater.com/reload: "grafana-alerting-contact-point,grafana-alerting-notification-policy,grafana-alerting-rules-resource-saturation"
+
+      sidecar:
+        # Watches ConfigMaps labelled grafana_alert="1" and loads them as Grafana
+        # unified alerting provisioning (contact points, notification policies, rules).
+        alerts:
+          enabled: true
+          label: grafana_alert
+          labelValue: "1"
+          # Skip the reload API call (always 401s — basic auth disabled).
+          # Reloader restarts the pod instead when alert ConfigMaps change.
+          skipReload: true
+        datasources:
+          skipReload: true
+
+      resources:
+        requests:
+          cpu: 100m
+          memory: 256Mi
+        limits:
+          cpu: 500m
+          memory: 512Mi
+
+      # Loki datasource — populated once the infrastructure-loki Kustomization is ready
+      additionalDataSources:
+        - name: Loki
+          type: loki
+          url: http://loki.loki.svc.cluster.local:3100
+          access: proxy
+
+    prometheus:
+      prometheusSpec:
+        # etcd client certificate for scraping etcd :2379 (see kubeEtcd above).
+        # Mounted at /etc/prometheus/secrets/etcd-client-cert/.
+        secrets:
+          - etcd-client-cert
+        # 15-day retention, matches default; adjust as needed.
+        retention: 15d
+        # Hard size cap: discard oldest blocks before hitting the filesystem
+        # limit. Set to ~90% of PVC to leave headroom for in-progress blocks.
+        retentionSize: 90GB
+
+        # Store metrics on a PVC (btrfs subvolume on the node).
+        storageSpec:
+          volumeClaimTemplate:
+            spec:
+              # Single replica (default): no in-cluster HA, but Longhorn 2-replica
+              # provides durable storage at the volume level. Prometheus is not
+              # stateful enough to warrant a second replica — 15d retention is expendable.
+              storageClassName: longhorn
+              accessModes: ["ReadWriteOnce"]
+              resources:
+                requests:
+                  storage: 100Gi
+
+        resources:
+          requests:
+            cpu: 200m
+            memory: 2Gi
+          limits:
+            cpu: 1000m
+            memory: 8Gi
+
+    alertmanager:
+      alertmanagerSpec:
+        useExistingSecret: true
+        configSecret: alertmanager-config
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 256Mi
+

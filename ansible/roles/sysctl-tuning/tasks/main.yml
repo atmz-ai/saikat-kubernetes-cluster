@@ -1,0 +1,31 @@
+---
+# Write and apply kernel sysctl tuning required for Kubernetes nodes.
+# This role is idempotent — re-running it is safe and a no-op if already applied.
+
+- name: Write sysctl tuning config
+  ansible.builtin.copy:
+    dest: /etc/sysctl.d/99-kubernetes-tuning.conf
+    content: |
+      # Increase inotify limits to prevent "too many open files" errors
+      # in kubelet, containerd, and pod workloads on busy nodes.
+      #
+      # max_user_instances: max number of inotify fd's a single user can hold
+      # open simultaneously across the whole node. All Kubernetes components
+      # (kubelet, containerd-shim, cilium-agent) run as root and share this
+      # counter. kubelet opens ~40+ instances per pod (secrets, configmaps,
+      # serviceaccount tokens, log paths). At 14+ pods per node the default
+      # of 128 and even 512 are exhausted, producing EMFILE ("too many open
+      # files") for any new fsnotify watcher. 8192 gives ample headroom for
+      # 100+ pods per node across all root processes.
+      #
+      # max_user_watches: max total filesystem paths one user can watch.
+      # 524288 is sufficient for current workloads.
+      fs.inotify.max_user_instances = 8192
+      fs.inotify.max_user_watches   = 524288
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Apply sysctl tuning
+  ansible.builtin.command: sysctl -p /etc/sysctl.d/99-kubernetes-tuning.conf
+  changed_when: true

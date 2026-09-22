@@ -1,0 +1,13 @@
+---
+# Names of the SSH keys as registered in the Hetzner Robot account — the
+# provision role looks them up by NAME via the Robot API to fetch their
+# fingerprints and authorize them in rescue mode. These are Hetzner account
+# labels, NOT the key's own comment field. The saikat-machine-access key must be
+# registered in the Hetzner Robot account under the name "saikat-machine-access".
+provision_hetzner_ssh_keys:
+  - "saikat-machine-access"
+  - "saikatdas0790@gmail.com"
+
+# OS partition size — use full disk for all nodes. Longhorn stores its data
+# files on the btrfs filesystem (expanded to both NVMe drives via RAID0).
+provision_os_partition_size: "all"

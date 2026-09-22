@@ -1,0 +1,150 @@
+---
+- name: Check if Kubernetes is already initialized
+  ansible.builtin.stat:
+    path: /etc/kubernetes/admin.conf
+  register: kubeconfig_stat
+
+- name: Determine if this is the first control plane
+  ansible.builtin.set_fact:
+    is_first_control_plane: "{{ ansible_facts['hostname'] == groups['control_plane'][0] }}"
+
+- name: Validate this is the first control plane
+  ansible.builtin.assert:
+    that:
+      - is_first_control_plane
+    fail_msg: |
+      This role (cluster-init) is for initializing the FIRST control plane only.
+      If this is an additional control plane, use 'control-plane-join' role instead.
+      Current state:
+        - Is first control plane: {{ is_first_control_plane }}
+        - kubeconfig exists: {{ kubeconfig_stat.stat.exists }}
+    success_msg: "Validated: This is the first control plane node"
+
+# If admin.conf already exists, check whether the cluster is actually healthy by
+# probing the API server on the node's own IP.
+# If the probe fails the previous kubeadm init was partial
+# and we must reset before re-trying.
+- name: Probe API server on node IP to detect partial init
+  ansible.builtin.wait_for:
+    host: "{{ ansible_host }}"
+    port: 6443
+    timeout: 10
+  register: api_probe
+  when: kubeconfig_stat.stat.exists
+  ignore_errors: true
+
+- name: Reset partial kubeadm init (admin.conf exists but API server unreachable)
+  ansible.builtin.command: kubeadm reset --force
+  changed_when: true   # kubeadm reset always tears down and rewrites state
+  when:
+    - kubeconfig_stat.stat.exists
+    - api_probe is defined
+    - api_probe.failed | default(false)
+
+- name: Remove stale admin.conf after reset
+  ansible.builtin.file:
+    path: /etc/kubernetes/admin.conf
+    state: absent
+  when:
+    - kubeconfig_stat.stat.exists
+    - api_probe is defined
+    - api_probe.failed | default(false)
+
+# Re-check state after potential reset
+- name: Re-check if Kubernetes is initialized
+  ansible.builtin.stat:
+    path: /etc/kubernetes/admin.conf
+  register: kubeconfig_stat_after_reset
+
+- name: Initialize first control plane node
+  when: not kubeconfig_stat_after_reset.stat.exists
+  block:
+    - name: Render shared kubeadm ClusterConfiguration template
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../../manifests/kubeadm-cluster-configuration.yaml.j2"
+        dest: /etc/kubernetes/kubeadm-cluster-configuration.yaml
+        mode: "0600"
+
+    - name: Run kubeadm init with declarative config
+      ansible.builtin.command: >
+        kubeadm init
+        --config /etc/kubernetes/kubeadm-cluster-configuration.yaml
+        --skip-phases=addon/kube-proxy
+        --upload-certs
+      register: kubeadm_init
+      changed_when: true
+
+    - name: Display kubeadm init output
+      ansible.builtin.debug:
+        msg: "{{ kubeadm_init.stdout_lines }}"
+
+    - name: Save join commands
+      ansible.builtin.copy:
+        content: "{{ kubeadm_init.stdout }}"
+        dest: /root/kubeadm-init-output.txt
+        mode: "0600"
+
+    - name: Extract control plane join command
+      ansible.builtin.shell: |
+        set -o pipefail && grep -A 2 "kubeadm join" /root/kubeadm-init-output.txt | \
+        grep -A 2 "control-plane" | tr -d '\n' | sed 's/\\//g'
+      args:
+        executable: /bin/bash
+      register: control_plane_join_cmd
+      changed_when: false
+
+    - name: Extract worker join command
+      ansible.builtin.shell: |
+        set -o pipefail && grep "kubeadm join" /root/kubeadm-init-output.txt | \
+        grep -v "control-plane" | tr -d '\n' | sed 's/\\//g'
+      args:
+        executable: /bin/bash
+      register: worker_join_cmd
+      changed_when: false
+
+    - name: Save join commands to variables
+      ansible.builtin.set_fact:
+        control_plane_join_command: "{{ control_plane_join_cmd.stdout }}"
+        worker_join_command: "{{ worker_join_cmd.stdout }}"
+
+    - name: Save join commands to file
+      ansible.builtin.copy:
+        content: |
+          # Control Plane Join Command
+          {{ control_plane_join_command }}
+
+          # Worker Join Command
+          {{ worker_join_command }}
+        dest: /root/kubeadm-join-commands.txt
+        mode: "0600"
+
+    - name: Display initialization summary
+      ansible.builtin.debug:
+        msg:
+          - "✅ Kubernetes control plane initialized successfully"
+          - "✅ Control plane endpoint: {{ control_plane_endpoint }}:6443"
+          - "✅ Pod network CIDR: {{ pod_network_cidr }}"
+          - "✅ kube-proxy skipped (Cilium will replace it)"
+          - "✅ Controller-manager/scheduler metrics bind 0.0.0.0 (declarative extraArgs)"
+          - ""
+          - "Join commands saved to /root/kubeadm-join-commands.txt"
+          - ""
+          - "Next steps:"
+          - "1. Install Cilium CNI (cilium role)"
+          - "2. Join remaining control plane nodes using control-plane-join role"
+          - "3. Join worker nodes using worker-join role"
+
+# Run unconditionally — ensures .kube/config is always present regardless of
+# whether kubeadm init ran this play or the partial-reset recovery path was taken.
+- name: Create .kube directory for root
+  ansible.builtin.file:
+    path: /root/.kube
+    state: directory
+    mode: "0755"
+
+- name: Copy admin.conf to .kube/config
+  ansible.builtin.copy:
+    src: /etc/kubernetes/admin.conf
+    dest: /root/.kube/config
+    remote_src: true
+    mode: "0600"

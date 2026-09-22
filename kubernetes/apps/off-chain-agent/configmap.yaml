@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: off-chain-agent-config
+  namespace: off-chain-agent
+data:
+  RUST_LOG: "info"

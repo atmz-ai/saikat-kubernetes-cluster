@@ -1,0 +1,19 @@
+# my-website Service — ClusterIP.
+#
+# DNS records for saikat.dev are managed declaratively via DNSEndpoint CRDs
+# in kubernetes/infrastructure/external-dns/dnsendpoint-saikat-dev.yaml.
+# No external-dns annotation needed — ExternalDNS uses --source=crd only.
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-website
+  namespace: my-website
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8080
+      targetPort: 8080
+      name: http
+  selector:
+    app: my-website

@@ -1,0 +1,2 @@
+# The dashboard-html ConfigMap is generated from index.html via configMapGenerator in kustomization.yaml.
+# Edit index.html directly — do not add this file back to kustomization resources.

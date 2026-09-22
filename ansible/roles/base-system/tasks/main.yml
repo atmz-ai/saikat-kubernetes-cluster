@@ -1,0 +1,93 @@
+---
+# Base System Setup and Updates
+# This role performs initial system configuration including updates,
+# unattended-upgrades, and system cleanup
+
+- name: Update apt cache
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Perform full system upgrade
+  ansible.builtin.apt:
+    upgrade: full
+    autoremove: true
+    autoclean: true
+  register: upgrade_result
+
+- name: Install base system packages
+  ansible.builtin.apt:
+    name:
+      - unattended-upgrades
+      # cryptsetup provides LUKS2/dm_crypt for Longhorn encrypted volumes.
+      # Required on all worker nodes that run Longhorn instance-manager pods.
+      - cryptsetup
+    state: present
+
+- name: Configure unattended-upgrades
+  ansible.builtin.debconf:
+    name: unattended-upgrades
+    question: unattended-upgrades/enable_auto_updates
+    value: "true"
+    vtype: boolean
+
+- name: Reconfigure unattended-upgrades
+  ansible.builtin.command: dpkg-reconfigure --priority=low unattended-upgrades
+  args:
+    creates: /etc/apt/apt.conf.d/20auto-upgrades
+
+- name: Remove unnecessary packages
+  ansible.builtin.apt:
+    autoremove: true
+    purge: true
+
+- name: Verify hostname
+  ansible.builtin.debug:
+    msg: "Current hostname: {{ ansible_facts['hostname'] }}"
+
+- name: Display system information
+  ansible.builtin.debug:
+    msg:
+      - "OS: {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }}"
+      - "Kernel: {{ ansible_facts['kernel'] }}"
+      - "Architecture: {{ ansible_facts['architecture'] }}"
+
+- name: Display upgrade results
+  ansible.builtin.debug:
+    msg: "System upgrade completed. Changed: {{ upgrade_result.changed }}"
+
+- name: Check if reboot is required
+  ansible.builtin.stat:
+    path: /var/run/reboot-required
+  register: reboot_required_stat
+
+- name: Display reboot status
+  ansible.builtin.debug:
+    msg: "System reboot: {{ 'REQUIRED' if reboot_required_stat.stat.exists else 'NOT required' }}"
+
+- name: Reboot system if required
+  when: reboot_required_stat.stat.exists
+  block:
+    - name: Display reboot message
+      ansible.builtin.debug:
+        msg: "Rebooting {{ inventory_hostname }} to apply system updates..."
+
+    - name: Initiate system reboot
+      ansible.builtin.reboot:
+        msg: "System rebooting for kernel/system updates"
+        connect_timeout: 5
+        reboot_timeout: 600
+        pre_reboot_delay: 5
+        post_reboot_delay: 30
+
+    - name: Verify system is back online
+      ansible.builtin.debug:
+        msg: "✅ {{ inventory_hostname }} rebooted successfully and is back online"
+
+# Mask rpcbind/portmapper so it cannot be started by any means.
+# rpcbind is pulled in as a dependency of nfs-common (required for Longhorn RWX),
+# but is NOT needed for NFSv4.1 — which is what Longhorn uses exclusively.
+# Leaving it running exposes port 111 tcp/udp on all interfaces, a well-known
+# DDoS reflection/amplification vector.
+- name: Mask rpcbind to prevent portmapper exposure
+  ansible.builtin.include_tasks: mask-rpcbind.yml

@@ -1,0 +1,80 @@
+# Let's Encrypt ClusterIssuers
+#
+# Two issuers:
+#   letsencrypt-staging  — use while testing; no rate limits, certs are untrusted
+#   letsencrypt-prod     — use for real services; browser-trusted, strict rate limits
+#
+# DNS-01 challenge flow (two solvers):
+#
+#   1. RFC2136 (self-hosted DNS): cert-manager sends TSIG-signed dynamic updates
+#      to PowerDNS to create _acme-challenge TXT records. Used for saikat.dev
+#      and yral.com (self-hosted zones). Supports wildcards.
+#      TSIG key: rfc2136-tsig-secret in cert-manager namespace.
+#
+#   2. Cloudflare (legacy): cert-manager calls the Cloudflare API to create
+#      _acme-challenge TXT records. Used for yral.com until the NS switch to
+#      self-hosted DNS is complete (Phase 2). Will be removed after migration.
+#      Cloudflare API token: cloudflare-api-token in cert-manager namespace.
+#
+# cert-manager tries solvers in order — RFC2136 first, then Cloudflare fallback.
+# The RFC2136 solver only matches domains PowerDNS is authoritative for (via
+# the nameserver field). Cloudflare solver handles everything else.
+#
+# Switching from staging to prod:
+#   1. Change cert-manager.io/cluster-issuer annotation on Gateway to letsencrypt-prod
+#   2. Delete the TLS Secret so cert-manager re-issues it
+#   3. cert-manager requests a prod cert automatically
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-staging
+spec:
+  acme:
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    email: infra@yral.com
+    privateKeySecretRef:
+      name: letsencrypt-staging-account-key
+    solvers:
+      # RFC2136 — self-hosted PowerDNS (saikat.dev, yral.com)
+      - dns01:
+          rfc2136:
+            nameserver: powerdns-dns.external-dns.svc.cluster.local:53
+            tsigKeyName: saikat-dev-key
+            tsigAlgorithm: HMACSHA512
+            tsigSecretSecretRef:
+              name: rfc2136-tsig-secret
+              key: tsig-key
+      # Cloudflare — legacy fallback (yral.com until NS switch complete)
+      - dns01:
+          cloudflare:
+            apiTokenSecretRef:
+              name: cloudflare-api-token
+              key: api-token
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: infra@yral.com
+    privateKeySecretRef:
+      name: letsencrypt-prod-account-key
+    solvers:
+      # RFC2136 — self-hosted PowerDNS (saikat.dev, yral.com)
+      - dns01:
+          rfc2136:
+            nameserver: powerdns-dns.external-dns.svc.cluster.local:53
+            tsigKeyName: saikat-dev-key
+            tsigAlgorithm: HMACSHA512
+            tsigSecretSecretRef:
+              name: rfc2136-tsig-secret
+              key: tsig-key
+      # Cloudflare — legacy fallback (yral.com until NS switch complete)
+      - dns01:
+          cloudflare:
+            apiTokenSecretRef:
+              name: cloudflare-api-token
+              key: api-token

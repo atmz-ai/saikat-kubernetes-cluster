@@ -1,0 +1,129 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: harbor
+  namespace: harbor
+spec:
+  interval: 30m
+  timeout: 10m
+  install:
+    crds: Create
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  chart:
+    spec:
+      chart: harbor
+      version: "1.19.2"
+      sourceRef:
+        kind: HelmRepository
+        name: harbor
+        namespace: harbor
+  values:
+    externalURL: https://harbor.yral.com
+    
+    # Expose core service internally for oauth2-proxy backend
+    expose:
+      type: clusterIP
+      tls:
+        enabled: false
+        certSource: none
+        auto:
+          commonName: harbor.yral.com
+      core:
+        servicePort: 80
+    
+    # Disable Harbor's built-in auth — oauth2-proxy provides authentication
+    # oauth2-proxy will handle authz/authn before reaching Harbor core
+    
+    # Storage backend for images
+    persistence:
+      enabled: true
+      resourceName: registry
+      storageClass: "longhorn"
+      persistentVolumeClaim:
+        registry:
+          size: 50Gi
+        jobservice:
+          size: 10Gi
+        redis:
+          size: 5Gi
+    
+    # Disable components not needed for temporary app registry
+    chartmuseum:
+      enabled: false
+    notary:
+      enabled: false
+    trivy:
+      enabled: false
+
+    # Harbor only templates updateStrategy.type for these PVC-backed Deployments.
+    # Use Recreate so the old pod releases the RWO volume before the new pod starts.
+    updateStrategy:
+      type: Recreate
+
+    # Core Harbor settings
+    # podAnnotations trigger a restart when changed — Harbor core needs to
+    # re-run schema migrations on the fresh DB (recreated after purge).
+    core:
+      replicas: 1
+      podAnnotations:
+        restart-trigger: "db-password-rotation"
+      resources:
+        requests:
+          cpu: 100m
+          memory: 512Mi
+        limits:
+          cpu: 500m
+          memory: 1Gi
+    
+    registry:
+      replicas: 1
+      resources:
+        requests:
+          cpu: 50m
+          memory: 256Mi
+        limits:
+          cpu: 500m
+          memory: 512Mi
+    
+    jobservice:
+      replicas: 1
+      podAnnotations:
+        restart-trigger: "db-password-rotation"
+      resources:
+        requests:
+          cpu: 50m
+          memory: 256Mi
+        limits:
+          cpu: 500m
+          memory: 512Mi
+    
+    database:
+      type: external
+      external:
+        host: harbor-db-rw.harbor.svc
+        port: "5432"
+        username: postgres
+        coreDatabase: registry
+        existingSecret: harbor-db-superuser
+        sslmode: disable
+    
+    redis:
+      type: internal
+  
+  valuesFrom:
+    # Admin password lives in harbor-admin-secret.sops.yaml (SOPS-encrypted).
+    # When the Harbor admin password or robot account credentials change, update ALL:
+    #   1. kubernetes/infrastructure/harbor/harbor-admin-secret.sops.yaml  (admin password)
+    #   2. kubernetes/apps/<app>/harbor-pull-secret.sops.yaml             (robot creds, per-app)
+    #      — yral-auth, yral-web, yral-metadata, off-chain-agent, my-website
+    #   3. kubernetes/apps/yral-auth/harbor-scan-secret.sops.yaml         (robot creds, Flux image scan)
+    #   4. kubernetes/apps/yral-metadata/harbor-scan-secret.sops.yaml      (robot creds, Flux image scan)
+    # Use: mise run sops-decrypt <file> / mise run sops-encrypt <file>
+    - kind: Secret
+      name: harbor-secrets
+      valuesKey: admin-password
+      targetPath: harborAdminPassword

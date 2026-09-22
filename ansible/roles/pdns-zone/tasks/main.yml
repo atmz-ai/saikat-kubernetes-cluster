@@ -1,0 +1,39 @@
+# Generate DNSEndpoint CRD YAML from hosts.yml inventory.
+#
+# Runs on localhost. Reads hostvars from the inventory (no SSH to nodes).
+# Workers with `namecheap_nameserver` defined become nameservers in the zone.
+# All nodes (workers + control planes) are included in the domain A records.
+#
+# Variables (from playbook):
+#   pdns_zone_name: the domain name (e.g. "saikat.dev")
+#
+# Usage:
+#   ansible-playbook ansible/playbooks/operations/update-pdns-zones.yml -e pdns_zone_name=saikat.dev
+
+- name: Initialize nameserver list
+  ansible.builtin.set_fact:
+    pdns_nameservers: []
+
+- name: Add each worker to nameserver list
+  ansible.builtin.set_fact:
+    pdns_nameservers: "{{ pdns_nameservers + [{'prefix': hostvars[item].namecheap_nameserver, 'ip': hostvars[item].ansible_host}] }}"
+  loop: "{{ groups['worker_nodes'] }}"
+  when: hostvars[item].namecheap_nameserver is defined
+
+- name: Display nameserver list
+  ansible.builtin.debug:
+    var: pdns_nameservers
+
+- name: Collect all node IPs (workers + control planes)
+  ansible.builtin.set_fact:
+    pdns_all_node_ips: "{{ (groups['worker_nodes'] + groups['control_plane']) | map('extract', hostvars) | map(attribute='ansible_host') | sort }}"
+
+- name: Display all node IPs
+  ansible.builtin.debug:
+    var: pdns_all_node_ips
+
+- name: Generate DNSEndpoint YAML from template
+  ansible.builtin.template:
+    src: dnsendpoint.yaml.j2
+    dest: "{{ playbook_dir }}/../../../kubernetes/infrastructure/external-dns/dnsendpoint-{{ pdns_zone_name | replace('.', '-') }}.yaml"
+    mode: '0644'

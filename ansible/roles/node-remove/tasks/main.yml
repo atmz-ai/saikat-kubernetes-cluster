@@ -1,0 +1,607 @@
+---
+- name: Check that target_host is defined
+  ansible.builtin.fail:
+    msg: "target_host must be specified: -e target_host=worker-X"
+  when: target_host is not defined or target_host == ""
+  run_once: true
+
+- name: Verify target host exists in inventory
+  ansible.builtin.assert:
+    that:
+      - target_host in groups['all']
+    fail_msg: "Host {{ target_host }} not found in inventory"
+    success_msg: "Host {{ target_host }} found in inventory"
+  run_once: true
+
+- name: Determine node type
+  ansible.builtin.set_fact:
+    is_control_plane: "{{ target_host in groups['control_plane'] }}"
+  run_once: true
+
+- name: Display removal plan for worker
+  ansible.builtin.debug:
+    msg: |
+      ============================================================
+      Removing Worker Node from Kubernetes Cluster
+      ============================================================
+      Target: {{ target_host }}
+
+      Steps:
+      1. Drain node (evict all pods)
+      2. Delete node from cluster
+      3. Cleanup kubelet config on node
+      4. Remove from inventory (manual step)
+
+      ⚠️  WARNING: This is DESTRUCTIVE!
+      - All pods will be evicted
+      - Node will be permanently removed
+      - You must manually remove from inventory afterward
+      ============================================================
+  when: not is_control_plane
+  run_once: true
+
+- name: Display removal plan for control plane
+  ansible.builtin.debug:
+    msg: |
+      ============================================================
+      Removing Control Plane Node from Kubernetes Cluster
+      ============================================================
+      Target: {{ target_host }}
+
+      Steps:
+      1. Drain node (evict all pods)
+      2. Remove from etcd cluster
+      3. Delete node from cluster
+      4. Cleanup kubelet config on node
+      5. Remove from inventory (manual step)
+
+      ⚠️  CRITICAL WARNING: This is EXTREMELY DESTRUCTIVE!
+      - Reduces HA quorum (3 → 2 control planes)
+      - Loss of quorum requires cluster rebuild
+      - etcd member will be removed permanently
+      - You must manually remove from inventory afterward
+
+      DO NOT remove more than 1 control plane at a time!
+      ============================================================
+  when: is_control_plane
+  run_once: true
+
+- name: Require explicit confirmation for control plane
+  ansible.builtin.pause:
+    prompt: |
+
+      YOU ARE REMOVING A CONTROL PLANE NODE!
+      Type 'yes-remove-control-plane' to confirm
+  register: control_plane_confirm
+  when:
+    - is_control_plane
+    - confirm_node_remove | default('') != 'yes'
+  run_once: true
+
+- name: Validate control plane confirmation
+  ansible.builtin.fail:
+    msg: "Control plane removal cancelled - confirmation not provided"
+  when:
+    - is_control_plane
+    - confirm_node_remove | default('') != 'yes'
+    - control_plane_confirm.user_input | default('') != 'yes-remove-control-plane'
+  run_once: true
+
+- name: Set target host IP fact
+  ansible.builtin.set_fact:
+    node_remove_target_ip: "{{ hostvars[target_host]['ansible_host'] }}"
+  run_once: true
+
+- name: Resolve Kubernetes node name
+  # Allows inventory name (target_host) to differ from the K8s node name.
+  # Set k8s_node_name in host_vars when the hostname registered in the cluster
+  # differs from the Ansible inventory name (e.g. old-control-plane-2 → control-plane-2).
+  ansible.builtin.set_fact:
+    node_remove_k8s_name: "{{ hostvars[target_host]['k8s_node_name'] | default(target_host) }}"
+  run_once: true
+
+- name: Select kubectl delegate host
+  # Use the first control plane that is NOT the target being removed.
+  # Without this, when removing old-control-plane-2 (which is groups['control_plane'][0]),
+  # all kubectl commands would delegate to the node being destroyed.
+  ansible.builtin.set_fact:
+    kubectl_delegate: "{{ (groups['control_plane'] | reject('equalto', target_host) | list)[0] }}"
+  run_once: true
+
+- name: Resolve kubectl delegate K8s node name
+  # etcd pod names follow the pattern etcd-<k8s-node-name>. The delegate may have a
+  # k8s_node_name that differs from its inventory name (same transitional scenario).
+  ansible.builtin.set_fact:
+    kubectl_delegate_k8s_name: "{{ hostvars[kubectl_delegate]['k8s_node_name'] | default(kubectl_delegate) }}"
+  run_once: true
+
+- name: Query Cloudflare for CP A record (control plane only)
+  ansible.builtin.uri:
+    url: >-
+      https://api.cloudflare.com/client/v4/zones/{{ cloudflare_zone_id }}/dns_records
+      ?type=A&name={{ kubernetes_api_hostname }}&content={{ node_remove_target_ip }}
+    method: GET
+    headers:
+      Authorization: "Bearer {{ cloudflare_api_token }}"
+      Content-Type: "application/json"
+    status_code: 200
+  delegate_to: localhost
+  register: node_remove_cf_records
+  when: is_control_plane
+  run_once: true
+  changed_when: false
+
+- name: Set Cloudflare record ID fact (control plane only)
+  ansible.builtin.set_fact:
+    node_remove_cf_record_id: "{{ node_remove_cf_records.json.result[0].id }}"
+  when:
+    - is_control_plane
+    - node_remove_cf_records.json.result | length > 0
+  run_once: true
+
+- name: Remove CP A record from Cloudflare before decommission
+  ansible.builtin.uri:
+    url: >-
+      https://api.cloudflare.com/client/v4/zones/{{ cloudflare_zone_id }}/dns_records/{{ node_remove_cf_record_id }}
+    method: DELETE
+    headers:
+      Authorization: "Bearer {{ cloudflare_api_token }}"
+      Content-Type: "application/json"
+    status_code: 200
+  delegate_to: localhost
+  when:
+    - is_control_plane
+    - node_remove_cf_record_id is defined
+  run_once: true
+
+- name: Warn if no Cloudflare A record found for CP
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: No Cloudflare A record found for {{ node_remove_target_ip }} under {{ kubernetes_api_hostname }}.
+      The DNS record may have already been removed or the IP is wrong.
+      Continuing with node removal.
+  when:
+    - is_control_plane
+    - node_remove_cf_records.json.result | length == 0
+  run_once: true
+
+- name: Query Cloudflare for app wildcard A record (all nodes)
+  ansible.builtin.uri:
+    url: >-
+      https://api.cloudflare.com/client/v4/zones/{{ cloudflare_zone_id }}/dns_records
+      ?type=A&name={{ cloudflare_app_wildcard_hostname }}&content={{ node_remove_target_ip }}
+    method: GET
+    headers:
+      Authorization: "Bearer {{ cloudflare_api_token }}"
+      Content-Type: "application/json"
+    status_code: 200
+  delegate_to: localhost
+  register: node_remove_cf_wildcard_records
+  run_once: true
+  changed_when: false
+
+- name: Set Cloudflare wildcard record ID fact
+  ansible.builtin.set_fact:
+    node_remove_cf_wildcard_record_id: "{{ node_remove_cf_wildcard_records.json.result[0].id }}"
+  when: node_remove_cf_wildcard_records.json.result | length > 0
+  run_once: true
+
+- name: Remove app wildcard A record from Cloudflare
+  ansible.builtin.uri:
+    url: >-
+      https://api.cloudflare.com/client/v4/zones/{{ cloudflare_zone_id }}/dns_records/{{ node_remove_cf_wildcard_record_id }}
+    method: DELETE
+    headers:
+      Authorization: "Bearer {{ cloudflare_api_token }}"
+      Content-Type: "application/json"
+    status_code: 200
+  delegate_to: localhost
+  when: node_remove_cf_wildcard_record_id is defined
+  run_once: true
+
+- name: Warn if no app wildcard A record found for node
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: No Cloudflare A record found for {{ node_remove_target_ip }} under {{ cloudflare_app_wildcard_hostname }}.
+      The DNS record may have already been removed or the IP is wrong.
+      Continuing with node removal.
+  when: node_remove_cf_wildcard_records.json.result | length == 0
+  run_once: true
+
+- name: Check if node exists in cluster
+  ansible.builtin.command: kubectl get node {{ node_remove_k8s_name }}
+  delegate_to: "{{ kubectl_delegate }}"
+  register: node_check
+  failed_when: false
+  changed_when: false
+
+- name: Skip drain if node not in cluster
+  ansible.builtin.debug:
+    msg: "Node {{ node_remove_k8s_name }} not found in cluster, skipping drain"
+  when: node_check.rc != 0
+
+- name: Force-delete Terminating pods on dead node before drain
+  # Pods stuck in Terminating on an unreachable node will never complete graceful
+  # termination — kubectl drain waits for them and times out. Force-deleting them
+  # removes the pod objects immediately (the containers are already gone since the
+  # node is dead), unblocking drain.
+  ansible.builtin.shell: |
+    set -o pipefail
+    kubectl get pods --all-namespaces --field-selector \
+      spec.nodeName={{ node_remove_k8s_name }},status.phase=Running \
+      -o json | python3 -c "
+    import sys, json, subprocess
+    pods = json.load(sys.stdin)['items']
+    terminating = [
+        (p['metadata']['namespace'], p['metadata']['name'])
+        for p in pods
+        if p.get('metadata', {}).get('deletionTimestamp')
+    ]
+    for ns, name in terminating:
+        print(f'Force-deleting Terminating pod {ns}/{name}')
+        subprocess.run([
+            'kubectl', 'delete', 'pod', name,
+            '-n', ns,
+            '--grace-period=0', '--force'
+        ])
+    print(f'Done: {len(terminating)} Terminating pod(s) force-deleted')
+    "
+  delegate_to: "{{ kubectl_delegate }}"
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  when: node_check.rc == 0
+  changed_when: true
+  run_once: true
+
+- name: Drain the node
+  ansible.builtin.command: >
+    kubectl drain {{ node_remove_k8s_name }}
+    --ignore-daemonsets
+    --delete-emptydir-data
+    --disable-eviction
+    --force
+    --grace-period=30
+    --timeout=120s
+  delegate_to: "{{ kubectl_delegate }}"
+  when: node_check.rc == 0
+  register: drain_result
+  changed_when: true   # drain always evicts/reschedules pods off the node
+
+- name: Display drain result
+  ansible.builtin.debug:
+    msg: "{{ drain_result.stdout_lines }}"
+  when: node_check.rc == 0
+
+# --- Post-drain: evacuate Longhorn replicas ---
+# Longhorn replicas must be evacuated AFTER draining. While the node is still
+# running, pods have their PVCs attached — Longhorn cannot move a replica
+# that is actively mounted by a running pod. Draining first evicts all pods
+# (including stateful workloads like Loki), detaching PVCs. Once detached,
+# Longhorn can freely rebuild replicas on other nodes.
+- name: Evict Longhorn replicas from node (post-drain)
+  ansible.builtin.include_role:
+    name: longhorn-evict
+  vars:
+    target_host: "{{ node_remove_k8s_name }}"
+  when:
+    - node_check.rc == 0
+    - not is_control_plane
+  run_once: true
+
+- name: Find a v1.36.x control plane node for etcd operations
+  ansible.builtin.set_fact:
+    etcd_delegate: >-
+      {{ ((groups['control_plane'] | reject('equalto', target_host) | select('match', '^(node-|worker-12)') | list) | first)
+         | default((groups['control_plane'] | reject('equalto', target_host) | list)[0]) }}
+  when: is_control_plane
+
+- name: Get etcd member ID
+  ansible.builtin.shell: |
+    set -o pipefail
+    ETCD_CID=$(ctr -n k8s.io containers list | grep "etcd:" | head -1 | cut -d" " -f1)
+    if [ -z "$ETCD_CID" ]; then
+      echo "No etcd container found on this node" >&2
+      exit 1
+    fi
+    ctr -n k8s.io tasks exec --exec-id etcd-list "$ETCD_CID" \
+      etcdctl member list \
+      --endpoints=https://127.0.0.1:2379 \
+      --cacert=/etc/kubernetes/pki/etcd/ca.crt \
+      --cert=/etc/kubernetes/pki/etcd/server.crt \
+      --key=/etc/kubernetes/pki/etcd/server.key 2>/dev/null \
+      | grep "{{ node_remove_k8s_name }}" | cut -d, -f1
+  delegate_to: "{{ etcd_delegate }}"
+  register: etcd_member_id
+  when: is_control_plane
+  failed_when: false
+  changed_when: false   # read-only: etcdctl member list lookup
+
+- name: Display etcd member ID
+  ansible.builtin.debug:
+    msg: "etcd member ID: {{ etcd_member_id.stdout | trim }}"
+  when: is_control_plane and etcd_member_id.stdout | trim != ""
+
+- name: Remove etcd member
+  ansible.builtin.shell: |
+    set -o pipefail
+    ETCD_CID=$(ctr -n k8s.io containers list | grep "etcd:" | head -1 | cut -d" " -f1)
+    ctr -n k8s.io tasks exec --exec-id etcd-remove "$ETCD_CID" \
+      etcdctl member remove {{ etcd_member_id.stdout | trim }} \
+      --endpoints=https://127.0.0.1:2379 \
+      --cacert=/etc/kubernetes/pki/etcd/ca.crt \
+      --cert=/etc/kubernetes/pki/etcd/server.crt \
+      --key=/etc/kubernetes/pki/etcd/server.key
+  delegate_to: "{{ etcd_delegate }}"
+  when:
+    - is_control_plane
+    - etcd_member_id.stdout | trim != ""
+  register: etcd_remove
+  changed_when: true   # etcdctl member remove reconfigures the cluster
+
+- name: Display etcd removal result
+  ansible.builtin.debug:
+    msg: "{{ etcd_remove.stdout }}"
+  when:
+    - is_control_plane
+    - etcd_member_id.stdout | trim != ""
+
+- name: Delete node from Kubernetes
+  ansible.builtin.command: kubectl delete node {{ node_remove_k8s_name }}
+  delegate_to: "{{ kubectl_delegate }}"
+  register: delete_result
+  failed_when: false
+  changed_when: delete_result.rc == 0   # deleting a nonexistent node exits nonzero (NotFound)
+
+- name: Display deletion result
+  ansible.builtin.debug:
+    msg: "{{ delete_result.stdout }}"
+  when: delete_result.rc == 0
+
+# Delete the Longhorn Node CR so a reprovisioned node gets a fresh CR with the
+# correct disk UUID. Without this, the stale CR persists with the old disk UUID
+# from the previous installation, causing a "DiskFilesystemChanged" mismatch
+# when the node rejoins with a freshly formatted disk.
+#
+# The Longhorn controller adds a finalizer (longhorn.io) that prevents deletion
+# until all replicas are cleaned up. Since we already evicted replicas, the
+# finalizer should be removed by the controller. But if the controller is slow
+# or the node is already gone, we force-remove the finalizer to ensure the CR
+# is actually deleted before the node is reprovisioned.
+#
+# The Longhorn validating webhook may block deletion when the K8s node is
+# already gone (KubernetesNodeGone condition). Workaround: temporarily point
+# the webhook to a non-existent service so failurePolicy: Ignore kicks in,
+# delete the CR, then restore the webhook.
+# See: https://github.com/longhorn/longhorn/issues/13494
+- name: Delete Longhorn Node CR
+  ansible.builtin.command: >
+    kubectl delete node.longhorn.io {{ node_remove_k8s_name }}
+    -n longhorn-system --ignore-not-found --timeout=30s
+  delegate_to: "{{ kubectl_delegate }}"
+  register: longhorn_node_delete
+  failed_when: false
+  changed_when: longhorn_node_delete.rc == 0
+
+- name: Bypass Longhorn webhook to delete stuck Node CR
+  when: longhorn_node_delete.rc != 0
+  block:
+    - name: Temporarily disable Longhorn webhook validation
+      ansible.builtin.shell: |
+        kubectl patch validatingwebhookconfiguration longhorn-webhook-validator \
+          --type=json -p='[{"op":"replace","path":"/webhooks/0/clientConfig/service/name","value":"longhorn-admission-webhook-disabled"}]'
+      delegate_to: "{{ kubectl_delegate }}"
+      changed_when: true
+
+    - name: Delete Longhorn Node CR with webhook bypassed
+      ansible.builtin.command: >
+        kubectl delete node.longhorn.io {{ node_remove_k8s_name }}
+        -n longhorn-system --ignore-not-found --timeout=30s
+      delegate_to: "{{ kubectl_delegate }}"
+      register: longhorn_node_bypass_delete
+      failed_when: false
+      changed_when: longhorn_node_bypass_delete.rc == 0
+
+    - name: Restore Longhorn webhook validation
+      ansible.builtin.shell: |
+        kubectl patch validatingwebhookconfiguration longhorn-webhook-validator \
+          --type=json -p='[{"op":"replace","path":"/webhooks/0/clientConfig/service/name","value":"longhorn-admission-webhook"}]'
+      delegate_to: "{{ kubectl_delegate }}"
+      changed_when: true
+
+    - name: Force-remove finalizer if still stuck
+      ansible.builtin.shell: |
+        kubectl -n longhorn-system patch node.longhorn.io {{ node_remove_k8s_name }} \
+          --type=merge -p '{"metadata":{"finalizers":null}}' 2>/dev/null
+        kubectl -n longhorn-system delete node.longhorn.io {{ node_remove_k8s_name }} \
+          --ignore-not-found 2>/dev/null
+      delegate_to: "{{ kubectl_delegate }}"
+      register: longhorn_node_force_delete
+      failed_when: false
+      changed_when: true
+
+- name: Display Longhorn Node CR deletion result
+  ansible.builtin.debug:
+    msg: "{{ longhorn_node_delete.stdout }}"
+  when: longhorn_node_delete.rc == 0
+
+- name: Stop kubelet service
+  ansible.builtin.systemd:
+    name: kubelet
+    state: stopped
+    enabled: false
+  delegate_to: "{{ target_host }}"
+  become: true
+  failed_when: false
+  ignore_unreachable: true
+
+- name: Remove Kubernetes configuration
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/kubernetes
+    - /var/lib/kubelet
+    - /var/lib/etcd
+  delegate_to: "{{ target_host }}"
+  become: true
+  failed_when: false
+  ignore_unreachable: true
+
+- name: Reset iptables (optional)
+  ansible.builtin.command: iptables -F && iptables -t nat -F && iptables -t mangle -F && iptables -X
+  delegate_to: "{{ target_host }}"
+  become: true
+  failed_when: false
+  ignore_unreachable: true
+  changed_when: true   # iptables -F/-X flushes all rules/chains
+  when: reset_iptables | default(false)
+
+- name: Delete stale VolumeAttachments for removed node
+  # After a node is deleted, the CSI detach finalizer can leave VolumeAttachment
+  # objects pointing to the dead node. These block new attachments on the pod's
+  # rescheduled node since RWO volumes can only attach to one node at a time.
+  #
+  # Two-step pattern:
+  # 1. Merge-patch finalizers to null — more reliable than json-patch "remove"
+  #    which errors when the path doesn't exist (and capture_output hides it).
+  # 2. Force-delete with --grace-period=0 --force to prevent kubectl from
+  #    blocking on webhook callbacks or residual controller finalizer processing.
+  ansible.builtin.shell: |
+    set -o pipefail
+    kubectl get volumeattachment -o json | python3 -c "
+    import sys, json, subprocess
+    items = json.load(sys.stdin)['items']
+    stale = [
+        va['metadata']['name']
+        for va in items
+        if va['spec'].get('nodeName') == '{{ node_remove_k8s_name }}'
+    ]
+    for name in stale:
+        print(f'Clearing finalizers on VolumeAttachment {name}')
+        subprocess.run(
+            ['kubectl', 'patch', 'volumeattachment', name,
+             '--type=merge', '-p', '{\"metadata\":{\"finalizers\":null}}'],
+            capture_output=True
+        )
+        print(f'Force-deleting VolumeAttachment {name}')
+        subprocess.run(
+            ['kubectl', 'delete', 'volumeattachment', name,
+             '--ignore-not-found', '--grace-period=0', '--force'],
+            capture_output=True
+        )
+    print(f'Done: {len(stale)} stale VolumeAttachment(s) deleted')
+    "
+  delegate_to: "{{ kubectl_delegate }}"
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  changed_when: true
+  run_once: true
+  timeout: 60
+
+- name: List remaining nodes
+  ansible.builtin.command: kubectl get nodes
+  delegate_to: "{{ kubectl_delegate }}"
+  register: nodes_list
+  changed_when: false
+  # API server may be briefly unavailable while etcd reconfigures after member removal.
+  retries: 10
+  delay: 15
+  until: nodes_list.rc == 0
+
+- name: Display nodes
+  ansible.builtin.debug:
+    msg: "{{ nodes_list.stdout_lines }}"
+
+- name: Verify etcd cluster health (control plane only)
+  ansible.builtin.shell: |
+    ETCD_CID=$(ctr -n k8s.io containers list | grep "etcd:" | head -1 | cut -d" " -f1)
+    timeout 60 ctr -n k8s.io tasks exec --exec-id etcd-health "$ETCD_CID" \
+      etcdctl endpoint health \
+      --endpoints=https://127.0.0.1:2379 \
+      --cacert=/etc/kubernetes/pki/etcd/ca.crt \
+      --cert=/etc/kubernetes/pki/etcd/server.crt \
+      --key=/etc/kubernetes/pki/etcd/server.key \
+      --cluster
+  delegate_to: "{{ etcd_delegate }}"
+  register: etcd_health
+  when: is_control_plane
+  changed_when: false
+  retries: 5
+  delay: 15
+  until: etcd_health.rc == 0
+  ignore_errors: true
+
+- name: Display etcd health
+  ansible.builtin.debug:
+    msg: "{{ etcd_health.stdout_lines }}"
+  when: is_control_plane
+
+- name: Find NotReady worker nodes after CP removal
+  # After etcd leader re-election (~30-60s outage), worker kubelet processes that were
+  # mid-connection enter exponential backoff and do not self-recover. A kubelet restart
+  # is non-destructive (pods keep running via the container runtime) and forces a clean
+  # reconnect to the surviving API servers.
+  ansible.builtin.shell: |
+    set -o pipefail
+    kubectl get nodes --no-headers \
+      -l '!node-role.kubernetes.io/control-plane' \
+      | awk '$2=="NotReady" {print $1}'
+  delegate_to: "{{ kubectl_delegate }}"
+  register: notready_workers
+  changed_when: false
+  when: is_control_plane
+  run_once: true
+
+- name: Restart kubelet and wait for Ready — one worker at a time (serial)
+  # include_tasks loops are serial: restart worker-N, wait until Ready, then worker-N+1.
+  # This prevents simultaneously restarting all NotReady workers and triggering further
+  # etcd/Longhorn disruption before the previous worker is confirmed healthy.
+  ansible.builtin.include_tasks: restart-worker-kubelet.yml
+  loop: "{{ notready_workers.stdout_lines | default([]) }}"
+  loop_control:
+    loop_var: worker_node
+  when:
+    - is_control_plane
+    - notready_workers.stdout_lines | default([]) | length > 0
+
+- name: Report worker recovery
+  ansible.builtin.debug:
+    msg: "Restarted kubelet on NotReady workers: {{ notready_workers.stdout_lines }}"
+  when:
+    - is_control_plane
+    - notready_workers.stdout_lines | default([]) | length > 0
+
+- name: Success message for worker
+  ansible.builtin.debug:
+    msg: |
+      ============================================================
+      ✅ Worker Node Removed Successfully!
+      ============================================================
+      Node: {{ target_host }}
+
+      Next steps:
+      1. Remove {{ target_host }} from ansible/inventory/hosts.yml
+      2. Verify cluster health: kubectl get nodes
+      3. Return server to Hetzner if no longer needed
+      ============================================================
+  when: not is_control_plane
+
+- name: Success message for control plane
+  ansible.builtin.debug:
+    msg: |
+      ============================================================
+      ✅ Control Plane Node Removed Successfully!
+      ============================================================
+      Node: {{ target_host }}
+
+      CRITICAL: Your cluster now has REDUCED HA capability!
+      Remaining control planes: {{ groups['control_plane'] | length - 1 }}
+
+      Next steps:
+      1. Remove {{ target_host }} from ansible/inventory/hosts.yml
+      2. Verify etcd cluster: kubectl get pods -n kube-system | grep etcd
+      3. Verify API server: kubectl get cs
+      4. Consider adding replacement control plane for HA
+      5. Return server to Hetzner if no longer needed
+      ============================================================
+  when: is_control_plane

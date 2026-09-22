@@ -1,0 +1,24 @@
+---
+# Add Control Plane Node to Kubernetes Cluster
+# Usage: ansible-playbook operations/add-control-plane.yml -e target_host=control-plane-X
+
+- name: Add control plane node (provision, configure, join)
+  # target_host is always passed explicitly at run time (-e target_host=control-plane-X);
+  # the default exists only so ansible-lint syntax-check can resolve the hosts keyword.
+  hosts: "{{ target_host | default('control_plane') }}"
+  gather_facts: false
+
+  serial: 1
+
+  roles:
+    - role: provision
+    - role: storage-longhorn
+    - role: ssh-hardening
+    - role: base-system
+    - role: resolv-cleanup
+    - role: sysctl-tuning
+    - role: containerd
+    - role: kubernetes
+    - role: control-plane-join
+    - role: node-labels
+    - role: cloudflare-dns

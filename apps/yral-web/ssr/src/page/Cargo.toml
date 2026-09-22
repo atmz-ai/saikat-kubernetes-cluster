@@ -1,0 +1,167 @@
+[package]
+name = "page"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+anyhow = { workspace = true }
+auth = { path = "../auth" }
+axum = { workspace = true, features = ["macros"], optional = true }
+axum-extra = {
+  workspace = true,
+  features = [
+    "cookie",
+    "cookie-private",
+    "cookie-signed",
+    "typed-header",
+  ],
+  optional = true
+}
+base64 = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true, features = ["v4", "js"] }
+codee = { workspace = true, features = ["json_serde"] }
+component = { path = "../component" }
+console_error_panic_hook = { workspace = true }
+console_log = { workspace = true }
+consts = { path = "../consts" }
+futures = { workspace = true }
+getrandom = { workspace = true, features = ["wasm_js"], optional = true }
+gloo = { workspace = true, features = ["futures", "net"] }
+hex = { workspace = true }
+http = { workspace = true }
+icondata = { workspace = true }
+icondata_core = { workspace = true }
+indexmap.workspace = true
+js-sys = { workspace = true }
+leptos = { workspace = true, features = ["nightly"] }
+leptos_axum = { workspace = true, optional = true }
+leptos_icons = { workspace = true }
+leptos_meta = { workspace = true }
+leptos_router = { workspace = true, features = ["nightly"] }
+leptos-use = { workspace = true }
+log = { workspace = true }
+num-bigint = { workspace = true }
+num-traits.workspace = true
+once_cell = { workspace = true }
+openidconnect = { workspace = true, optional = true }
+rand = { workspace = true, default-features = false }
+rand_chacha = { workspace = true, optional = true }
+regex = { workspace = true, optional = true }
+reqwest = { workspace = true, features = ["http2", "json", "multipart"] }
+send_wrapper = { workspace = true, features = ["futures"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+simple_logger = { workspace = true }
+speedate = { workspace = true, optional = true }
+state = { path = "../state" }
+thiserror = { workspace = true }
+tokio = {
+  workspace = true,
+  features = ["rt-multi-thread", "signal", "time"],
+  optional = true
+}
+tower = { workspace = true, features = ["full"], optional = true }
+tower-http = { workspace = true, features = ["cors", "fs"], optional = true }
+tracing = { workspace = true }
+urlencoding = { workspace = true }
+utils = { path = "../utils" }
+uts2ts = { workspace = true }
+wasm-bindgen = { workspace = true }
+wasm-bindgen-futures = { workspace = true }
+web-sys = {
+  workspace = true,
+  features = [
+    "Clipboard",
+    "Document",
+    "Navigator",
+    "ShareData",
+    "ValidityState",
+    "Window",
+    "Worker",
+    "XmlHttpRequest",
+    "XmlHttpRequestUpload",
+  ],
+  optional = true
+}
+web-time.workspace = true
+yral-database-spacetime-bindings = { workspace = true, optional = true }
+
+[features]
+hydrate = [
+  "component/hydrate",
+  "consts/hydrate",
+  "dep:rand_chacha",
+  "dep:web-sys",
+  "leptos/hydrate",
+  "send_wrapper/futures",
+  "speedate",
+  "state/hydrate",
+  "utils/hydrate",
+]
+ssr = [
+  "auth/ssr",
+  "axum-extra",
+  "component/ssr",
+  "consts/ssr",
+  "dep:axum",
+  "dep:leptos_axum",
+  "dep:rand_chacha",
+  "dep:regex",
+  "dep:tokio",
+  "dep:tower",
+  "dep:tower-http",
+  "dep:yral-database-spacetime-bindings",
+  "leptos_meta/ssr",
+  "leptos_router/ssr",
+  "leptos-use/axum",
+  "leptos-use/ssr",
+  "leptos/ssr",
+  "reqwest/rustls",
+  "speedate",
+  "state/ssr",
+  "utils/ssr",
+]
+
+backend-admin = [
+  "component/backend-admin",
+  "consts/backend-admin",
+  "state/backend-admin",
+  "utils/backend-admin",
+]
+oauth-hydrate = [
+  "component/oauth-hydrate",
+  "consts/oauth-hydrate",
+  "state/oauth-hydrate",
+  "utils/oauth-hydrate",
+]
+oauth-ssr = [
+  "auth/oauth-ssr",
+  "component/oauth-ssr",
+  "consts/oauth-ssr",
+  "dep:openidconnect",
+  "state/oauth-ssr",
+  "utils/oauth-ssr",
+]
+release-bin = [
+  "backend-admin",
+  "component/release-bin",
+  "consts/release-bin",
+  "oauth-ssr",
+  "ssr",
+  "state/release-bin",
+  "utils/release-bin",
+]
+release-lib = [
+  "backend-admin",
+  "component/release-lib",
+  "consts/release-lib",
+  "dep:openidconnect",
+  "hydrate",
+  "oauth-hydrate",
+  "state/release-lib",
+  "utils/release-lib",
+]

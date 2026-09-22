@@ -1,0 +1,10 @@
+target/
+**/node_modules
+**/test-results
+.env
+*.pem
+redb-kv.db
+.DS_Store
+.direnv
+.claude
+.ssh-key
