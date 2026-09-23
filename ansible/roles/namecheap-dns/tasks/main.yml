@@ -25,6 +25,15 @@
 # This allows the same workers to serve as nameservers for multiple domains.
 #
 # Namecheap API limits: up to 13 nameservers for .dev TLD (ICANN standard).
+#
+# WHITELISTING IS UI-ONLY — there is no API for it (verified 2026-09-23 against
+# the full method list: domains, domains.dns, domains.ns, domains.transfer, ssl,
+# users, users.address, domainprivacy all lack it; users.update only covers
+# contact details). Every call needs a ClientIp that Namecheap validates against
+# an account-level allowlist, so an un-whitelisted delegate surfaces as
+# `1011150 Invalid request IP`. The preflight below turns that into an
+# actionable message instead. See TODO(namecheap-delegate) in
+# ansible/playbooks/operations/update-namecheap-dns.yml.
 
 - name: Detect delegate host's public IP
   ansible.builtin.uri:
@@ -54,7 +63,36 @@
     return_content: true
   delegate_to: "{{ namecheap_delegate_host }}"
   register: namecheap_current_ns
+  # Namecheap answers errors with HTTP 200 + <ApiResponse Status="ERROR">, and a
+  # non-2xx would also land here. Either way the NEXT task owns the decision, so
+  # this one must not abort first — otherwise a whitelist rejection surfaces as
+  # a raw uri failure instead of the remediation message below.
+  failed_when: false
   changed_when: false
+
+- name: Fail with remediation when Namecheap rejects the API call
+  ansible.builtin.fail:
+    msg: |
+      Namecheap rejected the API call delegated to {{ namecheap_delegate_host }}.
+
+      This is almost always the IP allowlist: Namecheap requires ClientIp on every
+      call and validates it against an account-level allowlist that can ONLY be
+      edited in the web dashboard (there is no API method to read or change it).
+      A delegate whose IP is not on that list always fails with error 1011150.
+
+      Upstream response (verbatim):
+      {{ namecheap_current_ns.content | default(namecheap_current_ns.msg | default('no response body')) }}
+
+      To fix:
+        1. Namecheap → Profile → Tools → Business & Dev Tools → Namecheap API Access
+        2. Under "Whitelisted IPs" click Edit → Add IP → add {{ namecheap_client_ip }}
+        3. Re-run this playbook
+
+      Or delegate from an already-whitelisted node instead:
+        -e namecheap_delegate_host=<host>
+  when:
+    - namecheap_current_ns.content is defined
+    - "'Status=\"ERROR\"' in namecheap_current_ns.content"
 
 - name: Parse current nameservers
   ansible.builtin.set_fact:

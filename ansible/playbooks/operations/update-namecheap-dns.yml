@@ -5,7 +5,22 @@
 # defined in hosts.yml are registered as custom nameservers at Namecheap.
 # The worker's ansible_host IP is used as the glue record IP (single source of truth).
 #
-# API calls are delegated to control-plane-1 (static IP whitelisted in Namecheap dashboard).
+# API calls are delegated to node-3 (IP 95.216.228.60) — that is the static IP
+# whitelisted in the Namecheap dashboard. It was `control-plane-1` before the
+# control-plane-N → node-N inventory rename, so the delegate was a dead host name
+# until this fix. node-3's IP is already on the allowlist, so it is left as-is
+# deliberately (changing it would break the working setup until the new node's IP
+# is whitelisted).
+#
+# TODO(namecheap-delegate): switch to `node-1` (first entry in groups['control_plane'])
+# once node-1's IP is added to the Namecheap allowlist, so the delegate follows the
+# inventory's first control plane instead of a hardcoded node.
+#
+# Whitelisting is UI-only — Namecheap exposes no API for it. If a delegate's IP
+# drops off the allowlist (e.g. the node was reprovisioned and got a new IP), the
+# role's preflight in ansible/roles/namecheap-dns/tasks/main.yml fails with the
+# exact dashboard steps to add the new IP.
+#
 # Personal devices on WiFi don't have static IPs, so we can't whitelist them.
 # To whitelist a different node, change the `namecheap_delegate_host` var.
 #
@@ -26,7 +41,8 @@
     # Domain defaults — override with -e namecheap_domain_sld=... -e namecheap_domain_tld=...
     namecheap_domain_sld: "saikat"
     namecheap_domain_tld: "dev"
-    # API calls delegate to this host (must be whitelisted in Namecheap dashboard)
-    namecheap_delegate_host: "control-plane-1"
+    # API calls delegate to this host (must be whitelisted in Namecheap dashboard).
+    # node-3 == the old control-plane-1; its IP is the one Namecheap has on file.
+    namecheap_delegate_host: "node-3"
   roles:
     - role: namecheap-dns

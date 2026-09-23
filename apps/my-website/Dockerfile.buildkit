@@ -11,8 +11,17 @@
 # ── Stage 1: Build ──────────────────────────────────────────────────────────
 FROM docker.io/rust:1.98-bookworm AS builder
 
-# Install build dependencies (musl-tools for musl cross-compilation)
+# Install build dependencies:
+#   musl-tools      — musl cross-compilation (LEPTOS_BIN_TARGET_TRIPLE is musl)
+#   clang           — onig_sys's build script (syntect ← comrak) uses the cc crate
+#                     and hard-fails without a working C compiler:
+#                       Compiler family detection failed: failed to find tool "clang"
+#                     musl-gcc alone is NOT enough. libclang-dev is not needed:
+#                     onig_sys depends only on `cc` + `pkg-config` (no bindgen).
+#   pkg-config      — onig_sys locates the system libonig through it
+#   libssl-dev      — reqwest/rustls native-tls fallbacks
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    clang \
     musl-tools \
     pkg-config \
     libssl-dev \

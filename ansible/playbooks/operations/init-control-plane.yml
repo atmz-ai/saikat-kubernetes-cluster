@@ -7,7 +7,10 @@
 #             helm → gateway-api-crds → cilium
 
 - name: Initialize first control plane node (provision from scratch)
-  hosts: control-plane-1
+  # target_host is always passed explicitly at run time (-e target_host=node-N);
+  # the default exists only so ansible-lint syntax-check can resolve the hosts
+  # keyword. Same convention as add-control-plane.yml.
+  hosts: "{{ target_host | default('control_plane') }}"
   gather_facts: false
   serial: 1
 

@@ -1,4 +1,5 @@
 ---
+# TODO: merge this to add-node.yml
 # Add Control Plane Node to Kubernetes Cluster
 # Usage: ansible-playbook operations/add-control-plane.yml -e target_host=control-plane-X
 

@@ -1,4 +1,5 @@
 ---
+# TODO: remove this playbook
 # Reconcile control-plane metrics endpoints with the declarative kubeadm
 # ClusterConfiguration (control-plane-metrics role).
 #

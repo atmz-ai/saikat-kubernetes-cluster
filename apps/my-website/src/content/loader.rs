@@ -1,5 +1,9 @@
 // Server-side content loader: reads markdown files from content/ directory,
 // parses YAML frontmatter, and converts markdown body to HTML via comrak.
+//
+// This module is #[cfg(feature = "ssr")] (see content/mod.rs) — and comrak is an
+// ssr-only optional dependency — because comrak → syntect → onig_sys has a C
+// build that cannot target wasm32-unknown-unknown.
 
 use std::path::Path;
 

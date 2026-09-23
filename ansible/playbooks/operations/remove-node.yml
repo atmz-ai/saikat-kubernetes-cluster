@@ -1,4 +1,5 @@
 ---
+# TODO: validate that this works for both worker nodes and stacked control-plane nodes
 # Remove Node from Kubernetes Cluster
 # Usage: ansible-playbook operations/remove-node.yml -e target_host=worker-X
 
