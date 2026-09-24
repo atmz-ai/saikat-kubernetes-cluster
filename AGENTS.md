@@ -445,6 +445,13 @@ so --policy=sync will never update or delete them
 
 **Zone snapshots are the rebuild source of truth** (`pdns-zone-snapshot.yaml`). Two non-obvious details: the external-dns TXT ownership markers must survive verbatim (without them external-dns sees the loaded A/NS records as unmanaged and deletes them under `--policy=sync`), and the SOA should carry a real in-zone MNAME plus a low negative-cache TTL (`minimum`) rather than PowerDNS's `a.misconfigured.dns.server.invalid.` placeholder and a 3600s minimum — at 3600, any transient NODATA is pinned in resolver caches for an hour.
 
+**Two steps a newly added zone needs, or it silently does not work.** Adding an entry to `pdns_zones` renders the config, but the zone still does not exist until:
+1. `kubectl -n external-dns delete job pdns-db-seed` — the seed Job reads the zone list at run time, but a Completed Job never re-runs itself. Flux recreates it.
+2. Push (or requeue) so Flux re-applies — deleting the Job alone leaves it absent, because Flux only re-applies on a new revision or interval.
+Neither step errors if skipped: the config claims the zone while PowerDNS has no such zone, and external-dns logs "All records are already up to date". The generator prints a reminder at generation time.
+
+**`zone-cache-refresh-interval=0` is deliberate (do not "restore the default").** PowerDNS caches the list of known zones for 300s by default, so a zone created after the server started is not served until the cache expires. During that window the zone exists with correct records and SOA, but queries under it fall through to a **parent zone's wildcard and answer with the wrong addresses** (observed: a new sub-zone returning the parent's 40 node IPs). Disabling the cache makes a seeded zone servable immediately, so the declarative zone list and the served DNS cannot disagree. With `consistent-backends` (default) the uncached path is one indexed lookup.
+
 ### Local Environment & Parity
 The repo uses a single monorepo-wide `mise.toml` at the repository root as the source of truth for tool versions, task orchestration, and all app-specific environment variables. There are **no per-app `mise.toml`, `fnox.toml`, or `pitchfork.toml` files** — all env vars, secrets, and daemon definitions live in the root `mise.toml`, root `fnox.toml`, and root `mise.toml` `[daemons]` respectively. App-specific env vars are grouped by `# ── <app> ──` comment headers in the root `[env]` section. Avoid adding per-project config files unless there is a strong, documented reason.
 
