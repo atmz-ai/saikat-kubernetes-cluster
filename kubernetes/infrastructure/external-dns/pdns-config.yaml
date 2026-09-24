@@ -37,6 +37,14 @@ data:
     # Static settings only — see the header comment for why the backend settings
     # are rendered separately.
 
+    # REQUIRED for the template mechanism to work at all. The wrapper renders
+    # TEMPLATE_FILES into /etc/powerdns/pdns.d/, but PowerDNS only reads that
+    # directory if this directive names it. The upstream image ships this line in
+    # its own pdns.conf; replacing that file wholesale drops it, and the server
+    # then starts with no backend ("Unable to launch, no backends configured for
+    # querying") because the rendered gpgsql.conf is never read.
+    include-dir=/etc/powerdns/pdns.d
+
     # DNS server settings
     local-address=0.0.0.0
     local-port=5300
