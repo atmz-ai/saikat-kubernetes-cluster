@@ -75,28 +75,68 @@ spec:
               done
               echo "Backend reachable."
 
-              # Zone. `zone create` fails if the zone already exists, which is the
-              # expected state on re-run — treat that as success.
-              if pdnsutil --config-dir=/tmp/pdns-seed zone list-all 2>/dev/null | grep -qx "saikat.dev"; then
-                echo "Zone saikat.dev already exists."
-              else
-                echo "Creating zone saikat.dev..."
-                pdnsutil --config-dir=/tmp/pdns-seed zone create saikat.dev
-              fi
+              # ── Per-zone setup ──────────────────────────────────────────────
+              # The zone list is a ConfigMap generated from `pdns_zones` in
+              # ansible/inventory/group_vars/all/vars.yml (see
+              # ansible/roles/pdns-zones). Each line is "<zone> <snapshot>".
+              #
+              # Everything below runs once per zone. It is idempotent, so re-running
+              # (or re-running after adding a zone) is safe: existing zones, keys and
+              # metadata are detected and left alone.
+              #
+              # The zone name must appear in three places that have to agree — this
+              # Job (create + metadata), and external-dns's --rfc2136-zone and
+              # --domain-filter flags. All three are generated from that one list, so
+              # a new zone cannot end up configured here but unknown to external-dns.
+              while read -r zone use_snapshot; do
+                [ -n "$zone" ] || continue
 
-              # Load the record snapshot. external-dns would eventually recreate the
-              # A/NS records from its DNSEndpoint CRDs, but only after it next
-              # reconciles — and in the meantime the zone would answer NODATA, which
-              # resolvers cache for the SOA minimum. Loading the snapshot closes that
-              # window, and preserves the external-dns TXT ownership markers exactly
-              # so external-dns recognises the records as its own rather than
-              # treating them as unmanaged and deleting them.
-              if [ -s /seed/saikat.dev.zone ]; then
-                echo "Loading zone contents from snapshot..."
-                pdnsutil --config-dir=/tmp/pdns-seed zone load saikat.dev /seed/saikat.dev.zone
-              else
-                echo "No snapshot mounted — leaving zone empty for external-dns to populate."
-              fi
+                # Zone. `zone create` fails if the zone already exists, which is the
+                # expected state on re-run — treat that as success.
+                if pdnsutil --config-dir=/tmp/pdns-seed zone list-all 2>/dev/null | grep -qx "$zone"; then
+                  echo "Zone $zone already exists."
+                else
+                  echo "Creating zone $zone..."
+                  pdnsutil --config-dir=/tmp/pdns-seed zone create "$zone"
+                fi
+
+                # Load the record snapshot, for zones that already served records
+                # elsewhere. external-dns would eventually recreate them from its
+                # DNSEndpoint CRDs, but only after its next reconcile — and in the
+                # meantime the zone would answer NODATA, which resolvers cache for the
+                # SOA minimum. Loading the snapshot closes that window, and preserves
+                # the external-dns TXT ownership markers exactly so external-dns
+                # recognises the records as its own rather than treating them as
+                # unmanaged and deleting them under --policy=sync.
+                #
+                # New zones skip this (snapshot=false in pdns_zones): there is nothing
+                # to preserve, and an empty zone is correct until external-dns
+                # populates it.
+                if [ "$use_snapshot" = "true" ] && [ -s "/seed/$zone.zone" ]; then
+                  echo "Loading $zone contents from snapshot..."
+                  pdnsutil --config-dir=/tmp/pdns-seed zone load "$zone" "/seed/$zone.zone"
+                else
+                  echo "No snapshot for $zone — leaving it for external-dns to populate."
+                fi
+
+                # Zone metadata enabling RFC2136 updates, automatic SOA serial bumps,
+                # and the AXFR external-dns needs to read existing records.
+                echo "Setting $zone metadata..."
+                pdnsutil --config-dir=/tmp/pdns-seed metadata set "$zone" ALLOW-DNSUPDATE-FROM 0.0.0.0/0 ::/0
+                pdnsutil --config-dir=/tmp/pdns-seed metadata set "$zone" TSIG-ALLOW-DNSUPDATE saikat-dev-key
+                pdnsutil --config-dir=/tmp/pdns-seed metadata set "$zone" SOA-EDIT-DNSUPDATE INCREASE
+
+                # TSIG-ALLOW-AXFR is required by external-dns, not optional. With
+                # --policy=sync it needs to READ the zone (AXFR) to learn which records
+                # already exist and which are stale. Without AXFR permission it cannot
+                # list anything and silently degrades to create-only:
+                #   "--rfc2136-axfr is not set: ExternalDNS cannot list existing
+                #    records, so --policy=sync will never update or delete them"
+                # Scoping to the TSIG key (rather than ALLOW-AXFR-FROM) keeps transfers
+                # closed to unauthenticated readers — a publicly served zone must not
+                # be enumerable by anyone who can reach port 53.
+                pdnsutil --config-dir=/tmp/pdns-seed metadata set "$zone" TSIG-ALLOW-AXFR saikat-dev-key
+              done < /zones/zones
 
               # TSIG key used by external-dns and cert-manager for RFC2136 updates.
               # NOTE: this only makes the key known to POWERDNS. external-dns and
@@ -107,23 +147,6 @@ spec:
                 echo "Importing TSIG key saikat-dev-key..."
                 pdnsutil --config-dir=/tmp/pdns-seed tsigkey import saikat-dev-key hmac-sha512 "$TSIG_SECRET"
               fi
-
-              # Zone metadata enabling RFC2136 updates and automatic SOA serial bumps.
-              echo "Setting zone metadata..."
-              pdnsutil --config-dir=/tmp/pdns-seed metadata set saikat.dev ALLOW-DNSUPDATE-FROM 0.0.0.0/0 ::/0
-              pdnsutil --config-dir=/tmp/pdns-seed metadata set saikat.dev TSIG-ALLOW-DNSUPDATE saikat-dev-key
-              pdnsutil --config-dir=/tmp/pdns-seed metadata set saikat.dev SOA-EDIT-DNSUPDATE INCREASE
-
-              # TSIG-ALLOW-AXFR is required by external-dns, not optional. With
-              # --policy=sync it needs to READ the zone (AXFR) to learn which records
-              # already exist and which are stale. Without AXFR permission it cannot
-              # list anything and silently degrades to create-only:
-              #   "--rfc2136-axfr is not set: ExternalDNS cannot list existing records,
-              #    so --policy=sync will never update or delete them"
-              # Scoping to the TSIG key (rather than ALLOW-AXFR-FROM) keeps transfers
-              # closed to unauthenticated readers — a publicly served zone must not be
-              # enumerable by anyone who can reach port 53.
-              pdnsutil --config-dir=/tmp/pdns-seed metadata set saikat.dev TSIG-ALLOW-AXFR saikat-dev-key
 
               echo "Seeding complete."
               pdnsutil --config-dir=/tmp/pdns-seed zone list-all
@@ -157,13 +180,21 @@ spec:
                   name: pdns-db-app
                   key: password
           volumeMounts:
-            # Only the snapshot is mounted now: the connection parameters live in the
-            # temp config the script writes, so the pdns-config ConfigMap (which has
-            # no backend settings) is not needed here.
+            # Zone snapshots, for zones that have one. Mounted as a directory so the
+            # loop can pick out "/seed/<zone>.zone"; zones without a snapshot simply
+            # find no file and start empty.
             - name: zone-snapshot
               mountPath: /seed
+              readOnly: true
+            # The generated zone list ("<zone> <snapshot>" per line). See
+            # ansible/roles/pdns-zones.
+            - name: zones
+              mountPath: /zones
               readOnly: true
       volumes:
         - name: zone-snapshot
           configMap:
             name: pdns-zone-snapshot
+        - name: zones
+          configMap:
+            name: pdns-zones

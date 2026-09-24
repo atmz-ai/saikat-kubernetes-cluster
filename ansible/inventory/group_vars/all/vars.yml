@@ -68,3 +68,40 @@ namecheap_api_key: "{{ vault_namecheap_api_key }}"      # Indirection to vault �
 # 11 nameservers = Namecheap API max (ICANN allows 13, but Namecheap's setCustom API limits to 11).
 # These IPs must match the externalIPs in the powerdns-dns Service
 # (kubernetes/infrastructure/external-dns/pdns-service-dns.yaml).
+
+# ── PowerDNS zones ──────────────────────────────────────────────────────────
+# SINGLE SOURCE OF TRUTH for every zone this cluster serves authoritatively.
+#
+# Adding a domain = append one entry here, run `mise run dns-generate`, commit.
+# Two files are rendered from this list and must not be hand-edited:
+#   kubernetes/infrastructure/external-dns/pdns-zones-config.yaml
+#     - the zone list the seed Job creates + configures (zone, TSIG metadata)
+#   kubernetes/infrastructure/external-dns/external-dns-zones-patch.yaml
+#     - a JSON6902 append patch adding --rfc2136-zone/--domain-filter per zone
+# The generator asserts both carry every zone, so a bad render fails loudly.
+#
+# Why a generated list rather than editing the manifests directly: the zone name
+# appears in three unrelated places (the seed Job's script, external-dns's
+# --rfc2136-zone flag, and external-dns's --domain-filter flag) and they must
+# agree. They are the same value, so hardcoding it three times meant a new zone
+# was a multi-file edit with silent failure modes — a flag left behind, or a zone
+# created but never added to external-dns's list.
+#
+# Fields:
+#   name       the zone, exactly as the registrar delegates it
+#   snapshot   load pdns-zone-snapshot.yaml on seed. Only for zones that already
+#              served records elsewhere and need their contents preserved before
+#              external-dns can recreate them from DNSEndpoint CRDs. A brand-new
+#              zone leaves this false and starts empty.
+#
+# There is deliberately no "declared but not live" state. A zone listed here is a
+# zone this cluster serves: the seed Job creates it and external-dns is pointed at
+# it. Listing a zone that does not exist yet would break the AXFR at startup, so a
+# not-yet-ready domain simply stays out of the list until it is ready.
+#
+# After adding a zone, the registrar must delegate it here — point the domain's
+# NS records at the glue records registered by the namecheap-dns role
+# (ns1–ns11.<zone>, see hosts.yml `namecheap_nameserver`).
+pdns_zones:
+  - name: saikat.dev
+    snapshot: true

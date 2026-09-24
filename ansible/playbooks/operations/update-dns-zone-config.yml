@@ -1,0 +1,20 @@
+---
+# Render the PowerDNS zone artifacts from the `pdns_zones` list.
+#
+# Generates two committed files (see ansible/roles/pdns-zones):
+#   kubernetes/infrastructure/external-dns/pdns-zones-config.yaml
+#   kubernetes/infrastructure/external-dns/external-dns-zones-patch.yaml
+#
+# Runs on localhost — reads inventory only, no SSH, no cluster access. Commit and
+# push the result; Flux applies it.
+#
+# Usage:
+#   mise run dns-generate
+
+- name: Generate PowerDNS zone artifacts
+  hosts: localhost
+  gather_facts: false
+  vars:
+    pdns_zones_output_dir: "{{ playbook_dir }}/../../../kubernetes/infrastructure/external-dns"
+  roles:
+    - role: pdns-zones

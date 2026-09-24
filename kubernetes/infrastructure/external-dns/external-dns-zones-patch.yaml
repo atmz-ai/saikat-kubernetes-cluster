@@ -1,0 +1,32 @@
+#
+# Ansible managed
+#
+# JSON6902 append operations adding one --rfc2136-zone/--domain-filter pair per zone.
+#
+# GENERATED — do not hand-edit. Regenerate with: mise run dns-generate
+# from `pdns_zones` in ansible/inventory/group_vars/all/vars.yml
+#
+# This file holds ONLY the operations. The target Deployment is named by the
+# `patches: - path:` entry in kustomization.yaml — the target is stable hand-written
+# config, while the operations vary per zone.
+#
+# JSON6902 (not strategic-merge) on purpose. A strategic-merge patch on `args:`
+# REPLACES the whole list, so a flag added to the Deployment later would be silently
+# discarded every time this patch applied — no error, external-dns just runs without
+# it. JSON6902 `add` cannot drop a sibling.
+#
+# Path `/-` appends to the end of the array, so there is no index to keep in step
+# with the Deployment's arg list: adding a flag to the base cannot shift these, and
+# these cannot shift the base. Arg order is irrelevant to external-dns.
+#
+# Both flags are repeatable, NOT comma-separated. One zone per flag. A comma-joined
+# value ("a.dev,b.dev") names a single zone literally called that, which matches
+# nothing — external-dns then manages zero records while logging "All records are
+# already up to date" every cycle. Indistinguishable from success, so: one flag per
+# zone, always.
+- op: add
+  path: /spec/template/spec/containers/0/args/-
+  value: --rfc2136-zone=saikat.dev
+- op: add
+  path: /spec/template/spec/containers/0/args/-
+  value: --domain-filter=saikat.dev

@@ -2,8 +2,19 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 # Self-hosted authoritative DNS + ExternalDNS.
 #
-# PowerDNS: authoritative DNS server (LMDB backend on PVC, supports RFC2136).
-# ExternalDNS: syncs annotated Kubernetes Services to PowerDNS via RFC2136.
+# PowerDNS: authoritative DNS server (gpgsql backend on the pdns-db CNPG cluster,
+# supports RFC2136). It was LMDB on a PVC, which is single-writer and pinned DNS to
+# one node; gpgsql lets every replica read and write the same record store.
+# ExternalDNS: syncs DNSEndpoint CRDs to PowerDNS via RFC2136 + TSIG.
+#
+# WHICH ZONES ARE SERVED is declared once, in `pdns_zones`
+# (ansible/inventory/group_vars/all/vars.yml). Two files here are generated from it
+# and must not be hand-edited — regenerate with `mise run dns-generate`:
+#   pdns-zones-config.yaml        zone list the seed Job creates + configures
+#   external-dns-zones-patch.yaml appends --rfc2136-zone/--domain-filter per zone
+#
+# To add a domain: append to pdns_zones, run `mise run dns-generate`, commit, then
+# delegate the domain at its registrar to the glue records.
 #
 # SOPS-encrypted secrets (pdns-secrets.sops.yaml) contain:
 #   - PowerDNS API key (read-only debugging API)
@@ -27,9 +38,10 @@ resources:
   # Ordering intent (Flux applies in list order, and re-applies every reconcile):
   #   cnpg-cluster      creates the DB, role and tables (schema via
   #                     postInitApplicationSQLRefs)
-  #   pdns-db-seed      seeds zone + TSIG + metadata once the DB exists
+  #   pdns-zones-config the generated zone list the seed Job reads
+  #   pdns-db-seed      seeds zones + TSIG + metadata once the DB exists
   #
-  # The seed Job is safe to list here because pdns.conf now says launch=gpgsql, so
+  # The seed Job is safe to list here because pdns.conf says launch=gpgsql, so
   # pdnsutil in the Job talks to the new backend rather than the old LMDB file. The
   # Job is idempotent, and Flux keeps a Completed Job rather than re-running it.
   # For a from-scratch rebuild, delete the Job so Flux recreates it — see the
@@ -38,4 +50,17 @@ resources:
   - pdns-db-schema.yaml
   - pdns-db-grants.yaml
   - pdns-zone-snapshot.yaml
+  - pdns-zones-config.yaml
   - pdns-db-seed.yaml
+
+# Generated. Appends the per-zone RFC2136 flags to the external-dns Deployment.
+#
+# Must be a patch, not a resource — a JSON6902 op list has no resource metadata, so
+# listing it under `resources` fails with "missing Resource metadata". The target
+# lives here (stable) while the operations are generated per zone.
+patches:
+  - path: external-dns-zones-patch.yaml
+    target:
+      kind: Deployment
+      name: external-dns
+      namespace: external-dns

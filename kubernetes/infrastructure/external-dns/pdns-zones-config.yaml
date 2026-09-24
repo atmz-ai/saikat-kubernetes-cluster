@@ -1,0 +1,25 @@
+#
+# Ansible managed
+#
+# The zone list consumed by the pdns-db-seed Job.
+#
+# GENERATED from `pdns_zones` in ansible/inventory/group_vars/all/vars.yml — do not
+# hand-edit. Regenerate with: mise run dns-generate
+#
+# The seed Job reads this and, per zone: creates the zone, optionally loads its
+# snapshot, and sets the four metadata items that make RFC2136 work
+# (ALLOW-DNSUPDATE-FROM, TSIG-ALLOW-DNSUPDATE, SOA-EDIT-DNSUPDATE, TSIG-ALLOW-AXFR).
+#
+# Kept as a ConfigMap rather than baked into the Job's script so adding a zone does
+# not mean editing bash. The zone name previously appeared in three unrelated places
+# and they had to agree — a list makes that structural instead of conventional.
+#
+# `snapshot` is read by the Job as a shell boolean ("true"/"false").
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pdns-zones
+  namespace: external-dns
+data:
+  zones: |
+    saikat.dev true

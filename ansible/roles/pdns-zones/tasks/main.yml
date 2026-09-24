@@ -1,0 +1,76 @@
+# Render the generated zone artifacts from `pdns_zones` (group_vars/all/vars.yml).
+#
+# Runs on localhost — reads the inventory variable only, does not touch nodes and
+# does not talk to the cluster. The rendered files are committed and applied by Flux.
+#
+# Two artifacts, both generated because the same zone name must appear in two
+# unrelated manifests that have to agree:
+#
+#   pdns-zones-config.yaml        the seed Job's zone list (create + TSIG metadata)
+#   external-dns-zones-patch.yaml a JSON6902 append patch adding
+#                                 --rfc2136-zone / --domain-filter per zone
+#
+# The verification task at the end is not a formality. It is the reason the list can
+# be trusted: without it, a template bug would produce a manifest that quietly omits
+# a zone, and the failure would surface at runtime as external-dns managing no
+# records (indistinguishable from success, as happened with the comma-joined flags).
+#
+# Usage:
+#   mise run dns-generate
+# which runs:
+#   ansible-playbook ansible/playbooks/operations/update-dns-zone-config.yml
+
+- name: Fail fast if no zones are declared
+  ansible.builtin.assert:
+    that:
+      - pdns_zones is defined
+      - pdns_zones | length > 0
+    fail_msg: >-
+      pdns_zones is empty or undefined in ansible/inventory/group_vars/all/vars.yml.
+      At least one zone must be declared — rendering an empty zone list would
+      disable RFC2136 for every zone and strip the seed Job's zone setup.
+
+- name: Render the zone list consumed by the seed Job
+  ansible.builtin.template:
+    src: zones-config.yaml.j2
+    dest: "{{ playbook_dir }}/../../../kubernetes/infrastructure/external-dns/pdns-zones-config.yaml"
+    mode: '0644'
+
+- name: Render the external-dns zone flag patch
+  ansible.builtin.template:
+    src: zones-patch.yaml.j2
+    dest: "{{ playbook_dir }}/../../../kubernetes/infrastructure/external-dns/external-dns-zones-patch.yaml"
+    mode: '0644'
+
+# Read the rendered files back and prove each one carries every declared zone.
+# A dropped zone fails the playbook locally, before anything is committed or applied.
+- name: Read back the rendered artifacts
+  ansible.builtin.set_fact:
+    pdns_rendered_seed_config: "{{ lookup('file', pdns_zones_output_dir ~ '/pdns-zones-config.yaml') }}"
+    pdns_rendered_zone_patch: "{{ lookup('file', pdns_zones_output_dir ~ '/external-dns-zones-patch.yaml') }}"
+
+- name: Verify every zone reached the seed Job's zone list
+  ansible.builtin.assert:
+    that:
+      - item in pdns_rendered_seed_config
+    fail_msg: >-
+      Zone '{{ item }}' is missing from pdns-zones-config.yaml. The seed Job would
+      never create it, so external-dns would have nothing to write records into.
+      Fix the template — do not commit this.
+  loop: "{{ pdns_zones | map(attribute='name') | list }}"
+
+- name: Verify every zone reached the external-dns flag patch
+  ansible.builtin.assert:
+    that:
+      - item in pdns_rendered_zone_patch
+    fail_msg: >-
+      Zone '{{ item }}' is missing from external-dns-zones-patch.yaml. external-dns
+      would ignore it entirely and still report success while managing nothing.
+      Fix the template — do not commit this.
+  loop: "{{ pdns_zones | map(attribute='name') | list }}"
+
+- name: Report what was generated
+  ansible.builtin.debug:
+    msg: >-
+      Generated zone artifacts for {{ pdns_zones | map(attribute='name') | join(', ') }}.
+      Loading a snapshot: {{ pdns_zones | selectattr('snapshot') | map(attribute='name') | join(', ') | default('none', true) }}.

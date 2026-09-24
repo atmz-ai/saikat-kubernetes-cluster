@@ -350,6 +350,10 @@ run = '''
 description = "Run an Ansible playbook (usage: mise run ansible-playbook -- ansible/playbooks/operations/<playbook>.yml [-e target_host=...])"
 run = "./.venv/bin/ansible-playbook"
 
+[tasks.dns-generate]
+description = "Regenerate the PowerDNS zone artifacts from the pdns_zones list (ansible/inventory/group_vars/all/vars.yml)"
+run = "./.venv/bin/ansible-playbook ansible/playbooks/operations/update-dns-zone-config.yml"
+
 [tasks.ansible-lint]
 description = "Lint Ansible playbooks and roles (runs ansible-lint on ansible/playbooks/operations/)"
 run = "./.venv/bin/ansible-lint ansible/playbooks/operations/"
