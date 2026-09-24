@@ -400,6 +400,15 @@ Do NOT use 1-replica for workloads without app-layer replication. Losing the sin
 - The `harbor-db` Cluster in `kubernetes/infrastructure/harbor/cnpg-cluster.yaml` must have `enableSuperuserAccess: true` set, with `superuserSecret: name: harbor-db-superuser` (the SOPS-encrypted secret in `harbor-db-superuser.sops.yaml`).
 - This applies to ALL CNPG clusters in the repo — every service's PostgreSQL cluster must use this pattern for superuser password management.
 
+### CNPG Application Role (Hard Rule)
+
+`initdb.owner` provisions a **low-privilege application role** that owns the database, and the operator generates an `-app` Secret for it. Use it — do NOT reach for the superuser for application connections.
+
+- **Prefer `-app` over `-superuser` for every application.** The `-superuser` Secret is administrative only and is generated ONLY when `enableSuperuserAccess: true`. Without it, CNPG sets the `postgres` password to `NULL`, so any client authenticating as `postgres` gets `FATAL: password authentication failed`.
+- **`enableSuperuserAccess: true` makes the superuser Secret win for the `postgres` role.** If both a `-superuser` Secret and a stale `-app`-era password disagree, the superuser value is what the operator syncs — so a client holding the old app password fails. Adding `enableSuperuserAccess` to "fix" an auth failure is the wrong move; it usually *creates* the mismatch.
+- **`postInitApplicationSQLRefs` always runs as the superuser**, regardless of `initdb.owner`. SQL it applies (e.g. from a schema ConfigMap) therefore creates **superuser-owned tables**, and the app role then hits `permission denied for table ...` on its first write. Pair any schema ConfigMap with a grants ConfigMap that transfers ownership (`ALTER TABLE ... OWNER TO <app>` / `ALTER SEQUENCE ...` / `ALTER SCHEMA public OWNER TO <app>`). List the schema ConfigMap first in `configMapRefs` — ordering is Secrets first, then ConfigMaps, each in array order.
+- Verify ownership directly before wiring the client: `SELECT tablename, tableowner FROM pg_tables WHERE schemaname='public';`. Sequence names are easy to miss — list them from the live database rather than guessing.
+
 ### Backups
 Velero only (full cluster DR, 30-day self-managed `ttl: 720h`). Named prefix `velero/` in the bucket. No bucket lifecycle policy (Velero GC handles it).
 
@@ -411,6 +420,30 @@ Velero only (full cluster DR, 30-day self-managed `ttl: 720h`). Named prefix `ve
 - **NetworkPolicy rule:** Never rely on `fromCIDRSet`/`namespaceSelector`/`podSelector` for gateway-originated traffic (cilium-envoy runs hostNetwork; appears as node IP). Use an explicit ingress rule with only a `ports:` clause (app-level auth does the real enforcement).
 - **SOPS encryption mechanism:** To encrypt `*.sops.yaml` files, use the mise tasks: `mise run sops-encrypt -- <file>.sops.yaml` (encrypts in-place) or `mise run sops-edit -- <file>.sops.yaml` (opens in `$EDITOR`). These tasks extract the age key from Ansible vault automatically. The `.sops.yaml` creation rules in repo root handle age key selection automatically — no need to pass `--age` explicitly. For decryption, use `mise run sops-decrypt -- <file>.sops.yaml`. To get the raw age key for ad-hoc use: `mise run ansible-vault-view -- vault_age_private_key`.
 - **Editing SOPS files (decrypt → edit → re-encrypt workflow):** To add/modify keys in an existing `*.sops.yaml` file without an interactive editor: (1) `mise run sops-decrypt -- --in-place <file>.sops.yaml` (decrypt in-place), (2) edit `<file>.sops.yaml` with VS Code edit tools (`replace_string_in_file`, etc.), (3) `mise run sops-encrypt -- <file>.sops.yaml` (encrypt in-place). This works reliably every time — no `sops --set` JSON syntax issues, no MAC integrity errors, no temp files to clean up. Never commit the file while it's in the decrypted (plaintext) state.
+
+### DNS (PowerDNS + external-dns)
+
+DNS is self-hosted, not Cloudflare. PowerDNS Authoritative runs from `kubernetes/infrastructure/external-dns/` with the `gpgsql` (PostgreSQL) backend on a CNPG cluster, so every replica reads and writes one shared record store — the previous LMDB backend was single-writer (`Multiple instances: No` in PowerDNS's backend matrix) and pinned DNS to one node. `external-dns` owns records via RFC2136 dynamic updates.
+
+**PowerDNS config: never replace the image's `pdns.conf` wholesale.** The entrypoint is `/usr/local/sbin/pdns_server-startup`, a wrapper that renders Jinja2 templates from the environment into `/etc/powerdns/pdns.d/` (driven by `TEMPLATE_FILES` + `/etc/powerdns/templates.d/<name>.j2`). Mounting our own `pdns.conf` **replaces** the image's, which silently drops settings the wrapper depends on. Two consequences observed:
+- `include-dir=/etc/powerdns/pdns.d` must be restated in any custom `pdns.conf`. Without it the wrapper's rendered backend config is never read and the server dies with `Unable to launch, no backends configured for querying`.
+- The wrapper also generates `pdns.d/_api.conf` from `PDNS_AUTH_API_KEY`, so `webserver`/`api`/`api-key` need not be in our file — but they only take effect via the same `include-dir`.
+Templating is the right mechanism for connection params: the DB password stays in a Secret and never appears in the ConfigMap or pod spec (container `args` would expose it via `kubectl get pod`). Note `pdnsutil` does **not** go through this wrapper, cannot take backend settings as CLI flags, and ignores `PDNS_*` env vars — it needs a real config file.
+
+**external-dns RFC2136 + `--policy=sync` needs both halves of AXFR.** Zone transfer is how external-dns reads existing records; without it the sync policy silently degrades to create-only — it logs one startup warning and then never updates or deletes anything:
+```
+--rfc2136-axfr is not set: ExternalDNS cannot list existing records,
+so --policy=sync will never update or delete them
+```
+- Client: `--rfc2136-axfr`.
+- Server: `TSIG-ALLOW-AXFR <key>` zone metadata (set by the seed Job). Prefer it over `ALLOW-AXFR-FROM` so a publicly served zone is not enumerable by unauthenticated readers.
+- Enabling AXFR turns on real deletion. Before enabling, diff the DNSEndpoint CRDs against the live zone — names lacking an external-dns `heritage=external-dns` TXT marker are treated as unmanaged and deleted.
+
+**`--rfc2136-zone` and `--domain-filter` are REPEATABLE, not comma-separated.** Passing `saikat.dev,oleole.ai` creates a single zone/domain literally named `saikat.dev,oleole.ai`, which matches nothing — external-dns then manages zero records while logging `All records are already up to date` every cycle (indistinguishable from success). Symptom once AXFR is on: `AXFR error: dns: no signature found`. Add a zone by repeating the flag. List only zones that actually exist — external-dns never creates zones, and AXFR against a missing one is an error.
+
+**Record mutations go through `pdnsutil`, not SQL.** The seed Job (`pdns-db-seed.yaml`) creates the zone, imports the TSIG key, sets metadata (`ALLOW-DNSUPDATE-FROM`, `TSIG-ALLOW-DNSUPDATE`, `TSIG-ALLOW-AXFR`, `SOA-EDIT-DNSUPDATE`), and loads the committed snapshot (`pdns-zone-snapshot.yaml`). PowerDNS owns the internal representation of zones/keys/metadata and `pdnsutil` is the supported interface. The Job is a no-op once complete — Flux keeps a Completed Job — so re-trigger a rebuild with `kubectl -n external-dns delete job pdns-db-seed`.
+
+**Zone snapshots are the rebuild source of truth** (`pdns-zone-snapshot.yaml`). Two non-obvious details: the external-dns TXT ownership markers must survive verbatim (without them external-dns sees the loaded A/NS records as unmanaged and deletes them under `--policy=sync`), and the SOA should carry a real in-zone MNAME plus a low negative-cache TTL (`minimum`) rather than PowerDNS's `a.misconfigured.dns.server.invalid.` placeholder and a 3600s minimum — at 3600, any transient NODATA is pinned in resolver caches for an hour.
 
 ### Local Environment & Parity
 The repo uses a single monorepo-wide `mise.toml` at the repository root as the source of truth for tool versions, task orchestration, and all app-specific environment variables. There are **no per-app `mise.toml`, `fnox.toml`, or `pitchfork.toml` files** — all env vars, secrets, and daemon definitions live in the root `mise.toml`, root `fnox.toml`, and root `mise.toml` `[daemons]` respectively. App-specific env vars are grouped by `# ── <app> ──` comment headers in the root `[env]` section. Avoid adding per-project config files unless there is a strong, documented reason.
