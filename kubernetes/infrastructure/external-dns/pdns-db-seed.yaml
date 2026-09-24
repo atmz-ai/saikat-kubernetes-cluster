@@ -110,26 +110,22 @@ spec:
                 secretKeyRef:
                   name: pdns-tsig-key
                   key: tsig-key
-            # Same connection parameters the PowerDNS server uses. host/port are
-            # literals; dbname/user/password come from the Secret CNPG generates.
+            # Same connection parameters the PowerDNS server uses. Credentials come
+            # from pdns-db-superuser — see the explanation in pdns-deployment.yaml:
+            # the `postgres` role's password is managed from the superuser secret when
+            # enableSuperuserAccess is on, so pdns-db-app's password does not work.
             - name: PDNS_DB_HOST
               value: pdns-db-rw.external-dns.svc.cluster.local
             - name: PDNS_DB_PORT
               value: "5432"
             - name: PDNS_DB_NAME
-              valueFrom:
-                secretKeyRef:
-                  name: pdns-db-app
-                  key: dbname
+              value: pdns
             - name: PDNS_DB_USER
-              valueFrom:
-                secretKeyRef:
-                  name: pdns-db-app
-                  key: username
+              value: postgres
             - name: PDNS_DB_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: pdns-db-app
+                  name: pdns-db-superuser
                   key: password
           volumeMounts:
             # Mount the config directory wholesale (rather than pdns.conf via

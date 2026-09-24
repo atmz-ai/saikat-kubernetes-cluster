@@ -92,27 +92,28 @@ spec:
                 secretKeyRef:
                   name: pdns-api-key
                   key: api-key
-            # host/port are literals; dbname/user/password come from the Secret CNPG
-            # generates for the `pdns` database. The -rw service is used so a CNPG
-            # failover (which repoints it at the promoted replica) needs no change here.
+            # host/port are literals. The credentials come from pdns-db-superuser,
+            # NOT pdns-db-app, despite PowerDNS connecting as the application
+            # database's owner.
+            #
+            # Why: `owner: postgres` names the SAME role CNPG uses as its superuser,
+            # so both secrets describe `postgres`. With enableSuperuserAccess set, the
+            # operator syncs the SUPERUSER secret's password into the role and ignores
+            # the app secret for that role — verified directly, the superuser
+            # password authenticates and the app one does not. Using pdns-db-app here
+            # yields: FATAL: password authentication failed for user "postgres".
             - name: PDNS_DB_HOST
               value: pdns-db-rw.external-dns.svc.cluster.local
             - name: PDNS_DB_PORT
               value: "5432"
             - name: PDNS_DB_NAME
-              valueFrom:
-                secretKeyRef:
-                  name: pdns-db-app
-                  key: dbname
+              value: pdns
             - name: PDNS_DB_USER
-              valueFrom:
-                secretKeyRef:
-                  name: pdns-db-app
-                  key: username
+              value: postgres
             - name: PDNS_DB_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: pdns-db-app
+                  name: pdns-db-superuser
                   key: password
           volumeMounts:
             - name: pdns-config
