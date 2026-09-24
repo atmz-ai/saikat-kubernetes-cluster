@@ -1,0 +1,52 @@
+# Records for a zone that live OUTSIDE the cluster: mail, third parties, anything that
+# points away from our nodes.
+#
+# WHY THIS EXISTS SEPARATELY FROM dnsendpoint-*.yaml
+#
+# external-dns is the normal path for these, but it cannot serve this case, for two
+# independent reasons — both verified against live behaviour, not inferred:
+#
+#   1. Apex records get no ownership marker. external-dns writes "a-<name>"/"cname-<name>"
+#      TXT markers so it can recognise its own records, but not for apex/root records.
+#      Confirmed in both zones: oleole.ai and saikat.dev each hold 40 apex A records with
+#      no marker, and external-dns created oleole.ai's itself ("Adding RR: oleole.ai 300 A")
+#      without ever writing one. Tracked upstream as #6125.
+#
+#      Consequence: plan.go refuses to create ANY new record type at a name that holds an
+#      unowned record, so the first apex addition — here an MX — is silently discarded.
+#
+#   2. The rfc2136 provider cannot read MX back. Its AXFR handler switches over
+#      CNAME/DNAME/A/AAAA/TXT/NS/PTR and ends in "default: continue // Unhandled record
+#      type". external-dns can therefore WRITE an MX but never see it afterwards, so it
+#      cannot update or delete it. (Proved with a non-apex probe: the MX was written and
+#      given an ownership marker, then survived its DNSEndpoint being removed, with no
+#      DELETE ever logged. No upstream issue filed for this one.)
+#
+# So these records are applied by pdnsutil instead. `rrset replace` sets an rrset to the
+# declared contents, which makes the Job idempotent: re-running converges rather than
+# duplicating, and removing a line removes the record.
+#
+# TRADE-OFF, accepted deliberately: this is a second mechanism alongside external-dns.
+# The alternative is waiting on upstream. Keep the records here minimal and prefer
+# DNSEndpoints for anything external-dns CAN manage (A, AAAA, CNAME, NS) — including
+# subdomain CNAMEs, which work fine (2rbnnd3xklw7.oleole.ai verifies Google Workspace
+# through external-dns today).
+#
+# RE-RUNNING: a Completed Job never re-runs itself. After changing the records below,
+# delete the Job so Flux recreates it:
+#   kubectl -n external-dns delete job pdns-static-records
+#
+# FORMAT: one record per line, pipe-separated:
+#   <zone>|<name>|<TYPE>|<ttl>|<content>
+# Blank lines and lines starting with # are ignored. Content is passed to pdnsutil
+# verbatim, so TXT values keep their own quoting.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pdns-static-records
+  namespace: external-dns
+data:
+  records: |
+    # oleole.ai — Google Workspace. Supplied by the admin console's Gmail activation
+    # screen: priority 1, SMTP.GOOGLE.COM, TTL as low as possible.
+    oleole.ai|oleole.ai|MX|300|1 smtp.google.com

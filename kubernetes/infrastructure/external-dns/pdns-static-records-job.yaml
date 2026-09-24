@@ -1,0 +1,117 @@
+# Applies records that external-dns cannot manage, using pdnsutil.
+#
+# See pdns-static-records.yaml for WHY this exists — in short, two independent
+# external-dns gaps (no ownership marker on apex records, tracked as #6125; and the
+# rfc2136 provider unable to read MX back) mean an apex MX can be neither created nor
+# kept in step through the normal DNSEndpoint path.
+#
+# Idempotent by construction: it uses `rrset replace`, which sets each rrset to exactly
+# the declared contents. Re-running converges instead of duplicating, and removing a line
+# from the ConfigMap removes the record on the next run. Safe to re-run at any time.
+#
+# RE-RUNNING: a Completed Job never re-runs itself, and — unlike pdns-db-seed — changing
+# this Job's ConfigMap does NOT change the Job's own spec, so there is no immutable-template
+# error to prompt you. Nothing will happen until the Job is deleted:
+#   kubectl -n external-dns delete job pdns-static-records
+# Flux then recreates it on the next reconcile (webhook within seconds of a push).
+#
+# pdnsutil does NOT go through the image's pdns_server-startup wrapper, so it needs a real
+# config file rather than the environment templating the server uses — the same constraint
+# documented on pdns-db-seed. It also cannot take backend settings on the command line and
+# ignores PDNS_* environment variables. The temp config holds the DB password, so it lives
+# under /tmp (never a volume) and is removed on exit, including on failure.
+#
+# Ordering intent: after pdns-db-seed, so the zone exists before records are written into it.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: pdns-static-records
+  namespace: external-dns
+spec:
+  backoffLimit: 6
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: apply
+          image: docker.io/powerdns/pdns-auth-52:latest
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -eu
+
+              trap 'rm -rf /tmp/pdns-static' EXIT
+              mkdir -p /tmp/pdns-static
+              printf '%s\n' \
+                "launch=gpgsql" \
+                "gpgsql-host=$PDNS_DB_HOST" \
+                "gpgsql-port=$PDNS_DB_PORT" \
+                "gpgsql-dbname=$PDNS_DB_NAME" \
+                "gpgsql-user=$PDNS_DB_USER" \
+                "gpgsql-password=$PDNS_DB_PASSWORD" \
+                > /tmp/pdns-static/pdns.conf
+
+              echo "Waiting for the PowerDNS tables to be reachable..."
+              until pdnsutil --config-dir=/tmp/pdns-static zone list-all > /dev/null 2>&1; do
+                echo "  backend not ready yet, retrying..."
+                sleep 5
+              done
+              echo "Backend reachable."
+
+              # Each line is: <zone>|<name>|<TYPE>|<ttl>|<content>
+              # `rrset replace` is what makes this idempotent — it declares the rrset's
+              # full contents rather than appending, so a re-run is a no-op and a removed
+              # line removes the record.
+              #
+              # IFS is set to "|" only for the read, so content may contain spaces
+              # (everything after the 4th field). TXT content keeps its own quoting as
+              # written in the ConfigMap.
+              applied=0
+              while IFS='|' read -r zone name rtype ttl content; do
+                # Skip blanks and comments. Strip trailing whitespace from content so a
+                # stray space does not become part of an MX target.
+                case "$zone" in ''|'#'*) continue ;; esac
+                content="$(printf '%s' "$content" | sed 's/[[:space:]]*$//')"
+
+                # Fail loudly on a malformed line rather than silently skipping it —
+                # a skipped record is the exact failure mode this Job exists to avoid.
+                if [ -z "$zone" ] || [ -z "$name" ] || [ -z "$rtype" ] || [ -z "$ttl" ] || [ -z "$content" ]; then
+                  echo "ERROR: malformed record line: '$zone|$name|$rtype|$ttl|$content'" >&2
+                  exit 1
+                fi
+
+                echo "Setting $name IN $rtype (zone $zone, ttl $ttl)"
+                pdnsutil --config-dir=/tmp/pdns-static rrset replace "$zone" "$name" "$rtype" "$ttl" "$content"
+                applied=$((applied + 1))
+              done < /records/records
+
+              echo "Applied $applied record(s)."
+          env:
+            - name: PDNS_DB_HOST
+              value: pdns-db-rw.external-dns.svc.cluster.local
+            - name: PDNS_DB_PORT
+              value: "5432"
+            - name: PDNS_DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: pdns-db-app
+                  key: dbname
+            - name: PDNS_DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: pdns-db-app
+                  key: username
+            - name: PDNS_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: pdns-db-app
+                  key: password
+          volumeMounts:
+            - name: records
+              mountPath: /records
+              readOnly: true
+      volumes:
+        - name: records
+          configMap:
+            name: pdns-static-records

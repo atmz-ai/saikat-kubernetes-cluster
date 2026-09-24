@@ -85,6 +85,11 @@ resources:
   - pdns-zone-snapshot.yaml
   - pdns-zones-config.yaml
   - pdns-db-seed.yaml
+  # Records external-dns cannot manage, applied with pdnsutil. Currently the oleole.ai
+  # MX, which is blocked by two independent external-dns gaps — see
+  # pdns-static-records.yaml for both, with evidence, and for the re-run instructions.
+  - pdns-static-records.yaml
+  - pdns-static-records-job.yaml
 
 # Generated. Appends the per-zone RFC2136 flags to the external-dns Deployment.
 #
