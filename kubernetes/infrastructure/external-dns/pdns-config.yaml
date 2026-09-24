@@ -1,4 +1,4 @@
-# PowerDNS authoritative server configuration (non-sensitive settings).
+# PowerDNS authoritative server configuration.
 #
 # Uses the gpgsql backend: PostgreSQL via the pdns-db CNPG cluster. This replaced
 # the LMDB file backend, which could only ever run ONE replica (LMDB is
@@ -7,18 +7,26 @@
 # (`Multiple instances: Yes`), so every PowerDNS replica reads and writes the same
 # records and updates from external-dns / cert-manager are visible cluster-wide.
 #
-# Connection parameters (host, dbname, user, PASSWORD) are deliberately NOT here.
-# They are passed as container ARGS using Kubernetes `$(VAR)` expansion, which is
-# already proven to work in this deployment for `--api-key=$(PDNS_API_KEY)`. That
-# keeps the password out of a ConfigMap and out of the rendered manifest.
+# CONNECTION PARAMETERS ARE NOT IN THIS FILE. The PowerDNS image ships
+# `/usr/local/sbin/pdns_server-startup`, a wrapper that renders Jinja2 templates
+# from the environment into `pdns.d/*.conf` before exec'ing the real server, driven
+# by two env vars:
 #
-# Key settings:
-#   - launch=gpgsql: PostgreSQL backend (supports DNS update + TSIG)
-#   - gpgsql-host (via args): the -rw service, which follows CNPG failover
-#   - api=yes: HTTP API on port 8081 (read-only debugging + pdnsutil remote)
-#   - dnsupdate=yes: RFC2136 dynamic updates (ExternalDNS + cert-manager DNS-01)
-#   - local-port=5300: non-privileged port (Cilium LoadBalancer maps 53→5300)
----
+#   TEMPLATE_FILES  comma-separated template names (no .j2 extension)
+#   templates.d/    source directory; `<name>.j2` -> `pdns.d/<name>.conf`
+#
+# All environment variables are visible to the template, so the DB password is
+# injected from the CNPG-generated Secret and never appears in this ConfigMap or in
+# the pod spec. This is the image's documented mechanism and is strictly better
+# than the alternatives tried first:
+#   - container `args` (`--gpgsql-password=$(...)`): works, but exposes the
+#     password in the pod spec, readable via `kubectl get pod` — a Secret reference
+#     does not have that exposure.
+#   - a hand-written config in the seed Job: needed there, because `pdnsutil` does
+#     NOT go through this wrapper, but wrong for the server itself.
+#
+# The same wrapper also generates webserver/api/api-key from PDNS_AUTH_API_KEY, so
+# those are not repeated in pdns.conf.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -26,16 +34,14 @@ metadata:
   namespace: external-dns
 data:
   pdns.conf: |
-    # Backend: PostgreSQL (shared — supports DNS update + TSIG, multiple replicas).
-    # See the StatefulSet args for the connection parameters.
-    launch=gpgsql
+    # Static settings only — see the header comment for why the backend settings
+    # are rendered separately.
 
     # DNS server settings
     local-address=0.0.0.0
     local-port=5300
 
     # HTTP API (read-only debugging — not used for record management)
-    api=yes
     webserver=yes
     webserver-address=0.0.0.0
     webserver-port=8081
@@ -50,3 +56,15 @@ data:
     default-ttl=300
     loglevel=4
     version-string=anonymous
+
+  gpgsql.j2: |
+    # Rendered by pdns_server-startup from the environment (TEMPLATE_FILES=gpgsql).
+    # Backend: PostgreSQL (shared — supports DNS update + TSIG, multiple replicas).
+    # gpgsql-host is the -rw service, so a CNPG failover that repoints it needs no
+    # change here.
+    launch=gpgsql
+    gpgsql-host={{ PDNS_DB_HOST }}
+    gpgsql-port={{ PDNS_DB_PORT }}
+    gpgsql-dbname={{ PDNS_DB_NAME }}
+    gpgsql-user={{ PDNS_DB_USER }}
+    gpgsql-password={{ PDNS_DB_PASSWORD }}

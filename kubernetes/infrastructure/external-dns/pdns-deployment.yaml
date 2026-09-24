@@ -67,15 +67,10 @@ spec:
         - name: powerdns
           image: docker.io/powerdns/pdns-auth-52:latest
           args:
-            - --api-key=$(PDNS_API_KEY)
-            # Connection parameters passed as args rather than in pdns.conf, so the
-            # password never lands in a ConfigMap. Kubernetes expands $(VAR) in args;
-            # these resolve from the env block below.
-            - --gpgsql-host=$(PDNS_DB_HOST)
-            - --gpgsql-port=$(PDNS_DB_PORT)
-            - --gpgsql-dbname=$(PDNS_DB_NAME)
-            - --gpgsql-user=$(PDNS_DB_USER)
-            - --gpgsql-password=$(PDNS_DB_PASSWORD)
+            # No --gpgsql-*/--api-key flags: the image's pdns_server-startup wrapper
+            # renders those from the environment (see pdns-config.yaml). Passing them
+            # as args would additionally expose the DB password in the pod spec,
+            # readable via `kubectl get pod`; a Secret reference does not.
           ports:
             - name: dns-udp
               containerPort: 5300
@@ -87,11 +82,18 @@ spec:
               containerPort: 8081
               protocol: TCP
           env:
-            - name: PDNS_API_KEY
+            # PDNS_AUTH_API_KEY is consumed by pdns_server-startup, which writes
+            # webserver/api/api-key into pdns.d/_api.conf. This is the image's own
+            # convention for the API key, so it must keep this exact name.
+            - name: PDNS_AUTH_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: pdns-api-key
                   key: api-key
+            # Tells pdns_server-startup which template(s) to render. The name must
+            # match the ConfigMap key "gpgsql.j2".
+            - name: TEMPLATE_FILES
+              value: gpgsql
             # host/port are literals; dbname/user/password come from pdns-db-app —
             # the CNPG-generated Secret for the role that OWNS the database. Per
             # CNPG's "Connecting from an application" docs this is the secret
@@ -125,6 +127,12 @@ spec:
               mountPath: /etc/powerdns/pdns.conf
               subPath: pdns.conf
               readOnly: true
+            # The template the wrapper renders into pdns.d/gpgsql.conf. Mounted as a
+            # directory (not subPath) because the wrapper reads the whole
+            # templates.d directory to resolve TEMPLATE_FILES entries.
+            - name: pdns-templates
+              mountPath: /etc/powerdns/templates.d
+              readOnly: true
           readinessProbe:
             tcpSocket:
               port: 5300
@@ -150,3 +158,12 @@ spec:
         - name: pdns-config
           configMap:
             name: pdns-config
+            items:
+              - key: pdns.conf
+                path: pdns.conf
+        - name: pdns-templates
+          configMap:
+            name: pdns-config
+            items:
+              - key: gpgsql.j2
+                path: gpgsql.j2
