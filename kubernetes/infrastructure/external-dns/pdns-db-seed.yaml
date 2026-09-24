@@ -114,6 +114,17 @@ spec:
               pdnsutil --config-dir=/tmp/pdns-seed metadata set saikat.dev TSIG-ALLOW-DNSUPDATE saikat-dev-key
               pdnsutil --config-dir=/tmp/pdns-seed metadata set saikat.dev SOA-EDIT-DNSUPDATE INCREASE
 
+              # TSIG-ALLOW-AXFR is required by external-dns, not optional. With
+              # --policy=sync it needs to READ the zone (AXFR) to learn which records
+              # already exist and which are stale. Without AXFR permission it cannot
+              # list anything and silently degrades to create-only:
+              #   "--rfc2136-axfr is not set: ExternalDNS cannot list existing records,
+              #    so --policy=sync will never update or delete them"
+              # Scoping to the TSIG key (rather than ALLOW-AXFR-FROM) keeps transfers
+              # closed to unauthenticated readers — a publicly served zone must not be
+              # enumerable by anyone who can reach port 53.
+              pdnsutil --config-dir=/tmp/pdns-seed metadata set saikat.dev TSIG-ALLOW-AXFR saikat-dev-key
+
               echo "Seeding complete."
               pdnsutil --config-dir=/tmp/pdns-seed zone list-all
           env:

@@ -60,6 +60,15 @@ spec:
             - --rfc2136-tsig-keyname=saikat-dev-key
             - --rfc2136-tsig-secret-alg=hmac-sha512
             - --rfc2136-tsig-secret=$(TSIG_KEY)
+            # REQUIRED for --policy=sync. Without AXFR, ExternalDNS cannot list existing
+            # records, and the sync policy silently degrades to create-only — it logs a
+            # single warning at startup and then never updates or deletes anything:
+            #   "--rfc2136-axfr is not set: ExternalDNS cannot list existing records,
+            #    so --policy=sync will never update or delete them"
+            # Server side: the zone authorises this key via TSIG-ALLOW-AXFR (set by
+            # pdns-db-seed.yaml). The two must stay in step — the flag without the
+            # metadata fails the transfer, the metadata without the flag is unused.
+            - --rfc2136-axfr
             - --domain-filter=saikat.dev,oleole.ai
             - --registry=txt
             - --txt-owner-id=yral-k8s
