@@ -55,24 +55,27 @@ kubectl = "latest"
 maestro = { version = "latest", os = ["macos"] }
 node = "latest"
 pitchfork = "latest"
-# Container runtime for local image builds (`mise run <app>-image` and the
-# `<app>-container` daemons).
+# ── Container runtime for local image builds ────────────────────────────────
+# Runtime for `mise run <app>-image` and the `<app>-container` daemons.
 #
-# macOS: Apple's `container` CLI (aqua:apple/container). Picked over podman
-#   because its apiserver is a launchd-managed service — there is no VM to
-#   boot by hand. `podman machine` IS a VM that must be started manually, and a
-#   missing machine is exactly what made `podman build` fail with exit 125
-#   ("Cannot connect to Podman ... podman.sock: no such file or directory").
-#   podman cannot autostart its machine either: neither `machine init` nor
-#   `machine set` exposes an autostart flag, so it would need a hand-written
-#   launchd agent. Apple's runtime also builds linux/amd64 on arm64 via Rosetta
-#   (verified: `uname -m` → x86_64), which is what every `-image` task's
-#   `--platform linux/amd64` requires.
-# Linux/WSL: podman (native, no VM layer). WSL containers are the Windows plan;
+# macOS → Apple's `container` CLI, declared in the DOTFILES repo as
+#   `"brew:container"` (~/.dotfiles/mise.toml), NOT here. It is a system-wide
+#   tool, and declaring it in [tools] too would install a second copy under
+#   ~/.local/share/mise/installs/container whose shim shadows
+#   /opt/homebrew/bin/container on PATH. Same split as elsewhere: per-project
+#   config declares language/toolchain versions, the dotfiles declare system tools.
+#
+#   Chosen over podman on macOS because its apiserver is a launchd-managed
+#   service — there is no VM to boot by hand. `podman machine` IS a VM that must
+#   be started manually, and a missing machine is exactly what made `podman build`
+#   fail with exit 125 ("Cannot connect to Podman ... podman.sock: no such file
+#   or directory"). podman cannot autostart its machine either: neither `machine
+#   init` nor `machine set` exposes an autostart flag. Apple's runtime also builds
+#   linux/amd64 on arm64 via Rosetta (verified: `uname -m` → x86_64), which is
+#   what every `-image` task's `--platform linux/amd64` requires.
+#
+# Linux/WSL → podman (native, no VM layer). WSL containers are the Windows plan;
 #   no action needed there yet.
-#
-# OS-scoped so each platform resolves exactly one runtime.
-container = { version = "latest", os = ["macos"] }
 podman = { version = "latest", os = ["linux"] }
 python = "latest"
 # rclone — third S3 client, for the operations neither of the others covers:
