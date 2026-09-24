@@ -64,6 +64,7 @@ resources:
   # --managed-record-types in external-dns-deployment.yaml first if one is missing.
   - dnsendpoint-saikat-dev.yaml
   - dnsendpoint-oleole-ai.yaml
+  - dnsendpoint-oleole-ai-external.yaml
   - pdns-secrets.sops.yaml
   # PowerDNS's PostgreSQL backend (CNPG) and its one-time seed.
   #
