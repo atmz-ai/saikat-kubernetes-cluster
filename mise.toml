@@ -937,50 +937,48 @@ daemons = ["spacetimedb-dev"]
 env = { SPACETIMEDB_URL = "http://127.0.0.1:3000" }
 run = "fnox exec -- cargo test --features ssr --bins --lib -- --test-threads=1"
 
-# ── Local image builds: runtime + resource sizing (all *-image tasks) ────────
+# ── Local image builds: runtime + builder sizing (all *-image tasks) ─────────
 # Every `<app>-image` task is OS-conditional:
 #   macOS  → `container build` (Apple's CLI)
 #   Linux  → `podman build`
 #
-# On macOS the flags are NOT cosmetic. Apple's builder VM defaults to 2 CPUs /
-# 2048 MB (BuildConfig in Sources/ContainerPersistence/ContainerSystemConfig.swift)
-# and their own docs call that out as too small for heavy builds
-# (docs/resource-usage.md, "Configure memory and CPUs for large builds"). These
-# images cross-compile ~200 crates to musl under Rosetta for --platform
-# linux/amd64, so the default is the difference between minutes and tens of
-# minutes. Sizing is set on the build invocation rather than in a machine-global
-# config.toml so it travels with the repo, is reviewable in PRs, and affects only
-# these builds:
-#     --cpus 8      well under the host's 18, deliberately — see below
-#     --memory 24gb half the host's 48 GB, Apple's own machine default ratio
+# SIZING IS REQUIRED ON macOS — the builder VM default (2 CPUs / 2048 MB) OOMs.
+# Measured 2026-09-24 on this repo's Leptos image (Apple CLI 1.4.1): at the
+# default, `cargo leptos build` failed with
+#     error: could not compile `syn`  (signal: 9, SIGKILL: kill)
+#     Error: resourceExhausted: ... process ... did not complete successfully:
+#            cannot allocate memory
+# The image compiles ~200 crates to two targets (WASM front + musl server), so
+# the default genuinely cannot build it. Current setting:
+#     --cpus 17     all but one of the host's 18 cores
+#     --memory 40gb 8 GB spare of the host's 48 GB
 #
-# WHY NOT "ALL BUT ONE CPU": an earlier revision used --cpus 17 --memory 40gb
-# (all but one core, 8 GB spare) and the HOST panicked with
-#   "watchdog timeout: no checkins from watchdogd in 90 seconds"
-# — i.e. the host's own scheduler was starved, which is why the build appeared to
-# stall at the context-copy stage while macOS thrashed. Two reasons the
-# near-total allocation is wrong on macOS specifically:
-#   1. Rosetta-emulated x86_64 vCPUs are far more expensive than native ones, so
-#      17 emulated CPUs on an 18-core host saturates the scheduler.
-#   2. The builder VM is not the only consumer — the host also runs an emulation
-#      layer and the daemon. The watchdog daemon must still get scheduled.
-# Half the host's cores and memory is Apple's own ratio for container VMs and
-# leaves the host genuinely idle. Tune up only if a build is proven memory-bound
-# rather than scheduler-bound.
+# VERIFIED 2026-09-24 at this setting: build succeeded (529 s), peak 46 GB used /
+# 7603 MB compressor, swap 0, swapfiles 0 — no panic. An earlier version of this
+# setting had panicked the host ("watchdog timeout: no checkins from watchdogd in
+# 90 seconds"), but that was caused by the build CONTEXT: `.dockerignore` used
+# `**`-globs that `container build` does not apply, so ~15 GB was transferred and
+# pushed the host into memory-compressor/swap thrash. With the context fixed
+# (66 MB) the memory pressure is gone and the near-total allocation is safe.
+# If the host ever becomes unresponsive, drop to `--cpus 8 --memory 24gb`.
+#
+# NOT the cause of slow builds: build start-up latency (a ~80 s stall reported as
+# "transferring dockerfile") is the CONTEXT TREE WALK, not the VM size. That is
+# fixed by .dockerignore using explicit paths (15 GB → 66 MB). The two problems
+# are independent; the flags are for OOM, not speed.
 #
 # The values are duplicated across the five tasks on purpose — one line to change
-# per task beats an indirection for five call sites (simplicity over
-# over-optimisation).
+# per task beats an indirection for five call sites.
 #
-# BuildKit's layer CACHE lives inside the builder VM and GROWS across builds;
-# --memory does not cap it. If a build ever fails for disk, clear the cache
+# BuildKit's layer CACHE lives inside the builder VM and GROWS across builds; no
+# flag caps it. If a build ever fails for disk, clear the cache
 # (`container builder delete`, then re-run) — the next build rebuilds it.
 
 [tasks.yral-auth-image]
 description = "Build the yral-auth container image locally (container on macOS, podman on Linux)"
 run = '''
 if [[ "$(uname)" == "Darwin" ]]; then
-  exec container build -f apps/yral-auth/Dockerfile.buildkit -t test/yral-auth --platform linux/amd64 --cpus 8 --memory 24gb .
+  exec container build -f apps/yral-auth/Dockerfile.buildkit -t test/yral-auth --platform linux/amd64 --cpus 17 --memory 40gb .
 else
   exec podman build -f apps/yral-auth/Dockerfile.buildkit -t test/yral-auth --platform linux/amd64 .
 fi
@@ -1069,7 +1067,7 @@ run = "fnox exec -- cargo test --features ssr --bins --lib -- --test-threads=1"
 description = "Build the yral-web container image locally (container on macOS, podman on Linux)"
 run = '''
 if [[ "$(uname)" == "Darwin" ]]; then
-  exec container build -f apps/yral-web/Dockerfile.buildkit -t test/yral-web --platform linux/amd64 --cpus 8 --memory 24gb .
+  exec container build -f apps/yral-web/Dockerfile.buildkit -t test/yral-web --platform linux/amd64 --cpus 17 --memory 40gb .
 else
   exec podman build -f apps/yral-web/Dockerfile.buildkit -t test/yral-web --platform linux/amd64 .
 fi
@@ -1144,7 +1142,7 @@ run = "cargo test -p yral-metadata-server -p yral-metadata-client -p yral-metada
 description = "Build the yral-metadata container image locally (container on macOS, podman on Linux)"
 run = '''
 if [[ "$(uname)" == "Darwin" ]]; then
-  exec container build -f apps/yral-metadata/Dockerfile.buildkit -t test/yral-metadata --platform linux/amd64 --cpus 8 --memory 24gb .
+  exec container build -f apps/yral-metadata/Dockerfile.buildkit -t test/yral-metadata --platform linux/amd64 --cpus 17 --memory 40gb .
 else
   exec podman build -f apps/yral-metadata/Dockerfile.buildkit -t test/yral-metadata --platform linux/amd64 .
 fi
@@ -1210,7 +1208,7 @@ run = "cargo test -p off-chain-agent"
 description = "Build the off-chain-agent container image locally (container on macOS, podman on Linux)"
 run = '''
 if [[ "$(uname)" == "Darwin" ]]; then
-  exec container build -f apps/off-chain-agent/Dockerfile.buildkit -t test/off-chain-agent --platform linux/amd64 --cpus 8 --memory 24gb .
+  exec container build -f apps/off-chain-agent/Dockerfile.buildkit -t test/off-chain-agent --platform linux/amd64 --cpus 17 --memory 40gb .
 else
   exec podman build -f apps/off-chain-agent/Dockerfile.buildkit -t test/off-chain-agent --platform linux/amd64 .
 fi
@@ -1517,7 +1515,7 @@ run = "cargo test --features ssr --bins --lib"
 description = "Build the my-website container image locally (container on macOS, podman on Linux)"
 run = '''
 if [[ "$(uname)" == "Darwin" ]]; then
-  exec container build -f apps/my-website/Dockerfile.buildkit -t test/my-website --platform linux/amd64 --cpus 8 --memory 24gb .
+  exec container build -f apps/my-website/Dockerfile.buildkit -t test/my-website --platform linux/amd64 --cpus 17 --memory 40gb .
 else
   exec podman build -f apps/my-website/Dockerfile.buildkit -t test/my-website --platform linux/amd64 .
 fi

@@ -582,6 +582,20 @@ Never push code changes to git without first verifying they compile and run loca
 - **Build-context cost has two components that need different fixes.** *Transferred* size is what `dockerignore` reduces. *Walked-tree* size is what it does **not** — the CLI stats every path before applying ignore rules, so an excluded 111k-file tree still costs ~80 s of start-up latency. When image builds are slow to start or exhaust memory, delete the regenerable tree from disk (`rm -rf target/ apps/yral-ios/packages/YralApp/.build/ .venv/ ansible/collections/`) — the ignore rule is a safety net, not the fix.
 - **Verify the number, one build at a time.** Measure `transferring context:` from the build's own log. Never infer it from a side channel such as the newest `*/…/*.tar` in `$TMPDIR` — that file may belong to a different, concurrent build, which produces convincing but wrong results. (This mistake cost most of a debugging session.)
 
+**Local image builds on macOS need explicit builder sizing (Hard Rule).** The Apple `container` builder VM defaults to 2 CPUs / 2048 MB, which **OOM-kills** our Rust builds. Measured 2026-09-24 on the Leptos image (`cargo leptos build`, ~200 crates across a WASM front + musl server target):
+
+```
+error: could not compile `syn`            (signal: 9, SIGKILL: kill)
+Error: resourceExhausted: "...process ... did not complete successfully:
+        cannot allocate memory"
+```
+
+So every `<app>-image` task passes `--cpus 17 --memory 40gb` on macOS (all but one of the host's 18 cores, 8 GB spare of 48). **Verified at this setting**: build succeeded (529 s), peak 46 GB used, **swap 0, swapfiles 0, no host panic**. Do not remove the flags — the default genuinely cannot build these images.
+
+**The old host panic was a build-context problem, not a sizing problem.** An earlier revision at this same `--cpus 17 --memory 40gb` panicked the host (`watchdog timeout: no checkins from watchdogd`), which made the near-total allocation look unsafe. The actual cause was the ~15 GB build context (un-applied `.dockerignore` `**`-globs) driving memory-compressor/swap thrash — the 50 swapfiles the panic log showed. With the context fixed to 66 MB the same allocation runs clean. **Diagnose the context before blaming builder resources.** If the host ever does become unresponsive, drop to `--cpus 8 --memory 24gb`.
+
+**Builder sizing and build-context cost are independent problems — do not conflate them.** A slow build start (a ~80 s stall Apple reports on the unhelpful `transferring dockerfile` line) is the context tree walk, fixed in `.dockerignore`; an OOM at the compile step is VM size, fixed by the flags. Sizing never speeds up the walk, and ignore rules never prevent the OOM.
+
 **CI/CD Pipeline (Tekton Triggers → Shipwright → Harbor → Flux):** Git push → Tekton EventListener → BuildRun → Harbor image push → Flux ImageRepository/ImagePolicy/ImageUpdateAutomation → git commit updating deployment manifest → Flux Kustomization reconcile → new pods.
 
 - Per-app Tekton Trigger resources in `kubernetes/apps/<app>/tekton-trigger.yaml`.
