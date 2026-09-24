@@ -1,12 +1,7 @@
 ansible/.vault_pass
-ansible/group_vars/all/.vault_pass
 .saikat-machine-access-ed25519
 apps/yral-ios/iosApp/GoogleService-Info.plist
 apps/yral-ios/private_keys/
-.env
-apps/yral-auth/.env
-fnox.local.toml
-mise.local.toml
 
 # Rust workspace target
 target/
