@@ -10,6 +10,20 @@
 # The TXT records here are external-dns's own ownership markers. Preserving them
 # verbatim matters: without them external-dns would see the loaded A/NS records as
 # unmanaged and, under --policy=sync, delete them.
+#
+# The SOA is the one record normalised on import. As exported it carried PowerDNS's
+# placeholder MNAME "a.misconfigured.dns.server.invalid." — an artifact of
+# `zone create`, never a real nameserver — and a 3600s minimum, which is the
+# negative-cache TTL. Both are wrong for a zone we actually serve:
+#   - MNAME -> ns1.saikat.dev., a real in-zone NS that already has an A record.
+#     (Nothing queries the MNAME here: the zone is unsigned, so there is no ZSK to
+#     publish. It is corrected because it is operator-visible and "misconfigured"
+#     is misleading in diagnostics.)
+#   - minimum -> 300, matching default-ttl. At 3600, any transient NODATA — most
+#     relevantly the window between zone creation and the records being loaded — is
+#     pinned in resolver caches for a full hour.
+# The serial stays authoritative: SOA-EDIT-DNSUPDATE INCREASE rewrites it on every
+# external-dns / cert-manager update, so this value only seeds the zone.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -69,7 +83,7 @@ data:
     saikat.dev.	300	IN	NS	ns7.saikat.dev.
     saikat.dev.	300	IN	NS	ns8.saikat.dev.
     saikat.dev.	300	IN	NS	ns9.saikat.dev.
-    saikat.dev.	300	IN	SOA	a.misconfigured.dns.server.invalid. hostmaster.saikat.dev. 5 10800 3600 604800 3600
+    saikat.dev.	300	IN	SOA	ns1.saikat.dev. hostmaster.saikat.dev. 6 10800 3600 604800 300
     *.saikat.dev.	300	IN	A	116.202.234.107
     *.saikat.dev.	300	IN	A	116.202.84.59
     *.saikat.dev.	300	IN	A	136.243.145.173
