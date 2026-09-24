@@ -1,4 +1,4 @@
-# PowerDNS Authoritative Server — StatefulSet with the gpgsql (PostgreSQL) backend.
+# PowerDNS Authoritative Server — Deployment with the gpgsql (PostgreSQL) backend.
 #
 # All zone data lives in the pdns-db CNPG cluster, so PowerDNS itself is stateless:
 # no PVC, no init container, and replicas are interchangeable. The previous LMDB
@@ -22,19 +22,29 @@
 #   - 5300/UDP + 5300/TCP: DNS (LoadBalancer Service maps 53→5300)
 #   - 8081/TCP: HTTP API (ClusterIP — read-only debugging only)
 ---
+# Deployment, not StatefulSet: PowerDNS is stateless now (all zone data lives in
+# the pdns-db CNPG cluster), so it needs no stable pod identity and no per-pod
+# storage. Both Services select on `app: powerdns`, so neither depends on pod
+# names — replicas are fully interchangeable and can be rolled freely.
+#
+# A StatefulSet would actively obstruct this: `volumeClaimTemplates` is immutable
+# after creation, so removing the LMDB PVC claim (the very thing this migration
+# does) is rejected with:
+#   Forbidden: updates to statefulset spec for fields other than 'replicas', ...
+# A Deployment has no such field, so the conversion also removes that hazard for
+# any future change to the pod spec's storage.
 apiVersion: apps/v1
-kind: StatefulSet
+kind: Deployment
 metadata:
   name: powerdns
   namespace: external-dns
   labels:
     app: powerdns
 spec:
-  serviceName: powerdns-api
-  # 3 replicas: PowerDNS is stateless now (all state is in the pdns-db CNPG
-  # cluster), so any replica can answer any query and accept any update. Three
-  # gives HA across nodes and matches the database's 3 instances, so losing one
-  # node does not remove the ability to serve DNS or accept RFC2136 updates.
+  # 3 replicas: PowerDNS is stateless (all state is in the pdns-db CNPG cluster),
+  # so any replica can answer any query and accept any update. Three gives HA
+  # across nodes and matches the database's 3 instances, so losing one node does
+  # not remove the ability to serve DNS or accept RFC2136 updates.
   replicas: 3
   selector:
     matchLabels:
