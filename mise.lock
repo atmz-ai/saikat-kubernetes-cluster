@@ -276,27 +276,27 @@ url = "https://github.com/WebAssembly/binaryen/releases/download/version_131/bin
 url_api = "https://api.github.com/repos/WebAssembly/binaryen/releases/assets/478305109"
 
 [[tools.aws-cli]]
-version = "2.36.49"
+version = "2.37.1"
 backend = "aqua:aws/aws-cli"
 
 [tools.aws-cli."platforms.linux-arm64"]
-url = "https://awscli.amazonaws.com/awscli-exe-linux-aarch64-2.36.49.zip"
+url = "https://awscli.amazonaws.com/awscli-exe-linux-aarch64-2.37.1.zip"
 
 [tools.aws-cli."platforms.linux-arm64-musl"]
-url = "https://awscli.amazonaws.com/awscli-exe-linux-aarch64-2.36.49.zip"
+url = "https://awscli.amazonaws.com/awscli-exe-linux-aarch64-2.37.1.zip"
 
 [tools.aws-cli."platforms.linux-x64"]
-url = "https://awscli.amazonaws.com/awscli-exe-linux-x86_64-2.36.49.zip"
+url = "https://awscli.amazonaws.com/awscli-exe-linux-x86_64-2.37.1.zip"
 
 [tools.aws-cli."platforms.linux-x64-musl"]
-url = "https://awscli.amazonaws.com/awscli-exe-linux-x86_64-2.36.49.zip"
+url = "https://awscli.amazonaws.com/awscli-exe-linux-x86_64-2.37.1.zip"
 
 [tools.aws-cli."platforms.macos-arm64"]
-checksum = "blake3:90d9fb2a38d6900832bb43f70804704792c016f3e3e6c8077e920401c1aacbf0"
-url = "https://awscli.amazonaws.com/AWSCLIV2-2.36.49.pkg"
+checksum = "blake3:3e93052884b4a2e08f938fcdb04914be33e70524672ad60bbacbcd6a0caec251"
+url = "https://awscli.amazonaws.com/AWSCLIV2-2.37.1.pkg"
 
 [tools.aws-cli."platforms.macos-x64"]
-url = "https://awscli.amazonaws.com/AWSCLIV2-2.36.49.pkg"
+url = "https://awscli.amazonaws.com/AWSCLIV2-2.37.1.pkg"
 
 [[tools.cargo-binstall]]
 version = "1.23.0"
@@ -347,6 +347,31 @@ provenance = "github-attestations"
 [[tools."cargo:trunk"]]
 version = "0.21.14"
 backend = "cargo:trunk"
+
+[[tools.eza]]
+version = "0.23.5"
+backend = "vfox:eza"
+
+[tools.eza."platforms.linux-arm64"]
+url = "https://github.com/eza-community/eza/releases/download/v0.23.5/eza_aarch64-unknown-linux-gnu.tar.gz"
+
+[tools.eza."platforms.linux-arm64-musl"]
+url = "https://github.com/eza-community/eza/releases/download/v0.23.5/eza_aarch64-unknown-linux-gnu.tar.gz"
+
+[tools.eza."platforms.linux-x64"]
+url = "https://github.com/eza-community/eza/releases/download/v0.23.5/eza_x86_64-unknown-linux-gnu.tar.gz"
+
+[tools.eza."platforms.linux-x64-musl"]
+url = "https://github.com/eza-community/eza/releases/download/v0.23.5/eza_x86_64-unknown-linux-gnu.tar.gz"
+
+[tools.eza."platforms.macos-arm64"]
+url = "https://github.com/cargo-bins/cargo-quickinstall/releases/download/eza-0.23.5/eza-0.23.5-aarch64-apple-darwin.tar.gz"
+
+[tools.eza."platforms.macos-x64"]
+url = "https://github.com/cargo-bins/cargo-quickinstall/releases/download/eza-0.23.5/eza-0.23.5-x86_64-apple-darwin.tar.gz"
+
+[tools.eza."platforms.windows-x64"]
+url = "https://github.com/eza-community/eza/releases/download/v0.23.5/eza.exe_x86_64-pc-windows-gnu.tar.gz"
 
 [[tools.flux2]]
 version = "2.9.5"
@@ -409,57 +434,50 @@ url_api = "https://api.github.com/repos/fluxcd/flux2/releases/assets/538282898"
 url = "https://github.com/fluxcd/flux2/releases/download/v2.9.5/provenance.intoto.jsonl"
 
 [[tools.fnox]]
-version = "1.35.2"
+version = "1.35.3"
 backend = "github:jdx/fnox"
 
 [tools.fnox."platforms.linux-arm64"]
-checksum = "sha256:d404b219b6a3c3c4f3531d88cb7d3b96d00891b826d8fcfc2941b8a060028015"
-url = "https://github.com/jdx/fnox/releases/download/v1.35.2/fnox-aarch64-unknown-linux-gnu.tar.gz"
-url_api = "https://api.github.com/repos/jdx/fnox/releases/assets/561018918"
+checksum = "sha256:0bf2d91b31d57969e6c12e4677d77f2f648dde81685fa07a6d691560c8cd89f7"
+url = "https://github.com/jdx/fnox/releases/download/v1.35.3/fnox-aarch64-unknown-linux-gnu.tar.gz"
+url_api = "https://api.github.com/repos/jdx/fnox/releases/assets/578792289"
 provenance = "github-attestations"
-signer = "sigstore-oidc:https://github.com/jdx/fnox/.github/workflows/release.yml"
 
 [tools.fnox."platforms.linux-arm64-musl"]
-checksum = "sha256:e01d961fd668bb678a0fde108057651c40497d6a086f9b32fa4cbb8afe215b1f"
-url = "https://github.com/jdx/fnox/releases/download/v1.35.2/fnox-aarch64-unknown-linux-musl.tar.gz"
-url_api = "https://api.github.com/repos/jdx/fnox/releases/assets/561018922"
+checksum = "sha256:d0d808ee972747b0868317800772e80f693cb7023ca39a9e75f77c6e9cf57e38"
+url = "https://github.com/jdx/fnox/releases/download/v1.35.3/fnox-aarch64-unknown-linux-musl.tar.gz"
+url_api = "https://api.github.com/repos/jdx/fnox/releases/assets/578792291"
 provenance = "github-attestations"
-signer = "sigstore-oidc:https://github.com/jdx/fnox/.github/workflows/release.yml"
 
 [tools.fnox."platforms.linux-x64"]
-checksum = "sha256:5f95929bb8b73cd849b238fbefe3dbf8706f57f876cc5ae23aa9aa9da62a40a9"
-url = "https://github.com/jdx/fnox/releases/download/v1.35.2/fnox-x86_64-unknown-linux-gnu.tar.gz"
-url_api = "https://api.github.com/repos/jdx/fnox/releases/assets/561018959"
+checksum = "sha256:69066f81f624d355c83bcb394ba80f6add80c06b7be92c7b178d38af14a25c52"
+url = "https://github.com/jdx/fnox/releases/download/v1.35.3/fnox-x86_64-unknown-linux-gnu.tar.gz"
+url_api = "https://api.github.com/repos/jdx/fnox/releases/assets/578792337"
 provenance = "github-attestations"
-signer = "sigstore-oidc:https://github.com/jdx/fnox/.github/workflows/release.yml"
 
 [tools.fnox."platforms.linux-x64-musl"]
-checksum = "sha256:9ddbd3e8304f4bd1aae59f0152efd8ec810ada9656e64ce7533d4c46f8aae985"
-url = "https://github.com/jdx/fnox/releases/download/v1.35.2/fnox-x86_64-unknown-linux-musl.tar.gz"
-url_api = "https://api.github.com/repos/jdx/fnox/releases/assets/561018962"
+checksum = "sha256:e0a9bc1e132bc893301cc108afc849412046ebeb3043ef5b4a3de5e45d5f6701"
+url = "https://github.com/jdx/fnox/releases/download/v1.35.3/fnox-x86_64-unknown-linux-musl.tar.gz"
+url_api = "https://api.github.com/repos/jdx/fnox/releases/assets/578792344"
 provenance = "github-attestations"
-signer = "sigstore-oidc:https://github.com/jdx/fnox/.github/workflows/release.yml"
 
 [tools.fnox."platforms.macos-arm64"]
-checksum = "sha256:3f6e9b4f7a59a5712abe48cf6c97b2a0600392b5cb54059a80b53497adeab354"
-url = "https://github.com/jdx/fnox/releases/download/v1.35.2/fnox-aarch64-apple-darwin.tar.gz"
-url_api = "https://api.github.com/repos/jdx/fnox/releases/assets/561018919"
+checksum = "sha256:49965f9739d053f544aa32599494b3e2442dcf8c116d92a6a4afa5575e9decd3"
+url = "https://github.com/jdx/fnox/releases/download/v1.35.3/fnox-aarch64-apple-darwin.tar.gz"
+url_api = "https://api.github.com/repos/jdx/fnox/releases/assets/578792286"
 provenance = "github-attestations"
-signer = "sigstore-oidc:https://github.com/jdx/fnox/.github/workflows/release.yml"
 
 [tools.fnox."platforms.macos-x64"]
-checksum = "sha256:efb1a830b0b44704b93d1647cab9b9046da7519a869cc6de3437a028c7db7417"
-url = "https://github.com/jdx/fnox/releases/download/v1.35.2/fnox-x86_64-apple-darwin.tar.gz"
-url_api = "https://api.github.com/repos/jdx/fnox/releases/assets/561018920"
+checksum = "sha256:f56104dc739e6882e6a85fc32149c372450ba6a6799b31f69766234494bababb"
+url = "https://github.com/jdx/fnox/releases/download/v1.35.3/fnox-x86_64-apple-darwin.tar.gz"
+url_api = "https://api.github.com/repos/jdx/fnox/releases/assets/578792298"
 provenance = "github-attestations"
-signer = "sigstore-oidc:https://github.com/jdx/fnox/.github/workflows/release.yml"
 
 [tools.fnox."platforms.windows-x64"]
-checksum = "sha256:ba662d6a6452f8ab060505ae35e3bd81c890fa1ba5ada778b4c451aaf006d6a8"
-url = "https://github.com/jdx/fnox/releases/download/v1.35.2/fnox-x86_64-pc-windows-msvc.zip"
-url_api = "https://api.github.com/repos/jdx/fnox/releases/assets/561018956"
+checksum = "sha256:6264f8be31e6de99f6f97fa871f6323c9b01d605c0a9b9887e6364fdd74ad4f2"
+url = "https://github.com/jdx/fnox/releases/download/v1.35.3/fnox-x86_64-pc-windows-msvc.zip"
+url_api = "https://api.github.com/repos/jdx/fnox/releases/assets/578792327"
 provenance = "github-attestations"
-signer = "sigstore-oidc:https://github.com/jdx/fnox/.github/workflows/release.yml"
 
 [[tools.gh]]
 version = "2.101.0"
@@ -650,36 +668,36 @@ url = "https://github.com/mobile-dev-inc/Maestro/releases/download/cli-2.10.0/ma
 url_api = "https://api.github.com/repos/mobile-dev-inc/Maestro/releases/assets/538294003"
 
 [[tools.node]]
-version = "26.9.0"
+version = "26.10.0"
 backend = "core:node"
 
 [tools.node."platforms.linux-arm64"]
-checksum = "sha256:d5077591aa38b48d90bf9b3ac10da8d2f40dce289b20294913c58c19f153eb12"
-url = "https://nodejs.org/dist/v26.9.0/node-v26.9.0-linux-arm64.tar.gz"
+checksum = "sha256:423a41bff8e2a2fa15e702fefe2919ef95823b2378744daccb8439302534b44f"
+url = "https://nodejs.org/dist/v26.10.0/node-v26.10.0-linux-arm64.tar.gz"
 
 [tools.node."platforms.linux-arm64-musl"]
-checksum = "sha256:b52b747e86ef6d18068f02f43f508a608358c974dc5da8ef270bc823ba4710ca"
-url = "https://unofficial-builds.nodejs.org/download/release/v26.9.0/node-v26.9.0-linux-arm64-musl.tar.gz"
+checksum = "sha256:d26027bff3197050d2a2b0bfa151b18e8378ed81affa2bf5093804db158979b6"
+url = "https://unofficial-builds.nodejs.org/download/release/v26.10.0/node-v26.10.0-linux-arm64-musl.tar.gz"
 
 [tools.node."platforms.linux-x64"]
-checksum = "sha256:03d9104fc4f19652e74480fed11c023d75981464b7292f21a601c3f95ce7d90d"
-url = "https://nodejs.org/dist/v26.9.0/node-v26.9.0-linux-x64.tar.gz"
+checksum = "sha256:cb5c9ce9c80d7b8821e3a258543c71b939138cf17c74d5cc44bbe85d6dbc5ad8"
+url = "https://nodejs.org/dist/v26.10.0/node-v26.10.0-linux-x64.tar.gz"
 
 [tools.node."platforms.linux-x64-musl"]
-checksum = "sha256:669dd67ec374f7315dbac9e119641d0e4f371519e00c4b692f1f81e7a04b747c"
-url = "https://unofficial-builds.nodejs.org/download/release/v26.9.0/node-v26.9.0-linux-x64-musl.tar.gz"
+checksum = "sha256:e42da94821b9422eb76bf5aaf4de0977e04ba320b8aff6148d895a94b08ee223"
+url = "https://unofficial-builds.nodejs.org/download/release/v26.10.0/node-v26.10.0-linux-x64-musl.tar.gz"
 
 [tools.node."platforms.macos-arm64"]
-checksum = "sha256:6f3de7ed853ee283b4bf24b6e426618f1d357401ce5815db1866eb85eb4b05d9"
-url = "https://nodejs.org/dist/v26.9.0/node-v26.9.0-darwin-arm64.tar.gz"
+checksum = "sha256:751fdf7439f115d87ee2a8f3f18c065b6151852068e3e666ac60ac2996f75ac9"
+url = "https://nodejs.org/dist/v26.10.0/node-v26.10.0-darwin-arm64.tar.gz"
 
 [tools.node."platforms.macos-x64"]
-checksum = "sha256:06b2e742ed9025dc84adc830243b3f731956eac9c321bccd0ede384209af02a8"
-url = "https://nodejs.org/dist/v26.9.0/node-v26.9.0-darwin-x64.tar.gz"
+checksum = "sha256:ebbe9ab9b58ad6bb54390d6e2c862c1afa7d4475fb7e8ae8146acde211bf70df"
+url = "https://nodejs.org/dist/v26.10.0/node-v26.10.0-darwin-x64.tar.gz"
 
 [tools.node."platforms.windows-x64"]
-checksum = "sha256:c8af870b5b3e9789a6cbdb30270e7c212e12d76a7afa7fc7f21b6b21cc22a71b"
-url = "https://nodejs.org/dist/v26.9.0/node-v26.9.0-win-x64.zip"
+checksum = "sha256:9fef7eca6743a6b910989cd8e78712376b394fcb9b6e1e9c44a0799a287f90c5"
+url = "https://nodejs.org/dist/v26.10.0/node-v26.10.0-win-x64.zip"
 
 [[tools.pitchfork]]
 version = "2.27.0"
@@ -868,43 +886,43 @@ url_api = "https://api.github.com/repos/astral-sh/ruff/releases/assets/568294490
 provenance = "github-attestations"
 
 [[tools.rush]]
-version = "0.10.0"
+version = "0.11.0"
 backend = "aqua:shenwei356/rush"
 
 [tools.rush."platforms.linux-arm64"]
-checksum = "sha256:7bdb02a1a0c3ff8a61204cdb09d7ba57a9f4585d8c78bccec00f41e303156f98"
-url = "https://github.com/shenwei356/rush/releases/download/v0.10.0/rush_linux_arm64.tar.gz"
-url_api = "https://api.github.com/repos/shenwei356/rush/releases/assets/559524066"
+checksum = "sha256:466931db70732296b98bfe1a1aec4a6a79c226e4aa5bc690283bb39560e708de"
+url = "https://github.com/shenwei356/rush/releases/download/v0.11.0/rush_linux_arm64.tar.gz"
+url_api = "https://api.github.com/repos/shenwei356/rush/releases/assets/579426242"
 
 [tools.rush."platforms.linux-arm64-musl"]
-checksum = "sha256:7bdb02a1a0c3ff8a61204cdb09d7ba57a9f4585d8c78bccec00f41e303156f98"
-url = "https://github.com/shenwei356/rush/releases/download/v0.10.0/rush_linux_arm64.tar.gz"
-url_api = "https://api.github.com/repos/shenwei356/rush/releases/assets/559524066"
+checksum = "sha256:466931db70732296b98bfe1a1aec4a6a79c226e4aa5bc690283bb39560e708de"
+url = "https://github.com/shenwei356/rush/releases/download/v0.11.0/rush_linux_arm64.tar.gz"
+url_api = "https://api.github.com/repos/shenwei356/rush/releases/assets/579426242"
 
 [tools.rush."platforms.linux-x64"]
-checksum = "sha256:495c7c914345417cd6dec0aadcbebb28f895ecf714bb6e5465f7283e90c62969"
-url = "https://github.com/shenwei356/rush/releases/download/v0.10.0/rush_linux_amd64.tar.gz"
-url_api = "https://api.github.com/repos/shenwei356/rush/releases/assets/559523927"
+checksum = "sha256:7a22bbc7122acd5bd23e2dfde49f84bb856944a1860057bc89921b3dce45d056"
+url = "https://github.com/shenwei356/rush/releases/download/v0.11.0/rush_linux_amd64.tar.gz"
+url_api = "https://api.github.com/repos/shenwei356/rush/releases/assets/579426098"
 
 [tools.rush."platforms.linux-x64-musl"]
-checksum = "sha256:495c7c914345417cd6dec0aadcbebb28f895ecf714bb6e5465f7283e90c62969"
-url = "https://github.com/shenwei356/rush/releases/download/v0.10.0/rush_linux_amd64.tar.gz"
-url_api = "https://api.github.com/repos/shenwei356/rush/releases/assets/559523927"
+checksum = "sha256:7a22bbc7122acd5bd23e2dfde49f84bb856944a1860057bc89921b3dce45d056"
+url = "https://github.com/shenwei356/rush/releases/download/v0.11.0/rush_linux_amd64.tar.gz"
+url_api = "https://api.github.com/repos/shenwei356/rush/releases/assets/579426098"
 
 [tools.rush."platforms.macos-arm64"]
-checksum = "sha256:e4c83546830977ccd4ea55ed1412c3e10bca518628113d9bce94fdcef7fd59f3"
-url = "https://github.com/shenwei356/rush/releases/download/v0.10.0/rush_darwin_arm64.tar.gz"
-url_api = "https://api.github.com/repos/shenwei356/rush/releases/assets/559523078"
+checksum = "sha256:87f811032b727806158111856b77be076d2c923cc013de20d744405eb4dfe455"
+url = "https://github.com/shenwei356/rush/releases/download/v0.11.0/rush_darwin_arm64.tar.gz"
+url_api = "https://api.github.com/repos/shenwei356/rush/releases/assets/579424349"
 
 [tools.rush."platforms.macos-x64"]
-checksum = "sha256:d6b606e5a05ed6750d9016a15ed41c4fd7696d92302ebf317b0b2e752c27951f"
-url = "https://github.com/shenwei356/rush/releases/download/v0.10.0/rush_darwin_amd64.tar.gz"
-url_api = "https://api.github.com/repos/shenwei356/rush/releases/assets/559522722"
+checksum = "sha256:3d5c24ea9947c84b19ef1f0992470e255e296efbbda5fad0ccf5cc870d088433"
+url = "https://github.com/shenwei356/rush/releases/download/v0.11.0/rush_darwin_amd64.tar.gz"
+url_api = "https://api.github.com/repos/shenwei356/rush/releases/assets/579420523"
 
 [tools.rush."platforms.windows-x64"]
-checksum = "sha256:c93f3ea86610258de5a920b641c7c127916faacdffab3f8f9198c79d3c551400"
-url = "https://github.com/shenwei356/rush/releases/download/v0.10.0/rush_windows_amd64.exe.tar.gz"
-url_api = "https://api.github.com/repos/shenwei356/rush/releases/assets/559524683"
+checksum = "sha256:47dd38a1d527c8e00714623351379dfa2f617cf9f8f399586233c5ca29482a45"
+url = "https://github.com/shenwei356/rush/releases/download/v0.11.0/rush_windows_amd64.exe.tar.gz"
+url_api = "https://api.github.com/repos/shenwei356/rush/releases/assets/579426784"
 
 [[tools.rust]]
 version = "stable"
