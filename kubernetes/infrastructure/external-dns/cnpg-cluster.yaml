@@ -49,11 +49,24 @@ spec:
   instances: 3
   imageName: ghcr.io/cloudnative-pg/postgresql:18.4
 
-  # No superuserSecret / enableSuperuserAccess: PowerDNS connects as the
-  # application owner (postgres, above) via the CNPG-generated `pdns-db-app`
-  # Secret, so it never needs the superuser password. Unlike harbor-db, whose
-  # comment notes Harbor core connects AS postgres and therefore needs the
-  # superuser password synced, here the app Secret already carries what we need.
+  # Superuser access MUST be enabled here, even though PowerDNS connects as the
+  # `postgres` application owner rather than needing superuser rights as such.
+  #
+  # Reason: with enableSuperuserAccess unset (default false), the operator IGNORES
+  # superuserSecret and sets the postgres password to NULL — password auth is then
+  # disabled entirely, and PowerDNS fails at startup with:
+  #     FATAL: password authentication failed for user "postgres"
+  # This is the trap described in AGENTS.md "CNPG Superuser Password Management":
+  # the setting does not grant extra privilege so much as make the operator manage
+  # this role's password at all.
+  #
+  # The tables are owned by `postgres` because postInitApplicationSQLRefs runs the
+  # schema as superuser, so PowerDNS must connect as that same role — a different
+  # role would hit permission denied on every write.
+  enableSuperuserAccess: true
+  superuserSecret:
+    name: pdns-db-superuser
+
   bootstrap:
     initdb:
       database: pdns
