@@ -7,37 +7,25 @@
 #
 # Both files are plain DNSEndpoints and are applied identically by external-dns.
 #
-# Google Workspace (mail). MX and TXT are in --managed-record-types; without that
-# external-dns would drop these silently — no error, no log, no record.
+# Google Workspace domain verification — CNAME method.
 #
-# Record set mirrors the working atmz.ai Workspace configuration, which is the
-# reference for what Google expects. Google's current recommended MX is the single
-# smtp.google.com entry; the older 5-host ASPMX/ALT1-4 set is legacy.
+# The value and name are issued per-Workspace-account by the Google admin console;
+# they are not derivable, so they are recorded here verbatim as supplied.
+#
+# CNAME rather than the TXT method (google-site-verification=...) because it is
+# Google's current mechanism and stays valid without re-pasting codes. The usual
+# objection to a CNAME — that it is illegal at the zone apex (RFC 1034) — does not
+# apply: this is a subdomain, not the apex.
 ---
 apiVersion: externaldns.k8s.io/v1alpha1
 kind: DNSEndpoint
 metadata:
-  name: oleole-ai-mail
+  name: oleole-ai-workspace-verification
   namespace: external-dns
 spec:
   endpoints:
-    # Google Workspace mail routing. Without this, mail to @oleole.ai has nowhere
-    # to go. Adding it before mailbox provisioning is harmless: Google rejects mail
-    # for domains it has not verified, so nothing is misdelivered in the meantime.
-    - dnsName: oleole.ai
-      recordType: MX
+    - dnsName: 2rbnnd3xklw7.oleole.ai
+      recordType: CNAME
       recordTTL: 300
       targets:
-        - 1 smtp.google.com
-
-    # SPF — authorises Google to send mail as @oleole.ai. Without it, receivers
-    # have no statement to evaluate and will treat mail as unauthenticated.
-    # Additional senders (a provider, a transactional service) are appended INSIDE
-    # this one value, not added as a second TXT record: multiple SPF records are
-    # invalid and cause a permanent SPF error, which is worse than having none.
-    #   v=spf1 include:_spf.google.com [include:...] ~all
-    - dnsName: oleole.ai
-      recordType: TXT
-      recordTTL: 300
-      targets:
-        - '"v=spf1 include:_spf.google.com ~all"'
+        - gv-ijbp37komhcvmp.dv.googlehosted.com
