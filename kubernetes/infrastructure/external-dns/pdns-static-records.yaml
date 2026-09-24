@@ -32,6 +32,10 @@
 # subdomain CNAMEs, which work fine (2rbnnd3xklw7.oleole.ai verifies Google Workspace
 # through external-dns today).
 #
+# DO NOT try to fix gap 1 by deleting and recreating the apex records. external-dns
+# recreates them unowned — proved, since it created them that way originally — so a
+# recreate reproduces the same state and adds an outage to a working domain.
+#
 # RE-RUNNING: a Completed Job never re-runs itself. After changing the records below,
 # delete the Job so Flux recreates it:
 #   kubectl -n external-dns delete job pdns-static-records

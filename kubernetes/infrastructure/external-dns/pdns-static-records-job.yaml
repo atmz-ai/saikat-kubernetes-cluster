@@ -15,6 +15,10 @@
 #   kubectl -n external-dns delete job pdns-static-records
 # Flux then recreates it on the next reconcile (webhook within seconds of a push).
 #
+# That silence is the trap: edit the ConfigMap, push, watch Flux report everything up to
+# date, and conclude the record is applied when it is not. If a record you added is not
+# live, check this first.
+#
 # pdnsutil does NOT go through the image's pdns_server-startup wrapper, so it needs a real
 # config file rather than the environment templating the server uses — the same constraint
 # documented on pdns-db-seed. It also cannot take backend settings on the command line and
