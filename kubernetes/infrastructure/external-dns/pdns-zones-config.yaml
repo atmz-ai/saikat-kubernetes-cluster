@@ -23,4 +23,3 @@ metadata:
 data:
   zones: |
     saikat.dev true
-    test.saikat.dev false

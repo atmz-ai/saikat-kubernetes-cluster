@@ -11,23 +11,23 @@ service_node_port_range: "80-32767"
 
 # Hetzner Robot API credentials
 hetzner_robot_api_user: "#ws+hEJX77Pr"
-hetzner_robot_api_password: "{{ vault_hetzner_robot_api_password }}"  # Indirection to vault
+hetzner_robot_api_password: "{{ vault_hetzner_robot_api_password }}" # Indirection to vault
 
 # Hetzner S3 credentials
 hetzner_s3_access_key: "XO5X9A1W8AMHY3DSTKMS"
-hetzner_s3_secret_key: "{{ vault_hetzner_s3_secret_key }}"  # Indirection to vault
+hetzner_s3_secret_key: "{{ vault_hetzner_s3_secret_key }}" # Indirection to vault
 
 # Kubernetes cluster admin kubeconfig (stored in vault, used by scripts/setup-local-env.sh)
-kubeconfig: "{{ vault_kubeconfig }}"  # Indirection to vault
+kubeconfig: "{{ vault_kubeconfig }}" # Indirection to vault
 
 # GitHub PAT for Flux bootstrap (stored in vault, exported as GITHUB_TOKEN by scripts/setup-local-env.sh)
-github_flux_token: "{{ vault_github_flux_token }}"  # Indirection to vault
+github_flux_token: "{{ vault_github_flux_token }}" # Indirection to vault
 
 # Age private key for Flux SOPS decryption
 # scripts/setup-local-env.sh creates k8s Secret 'sops-age' in flux-system namespace.
 # Flux uses this key to decrypt *.sops.yaml files from git (e.g. cloudflare-api-token).
 # To generate: age-keygen -o /tmp/age.key  (then store contents as vault_age_private_key)
-age_private_key: "{{ vault_age_private_key }}"  # Indirection to vault
+age_private_key: "{{ vault_age_private_key }}" # Indirection to vault
 
 # Saikat machine-access SSH keypair — used for all node access, on any provider
 # (Hetzner today; cloud providers as they are added) AND for git operations
@@ -37,16 +37,16 @@ age_private_key: "{{ vault_age_private_key }}"  # Indirection to vault
 # ansible.cfg use it) AND installs it as ~/.ssh/id_ed25519 (the default SSH
 # identity), so ssh, git, and ansible all pick it up automatically.
 # To get the public key: ssh-keygen -y -f ~/.ssh/id_ed25519
-saikat_machine_access_ssh_private_key: "{{ vault_saikat_machine_access_ssh_private_key }}"  # Indirection to vault
-saikat_machine_access_ssh_pub_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIM/H7Jp2RgC1xtg1nyzpmhzOTmUz3n+PQPsk83BzUskg saikat-machine-access"  # Plaintext — derived from private key via: ssh-keygen -y -f ~/.ssh/id_ed25519
+saikat_machine_access_ssh_private_key: "{{ vault_saikat_machine_access_ssh_private_key }}" # Indirection to vault
+saikat_machine_access_ssh_pub_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIM/H7Jp2RgC1xtg1nyzpmhzOTmUz3n+PQPsk83BzUskg saikat-machine-access" # Plaintext — derived from private key via: ssh-keygen -y -f ~/.ssh/id_ed25519
 
 # Cloudflare DNS management for kubernetes-api round-robin A records
 # Used by node-remove and control-plane-join roles to update DNS on CP add/remove
-cloudflare_api_token: "{{ vault_cloudflare_api_token }}"  # Indirection to vault
+cloudflare_api_token: "{{ vault_cloudflare_api_token }}" # Indirection to vault
 cloudflare_zone_id: "f0e13310b0b3c66709f0debd5e3bbb10"
 cloudflare_zone_name: "yral.com"
 kubernetes_api_hostname: "kubernetes-api.yral.com"
-cloudflare_app_wildcard_hostname: "*.yral.com"  # Proxied wildcard served by cilium-envoy on all nodes
+cloudflare_app_wildcard_hostname: "*.yral.com" # Proxied wildcard served by cilium-envoy on all nodes
 
 # Namecheap API — for custom nameserver (glue record) management
 # Used by the namecheap-dns role to register ns1–ns13 glue records.
@@ -54,9 +54,9 @@ cloudflare_app_wildcard_hostname: "*.yral.com"  # Proxied wildcard served by cil
 # Whitelist the Ansible control machine IP in the same dashboard.
 # ApiUser and UserName are the same (Namecheap account username) — not secret.
 # Only the API key is sensitive (vault indirection).
-namecheap_api_user: "saikatdas0790"                     # Plaintext — not secret
-namecheap_username: "saikatdas0790"                     # Plaintext — not secret (same as api_user)
-namecheap_api_key: "{{ vault_namecheap_api_key }}"      # Indirection to vault — secret
+namecheap_api_user: "saikatdas0790" # Plaintext — not secret
+namecheap_username: "saikatdas0790" # Plaintext — not secret (same as api_user)
+namecheap_api_key: "{{ vault_namecheap_api_key }}" # Indirection to vault — secret
 
 # Namecheap custom nameservers — per-host annotation in hosts.yml
 # Workers with `namecheap_nameserver` defined (e.g. "ns1") are registered
@@ -105,9 +105,3 @@ namecheap_api_key: "{{ vault_namecheap_api_key }}"      # Indirection to vault �
 pdns_zones:
   - name: saikat.dev
     snapshot: true
-  # TEMPORARY — validation of the new-zone onboarding path. A zone with no prior
-  # records (snapshot: false) is what every future domain will be, so this proves
-  # the generator + seed Job + external-dns loop end to end before a real domain
-  # depends on it. Remove this entry once verified.
-  - name: test.saikat.dev
-    snapshot: false
