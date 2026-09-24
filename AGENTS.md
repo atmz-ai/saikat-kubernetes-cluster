@@ -452,6 +452,14 @@ Neither step errors if skipped: the config claims the zone while PowerDNS has no
 
 **`zone-cache-refresh-interval=0` is deliberate (do not "restore the default").** PowerDNS caches the list of known zones for 300s by default, so a zone created after the server started is not served until the cache expires. During that window the zone exists with correct records and SOA, but queries under it fall through to a **parent zone's wildcard and answer with the wrong addresses** (observed: a new sub-zone returning the parent's 40 node IPs). Disabling the cache makes a seeded zone servable immediately, so the declarative zone list and the served DNS cannot disagree. With `consistent-backends` (default) the uncached path is one indexed lookup.
 
+**Editing `pdns.conf` requires rolling the Deployment — a `subPath` mount never updates.** `pdns.conf` is mounted via `subPath`, and Kubernetes treats such a mount as a snapshot taken at pod creation: ConfigMap writes do **not** propagate, unlike an ordinary directory mount (`templates.d` does propagate, being a plain mount). So changing `pdns-config.yaml` alone has no effect on running pods, and there is no error — the ConfigMap says one thing, the server does another. Roll it deliberately after any change:
+```
+kubectl rollout restart deploy/powerdns -n external-dns
+```
+Verify with `kubectl exec ... -- grep <setting> /etc/powerdns/pdns.conf`, **selecting the pod by a live query**, not a name captured before the rollout — a stale name yields `container not found`, which reads like "the setting is missing" and sends the diagnosis the wrong way. This cost a wrong conclusion once: the `zone-cache-refresh-interval` fix was reported as verified from a probe that had in fact succeeded by the 300s cache expiring naturally.
+
+**Never verify a DNS or registry change from a recursive resolver's answer.** Recursive resolvers cache delegation for the zone's TTL, so `dig @1.1.1.1 NS <zone>` can keep returning the previous registrar's nameservers long after the change is live, and reading that as "nothing happened" is a mistake made twice here. Authoritative sources only: `whois <zone>`, `dig +trace`, or an uncached resolver. Note also that the Namecheap API returns success from `setCustom` *before* the registry publishes the new delegation, so the API response is not confirmation either.
+
 ### Local Environment & Parity
 The repo uses a single monorepo-wide `mise.toml` at the repository root as the source of truth for tool versions, task orchestration, and all app-specific environment variables. There are **no per-app `mise.toml`, `fnox.toml`, or `pitchfork.toml` files** — all env vars, secrets, and daemon definitions live in the root `mise.toml`, root `fnox.toml`, and root `mise.toml` `[daemons]` respectively. App-specific env vars are grouped by `# ── <app> ──` comment headers in the root `[env]` section. Avoid adding per-project config files unless there is a strong, documented reason.
 
