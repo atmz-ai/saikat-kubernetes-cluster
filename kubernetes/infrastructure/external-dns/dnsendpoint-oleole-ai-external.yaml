@@ -28,25 +28,6 @@ metadata:
   namespace: external-dns
 spec:
   endpoints:
-    # TEMPORARY DIAGNOSTIC — remove after reading the result.
-    #
-    # An MX at a NON-apex name. This isolates one question: is MX blocked because
-    # MX is unsupported by the rfc2136 provider, or because the apex name carries
-    # unowned records (the apex A/NS have no ownership marker) which makes
-    # external-dns refuse to create anything new at that name?
-    #
-    # A name like this has no records of its own — the *.oleole.ai wildcard is a
-    # record AT "*.oleole.ai", not at each literal subdomain — so its plan row is
-    # empty and nothing can block creation.
-    #
-    #   lands here  -> MX support is fine; the apex ownership state is the blocker
-    #   absent here -> MX genuinely is not written by this provider
-    - dnsName: mxprobe.oleole.ai
-      recordType: MX
-      recordTTL: 300
-      targets:
-        - 1 smtp.google.com
-
     # Google Workspace mail routing, per the admin console's activation screen:
     #   name: (default) — i.e. the zone apex
     #   priority: 1
