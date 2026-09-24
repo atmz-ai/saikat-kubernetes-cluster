@@ -89,7 +89,20 @@ spec:
             - --managed-record-types=A
             - --managed-record-types=AAAA
             - --managed-record-types=CNAME
+            # MX and TXT are required for records that point OUT of the cluster —
+            # mail servers, and the third-party verification/delegation tokens that
+            # arrive as TXT. Both were absent, and external-dns filters by type
+            # BEFORE comparing anything, so such a record is dropped silently: no
+            # error, no log, just "All records are already up to date" while the
+            # record never appears. Exactly the failure shape of the flag and cache
+            # bugs above, so the list is now complete for what we actually declare.
+            #
+            # TXT is safe alongside cert-manager's DNS-01 records: a record with no
+            # external-dns ownership TXT marker is treated as someone else's and is
+            # never modified or deleted, so _acme-challenge TXT records are untouched.
+            - --managed-record-types=MX
             - --managed-record-types=NS
+            - --managed-record-types=TXT
             - --log-level=info
             - --kube-api-qps=20
             - --kube-api-burst=40

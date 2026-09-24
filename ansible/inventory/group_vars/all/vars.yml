@@ -105,3 +105,7 @@ namecheap_api_key: "{{ vault_namecheap_api_key }}" # Indirection to vault — se
 pdns_zones:
   - name: saikat.dev
     snapshot: true
+  # Newly registered — no prior records, so nothing to preserve and the zone starts
+  # empty for external-dns to populate from its DNSEndpoint CRDs.
+  - name: oleole.ai
+    snapshot: false
