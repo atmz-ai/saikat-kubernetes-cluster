@@ -55,7 +55,25 @@ kubectl = "latest"
 maestro = { version = "latest", os = ["macos"] }
 node = "latest"
 pitchfork = "latest"
-podman = "latest"
+# Container runtime for local image builds (`mise run <app>-image` and the
+# `<app>-container` daemons).
+#
+# macOS: Apple's `container` CLI (aqua:apple/container). Picked over podman
+#   because its apiserver is a launchd-managed service — there is no VM to
+#   boot by hand. `podman machine` IS a VM that must be started manually, and a
+#   missing machine is exactly what made `podman build` fail with exit 125
+#   ("Cannot connect to Podman ... podman.sock: no such file or directory").
+#   podman cannot autostart its machine either: neither `machine init` nor
+#   `machine set` exposes an autostart flag, so it would need a hand-written
+#   launchd agent. Apple's runtime also builds linux/amd64 on arm64 via Rosetta
+#   (verified: `uname -m` → x86_64), which is what every `-image` task's
+#   `--platform linux/amd64` requires.
+# Linux/WSL: podman (native, no VM layer). WSL containers are the Windows plan;
+#   no action needed there yet.
+#
+# OS-scoped so each platform resolves exactly one runtime.
+container = { version = "latest", os = ["macos"] }
+podman = { version = "latest", os = ["linux"] }
 python = "latest"
 # rclone — third S3 client, for the operations neither of the others covers:
 # `purge` (remove a prefix AND the bucket in one step), `backend
@@ -160,16 +178,13 @@ sqlite = "latest"
 _.path = ".venv/bin"
 APP_ENV = "development"
 LEPTOS_ENV = "development"
-# fnox age decryption — private key extracted by mise run bootstrap
-# Uses {{config_root}} so the path resolves to the repo root regardless of cwd
+GIT_PAGER = "cat"
+GH_PAGER = "cat"
+PAGER = "cat"
 FNOX_AGE_KEY_FILE = "{{config_root}}/.saikat-machine-access-ed25519"
-# Cargo + cargo-binstall cache dirs — shared across all projects via $HOME.
-# Without these, mise's rust/rustup backend sets CARGO_HOME/RUSTUP_HOME to a
-# literal `./undefined/` at the cwd (repo root), duplicating caches per project.
 CARGO_HOME = "{{env.HOME}}/.cargo"
 RUSTUP_HOME = "{{env.HOME}}/.rustup"
 CARGO_BINSTALL_DIR = "{{env.HOME}}/.local/share/cargo-binstall"
-# Plaintext (non-sensitive) values — declared directly, no .env file needed.
 AWS_ACCESS_KEY_ID = "XO5X9A1W8AMHY3DSTKMS"
 AWS_ENDPOINT_URL = "https://fsn1.your-objectstorage.com"
 AWS_DEFAULT_REGION = "fsn1"
@@ -918,9 +933,43 @@ daemons = ["spacetimedb-dev"]
 env = { SPACETIMEDB_URL = "http://127.0.0.1:3000" }
 run = "fnox exec -- cargo test --features ssr --bins --lib -- --test-threads=1"
 
+# ── Local image builds: runtime + resource sizing (all *-image tasks) ────────
+# Every `<app>-image` task is OS-conditional:
+#   macOS  → `container build` (Apple's CLI)
+#   Linux  → `podman build`
+#
+# On macOS the flags are NOT cosmetic. Apple's builder VM defaults to 2 CPUs /
+# 2048 MB (BuildConfig in Sources/ContainerPersistence/ContainerSystemConfig.swift)
+# and their own docs call that out as too small for heavy builds
+# (docs/resource-usage.md, "Configure memory and CPUs for large builds"). These
+# images cross-compile ~200 crates to musl under Rosetta for --platform
+# linux/amd64, so the default is the difference between minutes and tens of
+# minutes. Sizing is set on the build invocation rather than in a machine-global
+# config.toml so it travels with the repo, is reviewable in PRs, and affects only
+# these builds:
+#     --cpus 17     all but one CPU (host has 18) so the host keeps a core
+#     --memory 40gb leaves 8 GB of the host's 48 GB for the rest of the system
+# The builder is shared and resizes on demand, so concurrent builds get whichever
+# flags they pass. `container build` accepts these directly — verified: passing
+# them resizes the existing builder container.
+#
+# The values are duplicated across the five tasks on purpose — one line to change
+# per task beats an indirection for five call sites (simplicity over
+# over-optimisation).
+#
+# BuildKit's layer CACHE lives inside the builder VM and GROWS across builds;
+# --memory does not cap it. If a build ever fails for disk, clear the cache
+# (`container builder delete`, then re-run) — the next build rebuilds it.
+
 [tasks.yral-auth-image]
-description = "Build the yral-auth container image locally (podman)"
-run = "podman build -f apps/yral-auth/Dockerfile.buildkit -t test/yral-auth --platform linux/amd64 ."
+description = "Build the yral-auth container image locally (container on macOS, podman on Linux)"
+run = '''
+if [[ "$(uname)" == "Darwin" ]]; then
+  exec container build -f apps/yral-auth/Dockerfile.buildkit -t test/yral-auth --platform linux/amd64 --cpus 17 --memory 40gb .
+else
+  exec podman build -f apps/yral-auth/Dockerfile.buildkit -t test/yral-auth --platform linux/amd64 .
+fi
+'''
 
 [tasks.yral-auth-image-run]
 description = "Run the yral-auth container image locally (podman, port 8080)"
@@ -1002,8 +1051,14 @@ env = { SPACETIMEDB_URL = "http://127.0.0.1:3000" }
 run = "fnox exec -- cargo test --features ssr --bins --lib -- --test-threads=1"
 
 [tasks.yral-web-image]
-description = "Build the yral-web container image locally (podman)"
-run = "podman build -f apps/yral-web/Dockerfile.buildkit -t test/yral-web --platform linux/amd64 ."
+description = "Build the yral-web container image locally (container on macOS, podman on Linux)"
+run = '''
+if [[ "$(uname)" == "Darwin" ]]; then
+  exec container build -f apps/yral-web/Dockerfile.buildkit -t test/yral-web --platform linux/amd64 --cpus 17 --memory 40gb .
+else
+  exec podman build -f apps/yral-web/Dockerfile.buildkit -t test/yral-web --platform linux/amd64 .
+fi
+'''
 
 [tasks.yral-web-image-run]
 description = "Run the yral-web container image locally (podman, port 8080)"
@@ -1071,8 +1126,14 @@ description = "Run yral-metadata tests"
 run = "cargo test -p yral-metadata-server -p yral-metadata-client -p yral-metadata-types"
 
 [tasks.yral-metadata-image]
-description = "Build the yral-metadata container image locally (podman)"
-run = "podman build -f apps/yral-metadata/Dockerfile.buildkit -t test/yral-metadata --platform linux/amd64 ."
+description = "Build the yral-metadata container image locally (container on macOS, podman on Linux)"
+run = '''
+if [[ "$(uname)" == "Darwin" ]]; then
+  exec container build -f apps/yral-metadata/Dockerfile.buildkit -t test/yral-metadata --platform linux/amd64 --cpus 17 --memory 40gb .
+else
+  exec podman build -f apps/yral-metadata/Dockerfile.buildkit -t test/yral-metadata --platform linux/amd64 .
+fi
+'''
 
 [tasks.yral-metadata-image-run]
 description = "Run the yral-metadata container image locally (podman, port 7000)"
@@ -1131,8 +1192,14 @@ description = "Run off-chain-agent tests"
 run = "cargo test -p off-chain-agent"
 
 [tasks.off-chain-agent-image]
-description = "Build the off-chain-agent container image locally (podman)"
-run = "podman build -f apps/off-chain-agent/Dockerfile.buildkit -t test/off-chain-agent --platform linux/amd64 ."
+description = "Build the off-chain-agent container image locally (container on macOS, podman on Linux)"
+run = '''
+if [[ "$(uname)" == "Darwin" ]]; then
+  exec container build -f apps/off-chain-agent/Dockerfile.buildkit -t test/off-chain-agent --platform linux/amd64 --cpus 17 --memory 40gb .
+else
+  exec podman build -f apps/off-chain-agent/Dockerfile.buildkit -t test/off-chain-agent --platform linux/amd64 .
+fi
+'''
 
 [tasks.off-chain-agent-image-run]
 description = "Run the off-chain-agent container image locally (podman, port 50051)"
@@ -1432,8 +1499,14 @@ dir = "apps/my-website"
 run = "cargo test --features ssr --bins --lib"
 
 [tasks.my-website-image]
-description = "Build the my-website container image locally (podman)"
-run = "podman build -f apps/my-website/Dockerfile.buildkit -t test/my-website --platform linux/amd64 ."
+description = "Build the my-website container image locally (container on macOS, podman on Linux)"
+run = '''
+if [[ "$(uname)" == "Darwin" ]]; then
+  exec container build -f apps/my-website/Dockerfile.buildkit -t test/my-website --platform linux/amd64 --cpus 17 --memory 40gb .
+else
+  exec podman build -f apps/my-website/Dockerfile.buildkit -t test/my-website --platform linux/amd64 .
+fi
+'''
 
 [tasks.my-website-image-run]
 description = "Run the my-website container image locally (podman, port 8080)"
@@ -1685,11 +1758,17 @@ ready_http = "http://localhost:8081/"
 stop_signal = "SIGINT"
 env = { LEPTOS_SITE_ADDR = "0.0.0.0:8081" }
 
-# ── my-website container (podman) ───────────────────────────────────────────
+# ── my-website container (container on macOS, podman on Linux) ──────────────
 # Build first with: mise run my-website-image
 
 [daemons.my-website-container]
-run = "exec podman run --rm -p 8080:8080 test/my-website"
+run = '''
+if [[ "$(uname)" == "Darwin" ]]; then
+  exec container run --rm -p 8080:8080 test/my-website
+else
+  exec podman run --rm -p 8080:8080 test/my-website
+fi
+'''
 
 # ── off-chain-agent dev server (release binary, port 50051) ────────────────
 # Runs the NATIVE binary (arm64 on macOS, gnu on Linux/WSL) with env vars from
@@ -1797,18 +1876,28 @@ ready_http = "http://localhost:8080/healthz"
 stop_signal = "SIGINT"
 env = { LEPTOS_SITE_ADDR = "0.0.0.0:8080" }
 
-# ── yral-auth container (podman) ───────────────────────────────────────────
+# ── yral-auth container (container on macOS, podman on Linux) ─────────────
 # Build first with: mise run yral-auth-image
 
 [daemons.yral-auth-container]
 run = '''
-exec fnox exec -- podman run --rm \
-  -e APP_ENV -e GOOGLE_CLIENT_ID -e GOOGLE_CLIENT_SECRET \
-  -e APPLE_CLIENT_ID -e APPLE_TEAM_ID -e APPLE_KEY_ID -e APPLE_AUTH_KEY_PEM \
-  -e JWT_EC_PEM -e JWT_PUB_EC_PEM \
-  -e CLIENT_JWT_ED_PEM -e CLIENT_JWT_PUB_ED_PEM \
-  -e COOKIE_KEY -e WHATSAPP_API_KEY \
-  -p 8080:8080 test/yral-auth
+if [[ "$(uname)" == "Darwin" ]]; then
+  exec fnox exec -- container run --rm \
+    -e APP_ENV -e GOOGLE_CLIENT_ID -e GOOGLE_CLIENT_SECRET \
+    -e APPLE_CLIENT_ID -e APPLE_TEAM_ID -e APPLE_KEY_ID -e APPLE_AUTH_KEY_PEM \
+    -e JWT_EC_PEM -e JWT_PUB_EC_PEM \
+    -e CLIENT_JWT_ED_PEM -e CLIENT_JWT_PUB_ED_PEM \
+    -e COOKIE_KEY -e WHATSAPP_API_KEY \
+    -p 8080:8080 test/yral-auth
+else
+  exec fnox exec -- podman run --rm \
+    -e APP_ENV -e GOOGLE_CLIENT_ID -e GOOGLE_CLIENT_SECRET \
+    -e APPLE_CLIENT_ID -e APPLE_TEAM_ID -e APPLE_KEY_ID -e APPLE_AUTH_KEY_PEM \
+    -e JWT_EC_PEM -e JWT_PUB_EC_PEM \
+    -e CLIENT_JWT_ED_PEM -e CLIENT_JWT_PUB_ED_PEM \
+    -e COOKIE_KEY -e WHATSAPP_API_KEY \
+    -p 8080:8080 test/yral-auth
+fi
 '''
 dir = "apps/yral-auth"
 ready_http = "http://localhost:8080/healthz"
