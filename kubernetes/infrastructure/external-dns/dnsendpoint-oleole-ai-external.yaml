@@ -20,10 +20,44 @@
 apiVersion: externaldns.k8s.io/v1alpha1
 kind: DNSEndpoint
 metadata:
+  # Name deliberately unchanged when the MX was added. external-dns encodes the
+  # resource name in each ownership TXT marker, so renaming this object would
+  # rewrite the CNAME's marker — churn on a record Google may already have
+  # validated. Stable names, additive changes.
   name: oleole-ai-workspace-verification
   namespace: external-dns
 spec:
   endpoints:
+    # Google Workspace mail routing, per the admin console's activation screen:
+    #   name: (default) — i.e. the zone apex
+    #   priority: 1
+    #   points to: SMTP.GOOGLE.COM
+    #
+    # Priority and host are one RFC 1034 §3.6.1 target string ("<pref> <host>"),
+    # not separate fields — that is how MX targets are expressed in a DNSEndpoint.
+    #
+    # No trailing dot, deliberately. Google's instruction is to "follow your domain
+    # host's specific format… this might include adding a full stop" — i.e. it is
+    # host-dependent, not required. external-dns normalises the target, and the
+    # recorded value in PowerDNS is authoritative: if it stores "smtp.google.com."
+    # then the trailing dot was added for us. Verified after the fact rather than
+    # assumed, because a malformed MX target is rejected silently.
+    - dnsName: oleole.ai
+      recordType: MX
+      recordTTL: 300
+      targets:
+        - 1 smtp.google.com
+
+    # Google Workspace domain verification — CNAME method.
+    #
+    # The value and name are issued per-Workspace-account by the admin console; they
+    # are not derivable, so they are recorded here verbatim as supplied.
+    #
+    # CNAME rather than the TXT method (google-site-verification=...) because it is
+    # Google's current mechanism and stays valid without re-pasting codes. The usual
+    # objection to a CNAME — illegal at the zone apex (RFC 1034) — does not apply as
+    # this is a subdomain. It also coexists correctly with *.oleole.ai: a specific
+    # name takes precedence over the wildcard, confirmed via five resolvers.
     - dnsName: 2rbnnd3xklw7.oleole.ai
       recordType: CNAME
       recordTTL: 300
