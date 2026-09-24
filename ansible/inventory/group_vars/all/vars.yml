@@ -105,3 +105,9 @@ namecheap_api_key: "{{ vault_namecheap_api_key }}"      # Indirection to vault â
 pdns_zones:
   - name: saikat.dev
     snapshot: true
+  # TEMPORARY â€” validation of the new-zone onboarding path. A zone with no prior
+  # records (snapshot: false) is what every future domain will be, so this proves
+  # the generator + seed Job + external-dns loop end to end before a real domain
+  # depends on it. Remove this entry once verified.
+  - name: test.saikat.dev
+    snapshot: false

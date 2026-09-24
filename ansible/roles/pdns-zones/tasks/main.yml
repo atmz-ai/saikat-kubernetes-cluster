@@ -74,3 +74,18 @@
     msg: >-
       Generated zone artifacts for {{ pdns_zones | map(attribute='name') | join(', ') }}.
       Loading a snapshot: {{ pdns_zones | selectattr('snapshot') | map(attribute='name') | join(', ') | default('none', true) }}.
+
+# The seed Job reads this ConfigMap's CONTENT, so a zone change does not alter the
+# Job's pod template — which means no immutable-template error (good) but also no
+# restart. A Completed Job never runs again on its own, so a newly added zone is
+# silently ignored until the Job is deleted and Flux recreates it. That silence is
+# the same failure shape as the flag bugs, so it is called out here rather than
+# left to be remembered.
+- name: Remind that the seed Job must be re-run for a zone change
+  ansible.builtin.debug:
+    msg: >-
+      ZONES CHANGED → the seed Job reads this list at run time, but a Completed Job
+      will not re-run itself. After pushing, delete it so Flux recreates it:
+        kubectl -n external-dns delete job pdns-db-seed
+      Skipping this leaves the new zone absent from PowerDNS while the config claims
+      it exists.
