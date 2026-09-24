@@ -22,3 +22,19 @@ resources:
   - external-dns-deployment.yaml
   - dnsendpoint-saikat-dev.yaml
   - pdns-secrets.sops.yaml
+  # PowerDNS's PostgreSQL backend (CNPG) and its one-time seed.
+  #
+  # Ordering intent (Flux applies in list order, and re-applies every reconcile):
+  #   cnpg-cluster      creates the DB, role and tables (schema via
+  #                     postInitApplicationSQLRefs)
+  #   pdns-db-seed      seeds zone + TSIG + metadata once the DB exists
+  #
+  # The seed Job is safe to list here because pdns.conf now says launch=gpgsql, so
+  # pdnsutil in the Job talks to the new backend rather than the old LMDB file. The
+  # Job is idempotent, and Flux keeps a Completed Job rather than re-running it.
+  # For a from-scratch rebuild, delete the Job so Flux recreates it — see the
+  # rebuild note in pdns-db-seed.yaml.
+  - cnpg-cluster.yaml
+  - pdns-db-schema.yaml
+  - pdns-zone-snapshot.yaml
+  - pdns-db-seed.yaml

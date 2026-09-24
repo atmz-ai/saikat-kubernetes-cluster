@@ -1,0 +1,152 @@
+# Seeds the PowerDNS zone, TSIG key and zone metadata using `pdnsutil` — PowerDNS's
+# own CLI — rather than hand-written SQL.
+#
+# Why this Job exists at all: external-dns manages records WITHIN a zone but never
+# creates the zone itself, and cert-manager's RFC2136 solver likewise needs the zone
+# (and the update metadata) to already exist. Both would fail silently against an
+# empty database. The old LMDB setup did this in a StatefulSet init container; with
+# gpgsql there is no local file to initialise, so it becomes a Job.
+#
+# Why `pdnsutil` and not SQL: PDNS owns the internal representation of zones, TSIG
+# keys and metadata, and `pdnsutil` is the supported interface for mutating it. It
+# is also self-documenting — `zone create` vs `INSERT INTO domains (...)`.
+#
+# Runs against the gpgsql backend only, so it needs `launch=gpgsql` — it reads the
+# same pdns.conf ConfigMap as the server, then overrides nothing. The connection
+# string comes from the pdns-secrets Secret.
+#
+# Idempotency and REBUILD: the Job is safe to re-run by hand. A completed Job will
+# NOT re-run automatically when Flux re-applies it (Kubernetes keeps Completed Jobs),
+# so if the pdns-db CNPG cluster is ever rebuilt from scratch, re-trigger with:
+#   kubectl -n external-dns delete job pdns-db-seed
+# Flux then recreates it on the next reconcile. This is the disaster-recovery path
+# for the seed step — the table schema is re-applied automatically by CNPG's
+# postInitApplicationSQLRefs, but the zone/TSIG/metadata are not.
+#
+# Order matters: the zone must exist before metadata or TSIG mapping is applied to it.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: pdns-db-seed
+  namespace: external-dns
+spec:
+  backoffLimit: 6
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: seed
+          image: docker.io/powerdns/pdns-auth-52:latest
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -eu
+
+              # Connection details: the pgpsql backend must be reachable. pdnsutil
+              # reads pdns.conf (which sets launch=gpgsql) and takes the connection
+              # parameters on the command line, expanded here from the same env the
+              # PowerDNS server uses.
+              PDNS_ARGS="--config-dir=/etc/powerdns \
+                --gpgsql-host=$PDNS_DB_HOST \
+                --gpgsql-port=$PDNS_DB_PORT \
+                --gpgsql-dbname=$PDNS_DB_NAME \
+                --gpgsql-user=$PDNS_DB_USER \
+                --gpgsql-password=$PDNS_DB_PASSWORD"
+
+              echo "Waiting for the PowerDNS tables to be reachable..."
+              # The schema is applied by CNPG during bootstrap; poll until a zone
+              # listing succeeds, which proves the tables exist and the backend works.
+              until pdnsutil $PDNS_ARGS zone list-all > /dev/null 2>&1; do
+                echo "  backend not ready yet, retrying..."
+                sleep 5
+              done
+              echo "Backend reachable."
+
+              # Zone. `zone create` fails if the zone already exists, which is the
+              # expected state on re-run — treat that as success.
+              if pdnsutil $PDNS_ARGS zone list-all 2>/dev/null | grep -qx "saikat.dev"; then
+                echo "Zone saikat.dev already exists."
+              else
+                echo "Creating zone saikat.dev..."
+                pdnsutil $PDNS_ARGS zone create saikat.dev
+              fi
+
+              # Load the record snapshot. external-dns would eventually recreate the
+              # A/NS records from its DNSEndpoint CRDs, but only after it next
+              # reconciles — and in the meantime the zone would answer NODATA, which
+              # resolvers cache for the SOA minimum. Loading the snapshot closes that
+              # window, and preserves the external-dns TXT ownership markers exactly
+              # so external-dns recognises the records as its own rather than
+              # treating them as unmanaged and deleting them.
+              if [ -s /seed/saikat.dev.zone ]; then
+                echo "Loading zone contents from snapshot..."
+                pdnsutil $PDNS_ARGS zone load saikat.dev /seed/saikat.dev.zone
+              else
+                echo "No snapshot mounted — leaving zone empty for external-dns to populate."
+              fi
+
+              # TSIG key used by external-dns and cert-manager for RFC2136 updates.
+              # NOTE: this only makes the key known to POWERDNS. external-dns and
+              # cert-manager read the same key from their own SOPS secrets.
+              if pdnsutil $PDNS_ARGS tsigkey list 2>/dev/null | grep -q "saikat-dev-key"; then
+                echo "TSIG key saikat-dev-key already exists."
+              else
+                echo "Importing TSIG key saikat-dev-key..."
+                pdnsutil $PDNS_ARGS tsigkey import saikat-dev-key hmac-sha512 "$TSIG_SECRET"
+              fi
+
+              # Zone metadata enabling RFC2136 updates and automatic SOA serial bumps.
+              echo "Setting zone metadata..."
+              pdnsutil $PDNS_ARGS metadata set saikat.dev ALLOW-DNSUPDATE-FROM 0.0.0.0/0 ::/0
+              pdnsutil $PDNS_ARGS metadata set saikat.dev TSIG-ALLOW-DNSUPDATE saikat-dev-key
+              pdnsutil $PDNS_ARGS metadata set saikat.dev SOA-EDIT-DNSUPDATE INCREASE
+
+              echo "Seeding complete."
+              pdnsutil $PDNS_ARGS zone list-all
+          env:
+            - name: TSIG_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: pdns-tsig-key
+                  key: tsig-key
+            # Same connection parameters the PowerDNS server uses. host/port are
+            # literals; dbname/user/password come from the Secret CNPG generates.
+            - name: PDNS_DB_HOST
+              value: pdns-db-rw.external-dns.svc.cluster.local
+            - name: PDNS_DB_PORT
+              value: "5432"
+            - name: PDNS_DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: pdns-db-app
+                  key: dbname
+            - name: PDNS_DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: pdns-db-app
+                  key: username
+            - name: PDNS_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: pdns-db-app
+                  key: password
+          volumeMounts:
+            # Mount the config directory wholesale (rather than pdns.conf via
+            # subPath): pdnsutil reads pdns.conf from --config-dir, and mounting the
+            # directory keeps that path working without a second overlapping mount.
+            - name: pdns-config
+              mountPath: /etc/powerdns
+            # Record snapshot, exported from the pre-migration LMDB backend with
+            #   pdnsutil zone list saikat.dev
+            # and stored in the repo so a rebuild produces the same zone.
+            - name: zone-snapshot
+              mountPath: /seed
+              readOnly: true
+      volumes:
+        - name: pdns-config
+          configMap:
+            name: pdns-config
+        - name: zone-snapshot
+          configMap:
+            name: pdns-zone-snapshot

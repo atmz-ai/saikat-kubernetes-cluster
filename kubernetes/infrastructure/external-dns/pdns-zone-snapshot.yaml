@@ -1,0 +1,135 @@
+# Snapshot of the saikat.dev zone, exported from the pre-migration LMDB backend
+# with: pdnsutil --config-dir=/etc/powerdns zone list saikat.dev
+#
+# Used by the pdns-db-seed Job (pdns-db-seed.yaml) to repopulate the zone when
+# the pdns-db CNPG cluster is created (or rebuilt). Kept in git because it is the
+# source of truth for a from-scratch rebuild — external-dns would also recreate
+# these records from its DNSEndpoint CRDs, but only after its next reconcile,
+# during which the zone would answer NODATA (cached for the SOA minimum).
+#
+# The TXT records here are external-dns's own ownership markers. Preserving them
+# verbatim matters: without them external-dns would see the loaded A/NS records as
+# unmanaged and, under --policy=sync, delete them.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pdns-zone-snapshot
+  namespace: external-dns
+data:
+  saikat.dev.zone: |
+    $ORIGIN .
+    saikat.dev.	300	IN	A	116.202.234.107
+    saikat.dev.	300	IN	A	116.202.84.59
+    saikat.dev.	300	IN	A	136.243.145.173
+    saikat.dev.	300	IN	A	138.201.120.189
+    saikat.dev.	300	IN	A	138.201.121.44
+    saikat.dev.	300	IN	A	138.201.125.248
+    saikat.dev.	300	IN	A	138.201.138.101
+    saikat.dev.	300	IN	A	138.201.16.44
+    saikat.dev.	300	IN	A	138.201.18.222
+    saikat.dev.	300	IN	A	138.201.199.41
+    saikat.dev.	300	IN	A	138.201.251.32
+    saikat.dev.	300	IN	A	138.201.85.40
+    saikat.dev.	300	IN	A	167.235.0.121
+    saikat.dev.	300	IN	A	167.235.115.50
+    saikat.dev.	300	IN	A	168.119.139.49
+    saikat.dev.	300	IN	A	176.9.7.19
+    saikat.dev.	300	IN	A	176.9.86.220
+    saikat.dev.	300	IN	A	37.27.109.138
+    saikat.dev.	300	IN	A	65.108.76.154
+    saikat.dev.	300	IN	A	65.21.137.111
+    saikat.dev.	300	IN	A	88.99.147.157
+    saikat.dev.	300	IN	A	88.99.148.85
+    saikat.dev.	300	IN	A	88.99.213.237
+    saikat.dev.	300	IN	A	94.130.128.105
+    saikat.dev.	300	IN	A	94.130.217.94
+    saikat.dev.	300	IN	A	95.216.101.114
+    saikat.dev.	300	IN	A	95.216.112.246
+    saikat.dev.	300	IN	A	95.216.16.174
+    saikat.dev.	300	IN	A	95.216.16.50
+    saikat.dev.	300	IN	A	95.216.225.124
+    saikat.dev.	300	IN	A	95.216.228.60
+    saikat.dev.	300	IN	A	95.216.24.51
+    saikat.dev.	300	IN	A	95.216.6.238
+    saikat.dev.	300	IN	A	95.216.77.98
+    saikat.dev.	300	IN	A	95.216.97.236
+    saikat.dev.	300	IN	A	95.217.35.190
+    saikat.dev.	300	IN	A	95.217.43.62
+    saikat.dev.	300	IN	A	95.217.57.130
+    saikat.dev.	300	IN	A	95.217.58.83
+    saikat.dev.	300	IN	A	95.217.74.238
+    saikat.dev.	300	IN	NS	ns1.saikat.dev.
+    saikat.dev.	300	IN	NS	ns10.saikat.dev.
+    saikat.dev.	300	IN	NS	ns11.saikat.dev.
+    saikat.dev.	300	IN	NS	ns2.saikat.dev.
+    saikat.dev.	300	IN	NS	ns3.saikat.dev.
+    saikat.dev.	300	IN	NS	ns4.saikat.dev.
+    saikat.dev.	300	IN	NS	ns5.saikat.dev.
+    saikat.dev.	300	IN	NS	ns6.saikat.dev.
+    saikat.dev.	300	IN	NS	ns7.saikat.dev.
+    saikat.dev.	300	IN	NS	ns8.saikat.dev.
+    saikat.dev.	300	IN	NS	ns9.saikat.dev.
+    saikat.dev.	300	IN	SOA	a.misconfigured.dns.server.invalid. hostmaster.saikat.dev. 5 10800 3600 604800 3600
+    *.saikat.dev.	300	IN	A	116.202.234.107
+    *.saikat.dev.	300	IN	A	116.202.84.59
+    *.saikat.dev.	300	IN	A	136.243.145.173
+    *.saikat.dev.	300	IN	A	138.201.120.189
+    *.saikat.dev.	300	IN	A	138.201.121.44
+    *.saikat.dev.	300	IN	A	138.201.125.248
+    *.saikat.dev.	300	IN	A	138.201.138.101
+    *.saikat.dev.	300	IN	A	138.201.16.44
+    *.saikat.dev.	300	IN	A	138.201.18.222
+    *.saikat.dev.	300	IN	A	138.201.199.41
+    *.saikat.dev.	300	IN	A	138.201.251.32
+    *.saikat.dev.	300	IN	A	138.201.85.40
+    *.saikat.dev.	300	IN	A	167.235.0.121
+    *.saikat.dev.	300	IN	A	167.235.115.50
+    *.saikat.dev.	300	IN	A	168.119.139.49
+    *.saikat.dev.	300	IN	A	176.9.7.19
+    *.saikat.dev.	300	IN	A	176.9.86.220
+    *.saikat.dev.	300	IN	A	37.27.109.138
+    *.saikat.dev.	300	IN	A	65.108.76.154
+    *.saikat.dev.	300	IN	A	65.21.137.111
+    *.saikat.dev.	300	IN	A	88.99.147.157
+    *.saikat.dev.	300	IN	A	88.99.148.85
+    *.saikat.dev.	300	IN	A	88.99.213.237
+    *.saikat.dev.	300	IN	A	94.130.128.105
+    *.saikat.dev.	300	IN	A	94.130.217.94
+    *.saikat.dev.	300	IN	A	95.216.101.114
+    *.saikat.dev.	300	IN	A	95.216.112.246
+    *.saikat.dev.	300	IN	A	95.216.16.174
+    *.saikat.dev.	300	IN	A	95.216.16.50
+    *.saikat.dev.	300	IN	A	95.216.225.124
+    *.saikat.dev.	300	IN	A	95.216.228.60
+    *.saikat.dev.	300	IN	A	95.216.24.51
+    *.saikat.dev.	300	IN	A	95.216.6.238
+    *.saikat.dev.	300	IN	A	95.216.77.98
+    *.saikat.dev.	300	IN	A	95.216.97.236
+    *.saikat.dev.	300	IN	A	95.217.35.190
+    *.saikat.dev.	300	IN	A	95.217.43.62
+    *.saikat.dev.	300	IN	A	95.217.57.130
+    *.saikat.dev.	300	IN	A	95.217.58.83
+    *.saikat.dev.	300	IN	A	95.217.74.238
+    a-*.saikat.dev.	0	IN	TXT	"heritage=external-dns,external-dns/owner=yral-k8s,external-dns/resource=crd/external-dns/saikat-dev-app-a"
+    a-ns1.saikat.dev.	0	IN	TXT	"heritage=external-dns,external-dns/owner=yral-k8s,external-dns/resource=crd/external-dns/saikat-dev-nameserver-a"
+    a-ns10.saikat.dev.	0	IN	TXT	"heritage=external-dns,external-dns/owner=yral-k8s,external-dns/resource=crd/external-dns/saikat-dev-nameserver-a"
+    a-ns11.saikat.dev.	0	IN	TXT	"heritage=external-dns,external-dns/owner=yral-k8s,external-dns/resource=crd/external-dns/saikat-dev-nameserver-a"
+    a-ns2.saikat.dev.	0	IN	TXT	"heritage=external-dns,external-dns/owner=yral-k8s,external-dns/resource=crd/external-dns/saikat-dev-nameserver-a"
+    a-ns3.saikat.dev.	0	IN	TXT	"heritage=external-dns,external-dns/owner=yral-k8s,external-dns/resource=crd/external-dns/saikat-dev-nameserver-a"
+    a-ns4.saikat.dev.	0	IN	TXT	"heritage=external-dns,external-dns/owner=yral-k8s,external-dns/resource=crd/external-dns/saikat-dev-nameserver-a"
+    a-ns5.saikat.dev.	0	IN	TXT	"heritage=external-dns,external-dns/owner=yral-k8s,external-dns/resource=crd/external-dns/saikat-dev-nameserver-a"
+    a-ns6.saikat.dev.	0	IN	TXT	"heritage=external-dns,external-dns/owner=yral-k8s,external-dns/resource=crd/external-dns/saikat-dev-nameserver-a"
+    a-ns7.saikat.dev.	0	IN	TXT	"heritage=external-dns,external-dns/owner=yral-k8s,external-dns/resource=crd/external-dns/saikat-dev-nameserver-a"
+    a-ns8.saikat.dev.	0	IN	TXT	"heritage=external-dns,external-dns/owner=yral-k8s,external-dns/resource=crd/external-dns/saikat-dev-nameserver-a"
+    a-ns9.saikat.dev.	0	IN	TXT	"heritage=external-dns,external-dns/owner=yral-k8s,external-dns/resource=crd/external-dns/saikat-dev-nameserver-a"
+    ns1.saikat.dev.	300	IN	A	138.201.85.40
+    ns10.saikat.dev.	300	IN	A	95.217.57.130
+    ns11.saikat.dev.	300	IN	A	136.243.145.173
+    ns2.saikat.dev.	300	IN	A	88.99.213.237
+    ns3.saikat.dev.	300	IN	A	94.130.128.105
+    ns4.saikat.dev.	300	IN	A	88.99.148.85
+    ns5.saikat.dev.	300	IN	A	138.201.199.41
+    ns6.saikat.dev.	300	IN	A	138.201.125.248
+    ns7.saikat.dev.	300	IN	A	168.119.139.49
+    ns8.saikat.dev.	300	IN	A	138.201.251.32
+    ns9.saikat.dev.	300	IN	A	88.99.147.157

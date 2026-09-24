@@ -1,0 +1,78 @@
+# CloudNativePG Cluster backing the PowerDNS authoritative server.
+#
+# Replaces the single-replica LMDB StatefulSet. Reasons for the switch:
+#   - LMDB is single-writer, so PowerDNS could never run more than one pod
+#     (`Multiple instances: No` in the PowerDNS backend support matrix). That made
+#     DNS a single point of failure on one node — unacceptable for a component
+#     that the cluster depends on.
+#   - gpgsql is a shared-database backend (`Multiple instances: Yes`), so every
+#     PowerDNS pod reads and writes the same records. Updates from external-dns
+#     and cert-manager land in one place and are visible to all pods, instead of
+#     each pod holding its own diverging LMDB file.
+#
+# 3 instances, not 2: with 2, losing one instance leaves neither redundancy nor a
+# failover target. With 3, one can fail and automatic failover still has a
+# remaining replica to promote. CNPG handles the promotion and repoints the
+# `pdns-db-rw` service; PowerDNS always connects via -rw, so it follows failover
+# with no configuration change.
+#
+# Storage: longhorn-1replica, per the storage replication policy — CNPG implements
+# native streaming replication, so Longhorn 2-replica would be redundant write
+# amplification. Same reasoning as the harbor-db Cluster.
+#
+# Role, database and password are owned by CNPG. The owner is `postgres` for the
+# same reason harbor-db uses it: postInitApplicationSQLRefs runs the schema as a
+# superuser, so the PowerDNS tables are OWNED by that superuser. If PowerDNS then
+# connected as a different role (`pdns`), every write — external-dns's record
+# updates, cert-manager's ACME TXT records — would fail with permission denied on
+# tables it does not own. Using one role for both avoids that entirely.
+#
+# Only the TABLE schema is applied by hand, because PowerDNS ships no tooling for
+# it: `pdnsutil` has no create-db/setup-schema command (only `test-schema`, which
+# validates), and the .sql files under /usr/local/share/doc/pdns/ are meant to be
+# applied by the operator. postInitApplicationSQLRefs is therefore the only option.
+#
+# Zone, TSIG key and zone metadata are NOT seeded here — they are created by the
+# `pdnsutil` seed Job (pdns-db-seed.yaml), using PowerDNS's own CLI rather than
+# hand-written SQL, because PDNS owns the internal representation of those objects.
+# external-dns manages records within a zone but never creates the zone, so the
+# zone must exist before external-dns can write anything.
+#
+# PowerDNS connects via the -rw service:
+#   pdns-db-rw.external-dns.svc.cluster.local
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: pdns-db
+  namespace: external-dns
+spec:
+  instances: 3
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.4
+
+  # No superuserSecret / enableSuperuserAccess: PowerDNS connects as the
+  # application owner (postgres, above) via the CNPG-generated `pdns-db-app`
+  # Secret, so it never needs the superuser password. Unlike harbor-db, whose
+  # comment notes Harbor core connects AS postgres and therefore needs the
+  # superuser password synced, here the app Secret already carries what we need.
+  bootstrap:
+    initdb:
+      database: pdns
+      owner: postgres
+      # Applied as superuser in the `pdns` database, immediately after initdb.
+      postInitApplicationSQLRefs:
+        configMapRefs:
+          - name: pdns-db-schema
+            key: schema.sql
+
+  storage:
+    storageClass: longhorn-1replica
+    size: 5Gi
+
+  # PowerDNS needs to know about failover promptly. CNPG's default probe interval
+  # is tuned for general workloads; a DNS backend benefits from faster detection.
+  # Only the liveness probe interval is set — everything else stays at CNPG
+  # defaults (see the "Default-First Configuration" policy in AGENTS.md).
+  probes:
+    liveness:
+      initialDelaySeconds: 10
+      periodSeconds: 10

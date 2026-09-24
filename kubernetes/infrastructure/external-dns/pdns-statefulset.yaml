@@ -1,15 +1,20 @@
-# PowerDNS Authoritative Server — StatefulSet with LMDB backend.
+# PowerDNS Authoritative Server — StatefulSet with the gpgsql (PostgreSQL) backend.
 #
-# Uses LMDB (file-based key-value store) on a PVC. Supports RFC2136 dynamic
-# updates and TSIG keys (unlike the bind backend which doesn't support DNS update).
+# All zone data lives in the pdns-db CNPG cluster, so PowerDNS itself is stateless:
+# no PVC, no init container, and replicas are interchangeable. The previous LMDB
+# backend stored zones in a local file and could therefore only ever run ONE pod
+# (LMDB is single-writer — `Multiple instances: No`), which made DNS a single point
+# of failure on a single node.
 #
-# Single replica for Phase 1 (LMDB doesn't support multiple writers).
-# Phase 2: migrate to gmysql backed by CNPG for HA with multiple replicas.
+# Zone, TSIG key and zone metadata are seeded once by the pdns-db-seed Job using
+# `pdnsutil` — see pdns-db-seed.yaml. That is a bootstrap concern, not a per-pod
+# one, which is why it is a Job rather than an init container here: three replicas
+# would otherwise race to seed the same zone on every pod start.
 #
-# Init container: creates the saikat.dev zone, imports the TSIG key, and sets
-# zone metadata (ALLOW-DNSUPDATE-FROM, TSIG-ALLOW-DNSUPDATE) using pdnsutil.
-# This runs before PowerDNS starts, against the LMDB file on the PVC.
-# Idempotent — checks if zone/key already exist before creating.
+# One shared TSIG key serves every zone (the key name is just an identifier);
+# external-dns sends the same key whichever zone it writes to. Add a new zone by
+# appending it in pdns-db-seed.yaml AND to external-dns's --rfc2136-zone /
+# --domain-filter lists, plus its DNSEndpoint CRD.
 #
 # Scheduling: worker nodes only (node affinity excludes control-plane).
 #
@@ -26,7 +31,11 @@ metadata:
     app: powerdns
 spec:
   serviceName: powerdns-api
-  replicas: 1
+  # 3 replicas: PowerDNS is stateless now (all state is in the pdns-db CNPG
+  # cluster), so any replica can answer any query and accept any update. Three
+  # gives HA across nodes and matches the database's 3 instances, so losing one
+  # node does not remove the ability to serve DNS or accept RFC2136 updates.
+  replicas: 3
   selector:
     matchLabels:
       app: powerdns
@@ -44,57 +53,19 @@ spec:
               - matchExpressions:
                   - key: node-role.kubernetes.io/control-plane
                     operator: DoesNotExist
-      initContainers:
-        - name: pdns-init
-          image: docker.io/powerdns/pdns-auth-52:latest
-          command:
-            - /bin/sh
-            - -c
-            - |
-              set -eu
-
-              echo "Initializing PowerDNS LMDB backend..."
-
-              # Create zone if it doesn't exist
-              if pdnsutil --config-dir=/etc/powerdns list-zone saikat.dev > /dev/null 2>&1; then
-                echo "Zone saikat.dev already exists."
-              else
-                echo "Creating zone saikat.dev..."
-                pdnsutil --config-dir=/etc/powerdns create-zone saikat.dev
-                pdnsutil --config-dir=/etc/powerdns set-meta saikat.dev SOA-EDIT-DNSUPDATE INCREASE
-              fi
-
-              # Import TSIG key if it doesn't exist
-              if pdnsutil --config-dir=/etc/powerdns tsigkey list 2>/dev/null | grep -q saikat-dev-key; then
-                echo "TSIG key saikat-dev-key already exists."
-              else
-                echo "Importing TSIG key saikat-dev-key..."
-                pdnsutil --config-dir=/etc/powerdns tsigkey import saikat-dev-key hmac-sha512 "$TSIG_SECRET"
-              fi
-
-              # Set zone metadata for DNS updates
-              pdnsutil --config-dir=/etc/powerdns set-meta saikat.dev ALLOW-DNSUPDATE-FROM 0.0.0.0/0 ::/0
-              pdnsutil --config-dir=/etc/powerdns set-meta saikat.dev TSIG-ALLOW-DNSUPDATE saikat-dev-key
-
-              echo "PowerDNS initialization complete. DNS records are managed by ExternalDNS DNSEndpoint CRDs."
-          env:
-            - name: TSIG_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: pdns-tsig-key
-                  key: tsig-key
-          volumeMounts:
-            - name: pdns-config
-              mountPath: /etc/powerdns/pdns.conf
-              subPath: pdns.conf
-              readOnly: true
-            - name: pdns-data
-              mountPath: /var/lib/powerdns
       containers:
         - name: powerdns
           image: docker.io/powerdns/pdns-auth-52:latest
           args:
             - --api-key=$(PDNS_API_KEY)
+            # Connection parameters passed as args rather than in pdns.conf, so the
+            # password never lands in a ConfigMap. Kubernetes expands $(VAR) in args;
+            # these resolve from the env block below.
+            - --gpgsql-host=$(PDNS_DB_HOST)
+            - --gpgsql-port=$(PDNS_DB_PORT)
+            - --gpgsql-dbname=$(PDNS_DB_NAME)
+            - --gpgsql-user=$(PDNS_DB_USER)
+            - --gpgsql-password=$(PDNS_DB_PASSWORD)
           ports:
             - name: dns-udp
               containerPort: 5300
@@ -111,13 +82,33 @@ spec:
                 secretKeyRef:
                   name: pdns-api-key
                   key: api-key
+            # host/port are literals; dbname/user/password come from the Secret CNPG
+            # generates for the `pdns` database. The -rw service is used so a CNPG
+            # failover (which repoints it at the promoted replica) needs no change here.
+            - name: PDNS_DB_HOST
+              value: pdns-db-rw.external-dns.svc.cluster.local
+            - name: PDNS_DB_PORT
+              value: "5432"
+            - name: PDNS_DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: pdns-db-app
+                  key: dbname
+            - name: PDNS_DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: pdns-db-app
+                  key: username
+            - name: PDNS_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: pdns-db-app
+                  key: password
           volumeMounts:
             - name: pdns-config
               mountPath: /etc/powerdns/pdns.conf
               subPath: pdns.conf
               readOnly: true
-            - name: pdns-data
-              mountPath: /var/lib/powerdns
           readinessProbe:
             tcpSocket:
               port: 5300
@@ -137,17 +128,9 @@ spec:
             limits:
               cpu: 200m
               memory: 256Mi
+      # No volumeClaimTemplates: PowerDNS holds no local state. All zone data lives
+      # in the pdns-db CNPG cluster (see cnpg-cluster.yaml).
       volumes:
         - name: pdns-config
           configMap:
             name: pdns-config
-  volumeClaimTemplates:
-    - metadata:
-        name: pdns-data
-      spec:
-        accessModes:
-          - ReadWriteOnce
-        storageClassName: longhorn
-        resources:
-          requests:
-            storage: 1Gi

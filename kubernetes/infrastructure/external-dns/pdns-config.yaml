@@ -1,16 +1,20 @@
 # PowerDNS authoritative server configuration (non-sensitive settings).
 #
-# Uses the LMDB backend — a file-based key-value store (no external database).
-# LMDB supports RFC2136 dynamic updates (since PowerDNS 5.0.0) and TSIG keys.
-# The bind backend does NOT support DNS updates (per PowerDNS docs).
+# Uses the gpgsql backend: PostgreSQL via the pdns-db CNPG cluster. This replaced
+# the LMDB file backend, which could only ever run ONE replica (LMDB is
+# single-writer, `Multiple instances: No` in the PowerDNS backend matrix) — making
+# DNS a single point of failure on one node. gpgsql is a shared-database backend
+# (`Multiple instances: Yes`), so every PowerDNS replica reads and writes the same
+# records and updates from external-dns / cert-manager are visible cluster-wide.
 #
-# The LMDB file lives on a PVC (Longhorn 2-replica, encrypted). PowerDNS auto-creates
-# the schema on first start. Zone and TSIG key are created by the init container
-# using pdnsutil.
+# Connection parameters (host, dbname, user, PASSWORD) are deliberately NOT here.
+# They are passed as container ARGS using Kubernetes `$(VAR)` expansion, which is
+# already proven to work in this deployment for `--api-key=$(PDNS_API_KEY)`. That
+# keeps the password out of a ConfigMap and out of the rendered manifest.
 #
 # Key settings:
-#   - launch=lmdb: LMDB file backend (supports DNS update + TSIG)
-#   - lmdb-filename: path to the LMDB file (on PVC)
+#   - launch=gpgsql: PostgreSQL backend (supports DNS update + TSIG)
+#   - gpgsql-host (via args): the -rw service, which follows CNPG failover
 #   - api=yes: HTTP API on port 8081 (read-only debugging + pdnsutil remote)
 #   - dnsupdate=yes: RFC2136 dynamic updates (ExternalDNS + cert-manager DNS-01)
 #   - local-port=5300: non-privileged port (Cilium LoadBalancer maps 53→5300)
@@ -22,9 +26,9 @@ metadata:
   namespace: external-dns
 data:
   pdns.conf: |
-    # Backend: LMDB (file-based, supports DNS update + TSIG)
-    launch=lmdb
-    lmdb-filename=/var/lib/powerdns/pdns.lmdb
+    # Backend: PostgreSQL (shared — supports DNS update + TSIG, multiple replicas).
+    # See the StatefulSet args for the connection parameters.
+    launch=gpgsql
 
     # DNS server settings
     local-address=0.0.0.0
