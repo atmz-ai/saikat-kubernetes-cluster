@@ -32,6 +32,9 @@ resources:
   - external-dns-rbac.yaml
   - external-dns-deployment.yaml
   - dnsendpoint-saikat-dev.yaml
+  # TEMPORARY validation fixture for the new-zone path. Remove with the
+  # test.saikat.dev entry in pdns_zones once confirmed.
+  - dnsendpoint-test-saikat-dev.yaml
   - pdns-secrets.sops.yaml
   # PowerDNS's PostgreSQL backend (CNPG) and its one-time seed.
   #
