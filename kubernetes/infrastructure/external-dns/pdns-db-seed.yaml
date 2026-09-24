@@ -23,6 +23,13 @@
 # for the seed step — the table schema is re-applied automatically by CNPG's
 # postInitApplicationSQLRefs, but the zone/TSIG/metadata are not.
 #
+# The same deletion is needed after ANY change to this Job's spec, not just a
+# rebuild: a Job's pod template is immutable, so amending it (a new volume, env var,
+# or command) fails with `field is immutable` and Flux will not patch it in place.
+# Delete the Job and let Flux recreate it. Note Flux reports the failure as a
+# dry-run error against the whole resource set, so one immutable Job blocks every
+# other resource in this kustomization until it is removed.
+#
 # Order matters: the zone must exist before metadata or TSIG mapping is applied to it.
 apiVersion: batch/v1
 kind: Job
