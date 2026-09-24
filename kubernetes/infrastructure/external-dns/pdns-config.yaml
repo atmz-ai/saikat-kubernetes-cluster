@@ -45,6 +45,20 @@ data:
     # querying") because the rendered gpgsql.conf is never read.
     include-dir=/etc/powerdns/pdns.d
 
+    # Deliberate deviation from the default (300). PowerDNS caches the list of known
+    # zones, so a zone created after startup is not served until the cache expires —
+    # up to five minutes during which the zone exists in the database but queries for
+    # names under it fall through to a parent zone's wildcard. Observed exactly that
+    # on a newly added sub-zone: correct records and SOA in the backend, but the
+    # parent's wildcard answering instead.
+    #
+    # That silent divergence is worse than the cost of disabling the cache: a zone
+    # added by the seed Job is served immediately, so the declarative zone list and
+    # what the server actually answers cannot disagree. With consistent-backends
+    # (default since 4.5) the uncached path is a single indexed lookup, and this
+    # server handles cluster-local DNS plus two public zones, not high-QPS recursion.
+    zone-cache-refresh-interval=0
+
     # DNS server settings
     local-address=0.0.0.0
     local-port=5300
