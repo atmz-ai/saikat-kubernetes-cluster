@@ -35,7 +35,7 @@ resources:
   # For a from-scratch rebuild, delete the Job so Flux recreates it — see the
   # rebuild note in pdns-db-seed.yaml.
   - cnpg-cluster.yaml
-  - pdns-db-superuser.sops.yaml
   - pdns-db-schema.yaml
+  - pdns-db-grants.yaml
   - pdns-zone-snapshot.yaml
   - pdns-db-seed.yaml

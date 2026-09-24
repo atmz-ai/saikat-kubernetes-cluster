@@ -20,12 +20,22 @@
 # native streaming replication, so Longhorn 2-replica would be redundant write
 # amplification. Same reasoning as the harbor-db Cluster.
 #
-# Role, database and password are owned by CNPG. The owner is `postgres` for the
-# same reason harbor-db uses it: postInitApplicationSQLRefs runs the schema as a
-# superuser, so the PowerDNS tables are OWNED by that superuser. If PowerDNS then
-# connected as a different role (`pdns`), every write — external-dns's record
-# updates, cert-manager's ACME TXT records — would fail with permission denied on
-# tables it does not own. Using one role for both avoids that entirely.
+# Role, database and password are owned by CNPG, following the documented pattern
+# in "Connecting from an application":
+#   - `pdns-db-app`     → the role that OWNS the database; this is what
+#                         applications (here, PowerDNS) must connect as.
+#   - `pdns-db-superuser` → administrative only, and NOT generated at all unless
+#                         enableSuperuserAccess is set.
+#
+# The owner is therefore a DEDICATED low-privilege role (`pdns`), not `postgres`.
+# An earlier revision set `owner: postgres` and used the -app secret, which is
+# subtly broken: `postgres` is also CNPG's superuser, so with superuser access
+# enabled the operator manages that role's password from the SUPERUSER secret,
+# leaving the -app secret's password stale. PowerDNS then failed with
+# `FATAL: password authentication failed for user "postgres"`. Keeping application
+# and administrative roles distinct is what avoids that class of bug — and it is
+# why enableSuperuserAccess is not needed here at all (nothing performs
+# administrative work; PowerDNS only needs to read and write its own tables).
 #
 # Only the TABLE schema is applied by hand, because PowerDNS ships no tooling for
 # it: `pdnsutil` has no create-db/setup-schema command (only `test-schema`, which
@@ -33,10 +43,7 @@
 # applied by the operator. postInitApplicationSQLRefs is therefore the only option.
 #
 # Zone, TSIG key and zone metadata are NOT seeded here — they are created by the
-# `pdnsutil` seed Job (pdns-db-seed.yaml), using PowerDNS's own CLI rather than
-# hand-written SQL, because PDNS owns the internal representation of those objects.
-# external-dns manages records within a zone but never creates the zone, so the
-# zone must exist before external-dns can write anything.
+# `pdnsutil` seed Job (pdns-db-seed.yaml), using PowerDNS's own CLI.
 #
 # PowerDNS connects via the -rw service:
 #   pdns-db-rw.external-dns.svc.cluster.local
@@ -49,33 +56,19 @@ spec:
   instances: 3
   imageName: ghcr.io/cloudnative-pg/postgresql:18.4
 
-  # Superuser access MUST be enabled here, even though PowerDNS connects as the
-  # `postgres` application owner rather than needing superuser rights as such.
-  #
-  # Reason: with enableSuperuserAccess unset (default false), the operator IGNORES
-  # superuserSecret and sets the postgres password to NULL — password auth is then
-  # disabled entirely, and PowerDNS fails at startup with:
-  #     FATAL: password authentication failed for user "postgres"
-  # This is the trap described in AGENTS.md "CNPG Superuser Password Management":
-  # the setting does not grant extra privilege so much as make the operator manage
-  # this role's password at all.
-  #
-  # The tables are owned by `postgres` because postInitApplicationSQLRefs runs the
-  # schema as superuser, so PowerDNS must connect as that same role — a different
-  # role would hit permission denied on every write.
-  enableSuperuserAccess: true
-  superuserSecret:
-    name: pdns-db-superuser
-
   bootstrap:
     initdb:
       database: pdns
-      owner: postgres
-      # Applied as superuser in the `pdns` database, immediately after initdb.
+      owner: pdns
+      # Order matters. `schema.sql` creates the tables (as superuser, so they are
+      # owned by postgres), then `grants.sql` transfers rights to the `pdns` app
+      # role. Without the grants PowerDNS could not write a single record.
       postInitApplicationSQLRefs:
         configMapRefs:
           - name: pdns-db-schema
             key: schema.sql
+          - name: pdns-db-grants
+            key: grants.sql
 
   storage:
     storageClass: longhorn-1replica

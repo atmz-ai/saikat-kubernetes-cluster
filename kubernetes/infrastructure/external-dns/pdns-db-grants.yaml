@@ -1,0 +1,54 @@
+# Grants that let the `pdns` application role use the PowerDNS tables.
+#
+# Companion to pdns-db-schema.yaml, applied immediately after it via the same
+# `postInitApplicationSQLRefs` list (ConfigMapRefs are processed in array order,
+# and schema.sql is listed before grants.sql).
+#
+# WHY THIS IS NEEDED: `postInitApplicationSQLRefs` always executes as a superuser,
+# regardless of `initdb.owner`. So the tables created by schema.sql are owned by
+# the superuser role, not by `pdns`. Without these grants the `pdns` role that
+# PowerDNS connects as would be unable to write anything — every record update
+# from external-dns or cert-manager would fail with "permission denied for table
+# records".
+#
+# WHY NOT JUST SET owner: postgres INSTEAD: it "works", but couples PowerDNS to
+# the administrative role. CNPG documents `-app` as "the user owning the database"
+# and `-superuser` as "administrative purposes" only. Keeping them separate means
+# a future superuser-password rotation (or enabling superuser access at all) cannot
+# silently invalidate the credentials PowerDNS uses.
+#
+# Note on `ALTER TABLE ... OWNER TO`: this runs as superuser, which is permitted —
+# only the app role is non-superuser. Ownership (rather than plain GRANT) is used
+# for the tables PowerDNS reads and writes, because PowerDNS also issues DDL-like
+# operations on them in some paths (e.g. creating empty non-terminal rows during
+# DNSSEC rectification), and an owner has the full set of rights without having to
+# enumerate them.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pdns-db-grants
+  namespace: external-dns
+data:
+  grants.sql: |
+    -- Hand the PowerDNS tables to the application role. PowerDNS connects as this
+    -- role and must be able to create, update and delete records.
+    ALTER TABLE domains        OWNER TO pdns;
+    ALTER TABLE records        OWNER TO pdns;
+    ALTER TABLE supermasters   OWNER TO pdns;
+    ALTER TABLE comments       OWNER TO pdns;
+    ALTER TABLE domainmetadata OWNER TO pdns;
+    ALTER TABLE cryptokeys     OWNER TO pdns;
+    ALTER TABLE tsigkeys       OWNER TO pdns;
+
+    -- Sequences back the SERIAL/BIGSERIAL primary keys; ownership is needed for
+    -- INSERTs to draw from them.
+    ALTER SEQUENCE domains_id_seq     OWNER TO pdns;
+    ALTER SEQUENCE records_id_seq     OWNER TO pdns;
+    ALTER SEQUENCE comments_id_seq    OWNER TO pdns;
+    ALTER SEQUENCE domainmetadata_id_seq OWNER TO pdns;
+    ALTER SEQUENCE cryptokeys_id_seq  OWNER TO pdns;
+    ALTER SEQUENCE tsigkeys_id_seq    OWNER TO pdns;
+
+    -- The schema itself, so PowerDNS can create tables it may need in future
+    -- upgrades without an operator intervention.
+    ALTER SCHEMA public OWNER TO pdns;
