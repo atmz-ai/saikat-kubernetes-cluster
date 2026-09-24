@@ -56,7 +56,19 @@ spec:
             - --provider=rfc2136
             - --rfc2136-host=powerdns-dns.external-dns.svc.cluster.local
             - --rfc2136-port=53
-            - --rfc2136-zone=saikat.dev,oleole.ai
+            # --rfc2136-zone and --domain-filter are REPEATABLE flags, not
+            # comma-separated lists. Passing "saikat.dev,oleole.ai" makes a single
+            # zone/domain literally named "saikat.dev,oleole.ai", which matches
+            # nothing — so external-dns silently managed no records at all (it
+            # logged "All records are already up to date" every cycle because every
+            # record was filtered out before comparison). Add a zone by repeating the
+            # flag:
+            #   - --rfc2136-zone=saikat.dev
+            #   - --rfc2136-zone=oleole.ai
+            # oleole.ai is intentionally absent until its zone exists in PowerDNS —
+            # external-dns will not create zones, and AXFR against a missing zone
+            # errors. See pdns-db-seed.yaml for zone creation.
+            - --rfc2136-zone=saikat.dev
             - --rfc2136-tsig-keyname=saikat-dev-key
             - --rfc2136-tsig-secret-alg=hmac-sha512
             - --rfc2136-tsig-secret=$(TSIG_KEY)
@@ -69,7 +81,15 @@ spec:
             # pdns-db-seed.yaml). The two must stay in step — the flag without the
             # metadata fails the transfer, the metadata without the flag is unused.
             - --rfc2136-axfr
-            - --domain-filter=saikat.dev,oleole.ai
+            # Same repeatable-flag rule applies. Keep this list to zones that
+            # actually exist in PowerDNS: a filter entry whose zone is missing makes
+            # external-dns attempt RFC2136 creates against a non-existent zone (and
+            # the AXFR at startup fails outright). To onboard oleole.ai, create its
+            # zone in pdns-db-seed.yaml, add dnsendpoint-oleole-ai.yaml to
+            # kustomization.yaml, then add both flags here:
+            #   - --rfc2136-zone=oleole.ai
+            #   - --domain-filter=oleole.ai
+            - --domain-filter=saikat.dev
             - --registry=txt
             - --txt-owner-id=yral-k8s
             - --policy=sync
