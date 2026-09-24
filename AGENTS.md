@@ -574,6 +574,13 @@ Two components are in play — Shipwright for builds, Tekton Triggers for the gi
 
 Never push code changes to git without first verifying they compile and run locally. Waiting for an in-cluster Shipwright build to discover a compile error or runtime failure wastes 10+ minutes per iteration.
 
+**Ignore patterns are explicit paths, never globs (Hard Rule).** In `.dockerignore` (and equally for anything that walks the tree — `.gitignore`, `.helmignore`, tool-specific ignore files), spell out the **specific** directory or file that must be excluded (`target/`, `apps/yral-ios/packages/YralApp/.build/`, `apps/off-chain-agent/target/`). Never use `**`-prefixed globs (`**/target/`, `**/.build/`) and never a broad `**`. Explicit paths are unambiguous, are what the docs prescribe, and cannot silently defeat a rule set.
+
+- **For `*.dockerignore` naming:** Apple's `container` CLI derives the ignore path from the `-f` value (`<dockerfile>.dockerignore`), so each app carries `apps/<app>/Dockerfile.buildkit.dockerignore` symlinked to the root `.dockerignore` for one source of truth (podman/Linux reads the root file directly).
+- **Build-context cost has two independent components, and they need different fixes.** *Transferred* size is what `dockerignore` reduces. *Walked-tree* size is what it does **not** — both Apple's CLI (which stats every path before applying ignore rules) and the ignore matcher itself traverse the whole tree, so an excluded directory still costs wall-clock. When local image builds are slow to start or exhaust memory, the fix is to **delete the regenerable tree from disk** (`rm -rf target/ .build/ .venv/ ansible/collections/ <stale app-local target/>`), not to add more ignore rules — the ignore rule is a safety net, not the fix.
+- **Verify, never assume.** After touching ignore rules or deleting trees, confirm the build reports a small `transferring context:` value (bytes, not GB) **and** that start-up latency dropped. A change that only lowers bytes transferred but leaves the walk intact has not fixed the slow-start symptom.
+- **One `**` poisons the whole file — treat any glob as a latent total failure**, not a local one: a single unsupported pattern can leave every rule unapplied while the build still succeeds (slower and heavier), which is why this is a hard rule rather than a style preference.
+
 **CI/CD Pipeline (Tekton Triggers → Shipwright → Harbor → Flux):** Git push → Tekton EventListener → BuildRun → Harbor image push → Flux ImageRepository/ImagePolicy/ImageUpdateAutomation → git commit updating deployment manifest → Flux Kustomization reconcile → new pods.
 
 - Per-app Tekton Trigger resources in `kubernetes/apps/<app>/tekton-trigger.yaml`.

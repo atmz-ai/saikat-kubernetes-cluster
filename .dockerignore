@@ -1,48 +1,17 @@
-# Exclude build artifacts and large directories from Docker build context
-# to prevent slow COPY operations and oversized build contexts.
-
-# Rust build targets (everywhere in the repo)
-**/target/
-
-# Node.js
-**/node_modules/
-
-# Swift / SwiftPM — NOT needed by any Rust image build.
-# `.build/` is SwiftPM's dependency + artifact cache and is the single largest
-# thing in this repo outside target/ (~7 GB: firebase-ios-sdk git packs, gRPC
-# xcframeworks, snowplow checkouts). Without this exclusion every `*-image`
-# build copies it into the build context — tens of GB of pointless I/O per
-# build, which is what tipped this machine into memory-compressor/swap
-# exhaustion and a watchdog panic (2026-09-23). The whole app dir goes, not
-# just `.build/`, so Xcode state can never leak back in.
-**/.build/
-**/DerivedData/
-apps/yral-ios/
-
-# Git
 .git/
-.gitignore
+target/
+apps/yral-ios/packages/YralApp/.build/
+apps/yral-ios/.build/
 
-# Python
+# Python virtualenvs (Ansible/Python tooling, not used by image builds)
 .venv/
-*.pyc
+apps/hetzner-bare-metal-fleet/.venv/
+apps/yral-rishi-agent/.venv/
 
-# Ansible (not needed for builds)
-ansible/
+# Installed Ansible collections (generated tree, not used by image builds)
+ansible/collections/
 
-# Kubernetes manifests (not needed for builds)
-kubernetes/
-
-# Dockerfiles themselves (copied individually by BuildKit)
-# (Don't ignore them — Shipwright needs to read them)
-
-# IDE / editor
-.vscode/
-.idea/
-
-# Misc
-*.md
-TODO.md
-LICENSE
-mise.lock
-spacetime*.json
+# Per-app build artefacts
+apps/yral-ios/build/
+apps/yral-ios/DerivedData/
+apps/hello-world/dist/
