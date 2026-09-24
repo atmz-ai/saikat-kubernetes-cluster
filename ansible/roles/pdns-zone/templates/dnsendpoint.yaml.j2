@@ -6,8 +6,15 @@
 #   - All nodes (workers + control planes) → domain A records + wildcard
 #
 # Synced to PowerDNS by ExternalDNS via RFC2136 dynamic updates.
-# The init container in pdns-statefulset.yaml creates the zone infrastructure
-# (zone, SOA, TSIG key, metadata). All actual DNS records live here.
+#
+# The zone itself is NOT created by this file. The only resource here is the
+# DNSEndpoint CRD, and ExternalDNS never creates zones — it manages records within
+# an existing one. Zone infrastructure (zone, SOA, TSIG key, metadata) is created by
+# the pdns-db-seed Job:
+#   kubernetes/infrastructure/external-dns/pdns-db-seed.yaml
+# A new zone must be named in that Job's script before these records can be written,
+# and the zone must also be added to external-dns's --rfc2136-zone/--domain-filter
+# flags (both repeatable). See that file and external-dns-deployment.yaml.
 #
 # To regenerate after node changes:
 #   ansible-playbook ansible/playbooks/operations/update-pdns-zones.yml -e pdns_zone_name={{ pdns_zone_name }}
