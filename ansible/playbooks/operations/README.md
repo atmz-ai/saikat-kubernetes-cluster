@@ -1,3 +1,4 @@
+<!-- TODO: Remove this file and put takeaways in agents.md -->
 # Kubernetes Cluster Operations
 
 This directory contains immutable, role-based playbooks for managing the Kubernetes cluster lifecycle. All operations are idempotent and use roles exclusively—no logic is embedded in the playbooks.
