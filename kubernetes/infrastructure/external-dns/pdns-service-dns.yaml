@@ -1,15 +1,35 @@
+#
+# Ansible managed
+#
 # PowerDNS DNS Service — LoadBalancer with externalIPs.
 #
-# externalIPs: the first 13 worker node IPs. Traffic arriving at any of these
-# IPs on port 53 (UDP+TCP) is load-balanced by Cilium to the PowerDNS pods.
-# This works cross-DC and cross-provider (Cilium routes via VXLAN tunnel to the pod).
-# No L2 announcements needed — externalIPs is an L3 feature.
+# GENERATED from the nameserver list in ansible/inventory/hosts.yml (workers with a
+# `namecheap_nameserver` annotation) — do not hand-edit. Regenerate with:
+#   ansible-playbook ansible/playbooks/operations/update-pdns-zones.yml -e pdns_zone_name=oleole.ai
 #
-# The externalIPs are the IPs registered as glue records at Namecheap
-# (ns1.saikat.dev → worker-1 IP, ..., ns13.saikat.dev → worker-13 IP).
+# WHY THIS IS GENERATED: the same set of node addresses has to agree in THREE places,
+# and two of them are the ones nobody remembers:
+#   1. the glue records at the registrar (ns1..nsN.<zone> → node IP)
+#   2. the NS records in the zone's DNSEndpoint (dnsendpoint-<zone>.yaml)
+#   3. this Service's externalIPs, which is what actually binds :53 on those nodes
 #
-# NOTE: externalIPs must be updated when workers are added/removed.
-# This is managed declaratively — update the list here and push to git.
+# All three now come from the one `namecheap_nameserver` list, so a node cannot be
+# added or removed in one place and forgotten in another. Previously this list was
+# maintained by hand while its two siblings were generated.
+#
+# Both ways of disagreeing fail SILENTLY, which is the reason for the coupling:
+#   - an IP here that is not a glue record: a nameserver nobody is ever told about
+#   - a glue record with no IP here: the address accepts no DNS traffic, so resolvers
+#     pointed at it time out or SERVFAIL — the node simply looks like a dead
+#     nameserver, and nothing in the cluster reports it
+#
+# externalIPs (not a LoadBalancer IP pool) is deliberate: traffic arriving on any of
+# these IPs at :53 is routed by Cilium across DCs and providers over the VXLAN tunnel,
+# which needs no shared L2 domain. See AGENTS.md on why L2 announcements are off.
+#
+# One Service serves every zone. The IPs are node addresses, not zone-specific, so
+# this file is emitted once per generation run and is identical regardless of which
+# zone was being generated — the loop below is over nodes, not over zones.
 ---
 apiVersion: v1
 kind: Service
@@ -21,27 +41,27 @@ metadata:
 spec:
   type: LoadBalancer
   externalIPs:
-    # ns1.saikat.dev
+    # ns1 — worker-1 (glue record + NS record must match this)
     - 138.201.85.40
-    # ns2.saikat.dev
+    # ns2 — worker-2 (glue record + NS record must match this)
     - 88.99.213.237
-    # ns3.saikat.dev
+    # ns3 — worker-3 (glue record + NS record must match this)
     - 94.130.128.105
-    # ns4.saikat.dev
+    # ns4 — worker-4 (glue record + NS record must match this)
     - 88.99.148.85
-    # ns5.saikat.dev
+    # ns5 — worker-5 (glue record + NS record must match this)
     - 138.201.199.41
-    # ns6.saikat.dev
+    # ns6 — worker-6 (glue record + NS record must match this)
     - 138.201.125.248
-    # ns7.saikat.dev
+    # ns7 — worker-7 (glue record + NS record must match this)
     - 168.119.139.49
-    # ns8.saikat.dev
+    # ns8 — worker-8 (glue record + NS record must match this)
     - 138.201.251.32
-    # ns9.saikat.dev
+    # ns9 — worker-9 (glue record + NS record must match this)
     - 88.99.147.157
-    # ns10.saikat.dev
+    # ns10 — worker-10 (glue record + NS record must match this)
     - 95.217.57.130
-    # ns11.saikat.dev
+    # ns11 — worker-11 (glue record + NS record must match this)
     - 136.243.145.173
   ports:
     - name: dns-udp

@@ -1,0 +1,56 @@
+{{ ansible_managed | comment }}
+# PowerDNS DNS Service — LoadBalancer with externalIPs.
+#
+# GENERATED from the nameserver list in ansible/inventory/hosts.yml (workers with a
+# `namecheap_nameserver` annotation) — do not hand-edit. Regenerate with:
+# {{ '  ansible-playbook ansible/playbooks/operations/update-pdns-zones.yml -e pdns_zone_name=' }}{{ pdns_zone_name }}
+#
+# WHY THIS IS GENERATED: the same set of node addresses has to agree in THREE places,
+# and two of them are the ones nobody remembers:
+#   1. the glue records at the registrar (ns1..nsN.<zone> → node IP)
+#   2. the NS records in the zone's DNSEndpoint (dnsendpoint-<zone>.yaml)
+#   3. this Service's externalIPs, which is what actually binds :53 on those nodes
+#
+# All three now come from the one `namecheap_nameserver` list, so a node cannot be
+# added or removed in one place and forgotten in another. Previously this list was
+# maintained by hand while its two siblings were generated.
+#
+# Both ways of disagreeing fail SILENTLY, which is the reason for the coupling:
+#   - an IP here that is not a glue record: a nameserver nobody is ever told about
+#   - a glue record with no IP here: the address accepts no DNS traffic, so resolvers
+#     pointed at it time out or SERVFAIL — the node simply looks like a dead
+#     nameserver, and nothing in the cluster reports it
+#
+# externalIPs (not a LoadBalancer IP pool) is deliberate: traffic arriving on any of
+# these IPs at :53 is routed by Cilium across DCs and providers over the VXLAN tunnel,
+# which needs no shared L2 domain. See AGENTS.md on why L2 announcements are off.
+#
+# One Service serves every zone. The IPs are node addresses, not zone-specific, so
+# this file is emitted once per generation run and is identical regardless of which
+# zone was being generated — the loop below is over nodes, not over zones.
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: powerdns-dns
+  namespace: external-dns
+  labels:
+    app: powerdns
+spec:
+  type: LoadBalancer
+  externalIPs:
+{% for ns in pdns_nameservers %}
+    # {{ ns.prefix }} — {{ ns.host }} (glue record + NS record must match this)
+    - {{ ns.ip }}
+{% endfor %}
+  ports:
+    - name: dns-udp
+      port: 53
+      targetPort: 5300
+      protocol: UDP
+    - name: dns-tcp
+      port: 53
+      targetPort: 5300
+      protocol: TCP
+  selector:
+    app: powerdns

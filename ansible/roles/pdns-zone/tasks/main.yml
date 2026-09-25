@@ -15,8 +15,12 @@
     pdns_nameservers: []
 
 - name: Add each worker to nameserver list
+  # `host` is carried alongside the prefix and IP so the generated Service can label
+  # each externalIP with the node it belongs to — without it, the connection between
+  # an IP in the Service and the node in hosts.yml is only discoverable by matching
+  # addresses by eye.
   ansible.builtin.set_fact:
-    pdns_nameservers: "{{ pdns_nameservers + [{'prefix': hostvars[item].namecheap_nameserver, 'ip': hostvars[item].ansible_host}] }}"
+    pdns_nameservers: "{{ pdns_nameservers + [{'prefix': hostvars[item].namecheap_nameserver, 'host': item, 'ip': hostvars[item].ansible_host}] }}"
   loop: "{{ groups['worker_nodes'] }}"
   when: hostvars[item].namecheap_nameserver is defined
 
@@ -94,4 +98,19 @@
   ansible.builtin.template:
     src: dnsendpoint.yaml.j2
     dest: "{{ playbook_dir }}/../../../kubernetes/infrastructure/external-dns/dnsendpoint-{{ pdns_zone_name | replace('.', '-') }}.yaml"
+    mode: '0644'
+
+# The DNS Service's externalIPs are the SAME node set as the glue records — the IPs
+# that bind :53 on the nodes the NS records point at. Generating it here is what makes
+# the three copies of this list (glue records, NS records, Service) impossible to
+# disagree, rather than merely checked by hand.
+#
+# Regenerated on every run, including runs for an unrelated zone. That is safe and
+# intended: the content depends only on the nameserver list, never on which zone was
+# being generated, so the bytes are identical either way and regenerating keeps the
+# file fresh. Guarding it per-zone would add a condition that protects nothing.
+- name: Generate the PowerDNS DNS Service from the same nameserver list
+  ansible.builtin.template:
+    src: pdns-service-dns.yaml.j2
+    dest: "{{ playbook_dir }}/../../../kubernetes/infrastructure/external-dns/pdns-service-dns.yaml"
     mode: '0644'
