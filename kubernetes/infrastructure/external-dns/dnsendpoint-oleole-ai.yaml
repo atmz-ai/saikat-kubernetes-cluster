@@ -209,3 +209,34 @@ spec:
         - 95.217.57.130
         - 95.217.58.83
         - 95.217.74.238
+---
+apiVersion: externaldns.k8s.io/v1alpha1
+kind: DNSEndpoint
+metadata:
+  name: oleole-ai-control-plane-endpoint
+  namespace: external-dns
+spec:
+  endpoints:
+    # API server endpoint names for this zone — the control planes on :6443.
+    #
+    # Only emitted for names the API server CERTIFICATE actually carries (see the
+    # pdns-zone role, which derives this list from `api_server_cert_sans` in
+    # ansible/inventory/hosts.yml). That coupling is deliberate: a record for a name the
+    # certificate lacks sends every client into a TLS failure, and a certificate for a
+    # name with no record is unreachable, so declaring them separately means one can be
+    # updated while the other is forgotten — and neither failure is loud.
+    #
+    # These target control plane IPs only, not the full node list. The apiserver listens
+    # on the control planes; a worker has nothing on :6443, so the wildcard's node set
+    # would include dead targets here.
+    - dnsName: kubernetes-api.oleole.ai
+      recordTTL: 300
+      recordType: A
+      targets:
+        - 167.235.115.50
+        - 37.27.109.138
+        - 65.108.76.154
+        - 65.21.137.111
+        - 94.130.217.94
+        - 95.216.228.60
+        - 95.217.58.83
