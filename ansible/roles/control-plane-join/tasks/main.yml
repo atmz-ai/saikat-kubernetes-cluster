@@ -48,6 +48,41 @@
       ansible.builtin.debug:
         msg: "{{ stale_etcd_cleanup.stdout_lines }}"
 
+    # A joining node does not read a config file — it has none. `kubeadm join
+    # --control-plane` DOWNLOADS the ClusterConfiguration from the kubeadm-config
+    # ConfigMap, and that download is the only reason it inherits any cluster-wide
+    # setting at all (podSubnet, the bind-address extraArgs, apiServer.certSANs). So
+    # the ConfigMap has to be current BEFORE the join, or the new node silently
+    # inherits whatever was uploaded last: the join succeeds either way, and the
+    # difference only surfaces later as a wrong certificate or a wrong network.
+    #
+    # The ConfigMap used to be written only at bootstrap (cluster-init) and by the
+    # two reconcile playbooks — both of which are temporary — so this makes the join
+    # path self-sufficient instead of depending on a role that is due for deletion.
+    #
+    # Rendered and uploaded on an EXISTING control plane rather than on this node,
+    # because this node is not a cluster member yet and has no admin.conf.
+    #
+    # Do NOT add certificate regeneration here. A joining node's certificate is
+    # generated from this ConfigMap during the join, so it is correct by
+    # construction. Existing nodes are the ones that need converging, which is a
+    # separate per-node operation — see the control-plane-certificates role.
+    - name: Render the declarative kubeadm ClusterConfiguration on an existing control plane
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../../manifests/kubeadm-cluster-configuration.yaml.j2"
+        dest: /etc/kubernetes/kubeadm-cluster-configuration.yaml
+        mode: "0600"
+      delegate_to: "{{ (groups['control_plane'] | reject('equalto', inventory_hostname) | list)[0] }}"
+
+    - name: Reconcile the kubeadm-config ConfigMap before joining
+      # upload-config rather than a kubectl patch: this is the supported phase and the
+      # same one init/join use, and it writes exactly the file the join will read back.
+      ansible.builtin.command: >-
+        kubeadm init phase upload-config kubeadm
+        --config /etc/kubernetes/kubeadm-cluster-configuration.yaml
+      delegate_to: "{{ (groups['control_plane'] | reject('equalto', inventory_hostname) | list)[0] }}"
+      changed_when: false
+
     - name: Upload control plane certificates on first control plane
       ansible.builtin.shell: |
         set -o pipefail
