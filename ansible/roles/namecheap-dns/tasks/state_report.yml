@@ -1,0 +1,108 @@
+# Read-only: report the DNS state Namecheap currently holds for a domain.
+#
+# Exists because a domain whose nameservers have moved to custom ones can still be
+# ANSWERED for by Namecheap's registrar nameservers (dns1/dns2.registrar-servers.com),
+# serving whatever zone they were left holding — in our case the pre-migration parking
+# A record and five eforward*.registrar-servers.com MX records from the email-forwarding
+# service. Those are invisible through normal resolution, because the registry delegates
+# to our own nameservers, but they surface the moment anything queries the old
+# nameservers directly (or holds a cached delegation that still points at them).
+#
+# This task only READS, so it is safe on any domain at any time and is worth running
+# before and after any registrar change.
+#
+# Two distinct questions, and the API answers them separately:
+#   getList    -> which nameservers the domain is configured to use
+#   getHosts   -> which records Namecheap holds. Errors with 2030288 while the domain
+#                 uses custom nameservers, because host-record management is a
+#                 Namecheap-DNS-only feature. That error is itself the answer: it means
+#                 Namecheap no longer manages the zone, so any records still being
+#                 served by dns1/dns2 are leftovers it cannot clean up for us.
+
+# Note: this task file sets up its own prerequisites (delegate IP, API base URL) rather
+# than relying on main.yml, because it is included via `tasks_from` which skips main.yml.
+# Keeps the file independently executable, per the repo's atomic-role rule.
+
+- name: Detect delegate host's public IP
+  ansible.builtin.uri:
+    url: https://api.ipify.org
+    return_content: true
+  delegate_to: "{{ namecheap_delegate_host }}"
+  register: namecheap_state_detected_ip
+  when: namecheap_client_ip is not defined
+
+- name: Set client IP from delegate host
+  ansible.builtin.set_fact:
+    namecheap_client_ip: "{{ namecheap_state_detected_ip.content }}"
+  when: namecheap_client_ip is not defined
+
+- name: Set Namecheap API base URL
+  ansible.builtin.set_fact:
+    namecheap_api_url: "https://api.namecheap.com/xml.response"
+
+- name: Report which nameservers the domain is configured to use
+  ansible.builtin.uri:
+    url: >-
+      {{ namecheap_api_url }}?ApiUser={{ namecheap_api_user }}&ApiKey={{ namecheap_api_key
+      }}&UserName={{ namecheap_username }}&ClientIp={{ namecheap_client_ip
+      }}&Command=namecheap.domains.dns.getList&SLD={{ namecheap_domain_sld
+      }}&TLD={{ namecheap_domain_tld }}
+    method: GET
+    return_content: true
+  delegate_to: "{{ namecheap_delegate_host }}"
+  register: namecheap_ns_state
+  failed_when: false
+  changed_when: false
+
+- name: Report the DNS records Namecheap holds
+  ansible.builtin.uri:
+    url: >-
+      {{ namecheap_api_url }}?ApiUser={{ namecheap_api_user }}&ApiKey={{ namecheap_api_key
+      }}&UserName={{ namecheap_username }}&ClientIp={{ namecheap_client_ip
+      }}&Command=namecheap.domains.dns.getHosts&SLD={{ namecheap_domain_sld
+      }}&TLD={{ namecheap_domain_tld }}
+    method: GET
+    return_content: true
+  delegate_to: "{{ namecheap_delegate_host }}"
+  register: namecheap_hosts_state
+  failed_when: false
+  changed_when: false
+
+# Email forwarding is a separate service from host records, and it is the one most
+# likely to still hold state after a domain moves to custom nameservers: it is what
+# produces the "eforward*.registrar-servers.com" MX records. getEmailForwarding has its
+# own error surface, so it is queried independently of getHosts — a 2030288 on getHosts
+# does not imply email forwarding is gone.
+- name: Report the email forwarding Namecheap holds
+  ansible.builtin.uri:
+    url: >-
+      {{ namecheap_api_url }}?ApiUser={{ namecheap_api_user }}&ApiKey={{ namecheap_api_key
+      }}&UserName={{ namecheap_username }}&ClientIp={{ namecheap_client_ip
+      }}&Command=namecheap.domains.dns.getEmailForwarding&DomainName={{ namecheap_domain_sld }}.{{ namecheap_domain_tld }}
+    method: GET
+    return_content: true
+  delegate_to: "{{ namecheap_delegate_host }}"
+  register: namecheap_email_state
+  failed_when: false
+  changed_when: false
+
+- name: Show the state Namecheap reports
+  ansible.builtin.debug:
+    msg:
+      configured_nameservers: "{{ (namecheap_ns_state.content | default('')) | regex_findall('<Nameserver>([^<]+)</Nameserver>', '\\1') }}"
+      # getHosts: host-record management is a Namecheap-DNS-only feature, so this is
+      # expected to fail with 2030288 while the domain uses custom nameservers.
+      hosts_error: >-
+        {{ (namecheap_hosts_state.content | default('')) | regex_findall('<(?:Error )?Number="([^"]+)">([^<]+)<', '\\1: \\2') | default([], true) }}
+      hosts_records: >-
+        {{ (namecheap_hosts_state.content | default('')) | regex_findall('<Host [^>]*Name="([^"]+)"[^>]*Type="([^"]+)"[^>]*Address="([^"]+)"', '\\1 \\2 \\3')
+           | default([], true) }}
+      # getEmailForwarding: a separate service, and the one that produces the
+      # eforward*.registrar-servers.com MX records. Queried independently because a
+      # 2030288 on getHosts does not imply forwarding state is gone.
+      email_forwarding_records: >-
+        {{ (namecheap_email_state.content | default('')) | regex_findall('<Forward[^>]*>', '\\1') | default([], true) }}
+      email_error: >-
+        {{ (namecheap_email_state.content | default('')) | regex_findall('<(?:Error )?Number="([^"]+)">([^<]+)<', '\\1: \\2') | default([], true) }}
+      email_response_verbatim: >-
+        {{ (namecheap_email_state.content | default('(no response)')) | replace('\n', ' ') | truncate(800) }}

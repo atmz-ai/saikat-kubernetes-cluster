@@ -1,0 +1,39 @@
+---
+# Read-only report of the DNS state Namecheap holds for a domain.
+#
+# Does NOT change anything — safe to run against any domain at any time. Reports which
+# nameservers the domain is configured to use, and which records Namecheap still holds
+# (or the API error explaining why it refuses to say).
+#
+# Why this exists: a domain can have moved to custom nameservers while Namecheap's own
+# registrar nameservers (dns1/dns2.registrar-servers.com) continue to ANSWER for it,
+# serving whatever zone they were left holding — typical leftovers being a parking A
+# record and eforward*.registrar-servers.com MX records from the email-forwarding
+# service. Those are invisible through normal resolution because the registry delegates
+# to our nameservers, but they appear the moment anything queries the old nameservers
+# directly, and Google Workspace's verification explicitly warns about pre-existing MX.
+#
+# See ansible/roles/namecheap-dns/tasks/report_state.yml for what each API call means.
+#
+# Usage:
+#   mise run ansible-playbook -- ansible/playbooks/operations/namecheap-dns-state.yml \
+#     -e namecheap_domain_sld=oleole -e namecheap_domain_tld=ai
+
+- name: Report Namecheap DNS state (read-only)
+  hosts: worker_nodes
+  serial: 1
+  gather_facts: false
+  vars:
+    namecheap_domain_sld: "saikat"
+    namecheap_domain_tld: "dev"
+    # API calls delegate to this host (must be whitelisted in the Namecheap dashboard).
+    namecheap_delegate_host: "node-3"
+  tasks:
+    # Only the first host runs anything: this is one domain-level report, not a
+    # per-node operation, and the role is written to run on worker_nodes because the
+    # Namecheap delegate must be one of them. Everything else is skipped.
+    - name: Query Namecheap
+      ansible.builtin.include_role:
+        name: namecheap-dns
+        tasks_from: state_report
+      when: inventory_hostname == ansible_play_hosts[0]
