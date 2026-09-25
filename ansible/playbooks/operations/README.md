@@ -82,12 +82,21 @@ ansible-playbook playbooks/operations/add-worker.yml -e target_host=worker-1
 5. Joins node to cluster as worker
 6. Applies topology and workload labels
 7. Verifies node is Ready
+8. Regenerates every DNS zone from the updated inventory (second play, localhost)
+
+**Commit and push the regenerated DNS files.** The apex and wildcard records list every
+node IP, so a node missing from them joins successfully, reports Ready, and receives no
+traffic — nothing reports a problem. Flux applies the regenerated DNSEndpoint and
+external-dns converges the records.
 
 **Requirements**:
 - Target host must be in `ansible/inventory/hosts.yml` under `worker_nodes` group
 - Cluster must be initialized (control plane up and running)
 - Hetzner credentials configured in vault
 - Sufficient cluster capacity for new workloads
+- A server that exists with a static IP. The `provision` role reprovisions a server via
+  Hetzner Robot rescue mode — it does not order hardware, so the server must be
+  provisioned and its IP known before this runs.
 
 **Example Inventory Entry**:
 ```yaml
