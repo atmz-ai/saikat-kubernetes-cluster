@@ -9,3 +9,19 @@
 
   roles:
     - role: node-remove
+
+# Regenerate the DNS records from the updated inventory, for the same reason as on add:
+# the apex, wildcard and API endpoint records each list node IPs, so a removed node left
+# in them is a dead answer handed to clients. Removal is the case where omitting this is
+# worst — the record keeps pointing at a host that no longer exists, and it still
+# resolves, so it looks correct.
+#
+# Commit and push the regenerated files; Flux applies them and external-dns removes the
+# departed node from the records it owns.
+- name: Regenerate the DNS records for the updated inventory
+  hosts: localhost
+  gather_facts: false
+  vars:
+    pdns_zones_output_dir: "{{ playbook_dir }}/../../kubernetes/infrastructure/external-dns"
+  roles:
+    - role: pdns-zones

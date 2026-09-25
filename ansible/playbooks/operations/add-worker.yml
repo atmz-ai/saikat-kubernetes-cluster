@@ -22,3 +22,23 @@
     - role: worker-join
     - role: node-labels
     - role: cloudflare-dns
+
+# Regenerate the DNS records from the updated inventory — a SECOND play, because the
+# generator reads hostvars and must run after the join rather than alongside it.
+#
+# Without this a new node joins successfully, reports Ready, and receives NO traffic:
+# the apex and wildcard records list every node IP, so a node absent from them is simply
+# never routed to. Nothing reports a problem — the cluster looks healthy and the node is
+# unreachable.
+#
+# These records are owned by external-dns, so this only rewrites the DNSEndpoint files.
+# Writing the DNS records directly would put two writers on one record and external-dns
+# would revert it on its next sync — succeeding while undoing itself. Commit and push
+# instead; Flux applies it and external-dns converges.
+- name: Regenerate the DNS records for the updated inventory
+  hosts: localhost
+  gather_facts: false
+  vars:
+    pdns_zones_output_dir: "{{ playbook_dir }}/../../kubernetes/infrastructure/external-dns"
+  roles:
+    - role: pdns-zones

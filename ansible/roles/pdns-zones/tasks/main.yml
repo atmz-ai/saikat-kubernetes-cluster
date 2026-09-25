@@ -1,24 +1,37 @@
-# Render the generated zone artifacts from `pdns_zones` (group_vars/all/vars.yml).
+# Render every generated PowerDNS artifact from `pdns_zones` (group_vars/all/vars.yml).
 #
-# Runs on localhost — reads the inventory variable only, does not touch nodes and
-# does not talk to the cluster. The rendered files are committed and applied by Flux.
+# Runs on localhost — reads the inventory variable only, does not touch nodes and does
+# not talk to the cluster. The rendered files are committed and applied by Flux.
 #
-# Two artifacts, both generated because the same zone name must appear in two
-# unrelated manifests that have to agree:
+# ONE role, ONE run, EVERY zone. It generates two kinds of thing:
 #
-#   pdns-zones-config.yaml        the seed Job's zone list (create + TSIG metadata)
-#   external-dns-zones-patch.yaml a JSON6902 append patch adding
-#                                 --rfc2136-zone / --domain-filter per zone
+#   1. The zone LIST — which zones exist and their flags:
+#        pdns-zones-config.yaml        the seed Job's zone list (create + TSIG metadata)
+#        external-dns-zones-patch.yaml a JSON6902 append patch adding
+#                                      --rfc2136-zone / --domain-filter per zone
+#   2. One DNSEndpoint file per zone — the actual records:
+#        dnsendpoint-<zone>.yaml       apex + wildcard + ns glue, plus the API server
+#                                      endpoint records for names the CERTIFICATE covers
+#      plus pdns-service-dns.yaml, the :53 Service whose externalIPs are the ns set.
 #
-# The verification task at the end is not a formality. It is the reason the list can
-# be trusted: without it, a template bug would produce a manifest that quietly omits
-# a zone, and the failure would surface at runtime as external-dns managing no
-# records (indistinguishable from success, as happened with the comma-joined flags).
+# Everything is driven from `pdns_zones`, so a node add regenerates the apex and wildcard
+# in ALL zones at once. That matters because those records list every node: a new node
+# that never reaches them joins successfully and receives no traffic, with nothing
+# reporting a problem.
+#
+# The verification task below is not a formality. It is the reason the list can be
+# trusted: without it, a template bug would produce a manifest that quietly omits a zone,
+# and the failure would surface at runtime as external-dns managing no records
+# (indistinguishable from success, as happened with the comma-joined flags).
 #
 # Usage:
 #   mise run dns-generate
 # which runs:
 #   ansible-playbook ansible/playbooks/operations/update-dns-zone-config.yml
+#
+# The generated files are INPUT to GitOps, not live changes: commit and push them, and
+# Flux applies. external-dns then converges the records from the DNSEndpoint — which is
+# why nothing here writes DNS directly.
 
 - name: Fail fast if no zones are declared
   ansible.builtin.assert:
@@ -74,6 +87,69 @@
     msg: >-
       Generated zone artifacts for {{ pdns_zones | map(attribute='name') | join(', ') }}.
       Loading a snapshot: {{ pdns_zones | selectattr('snapshot') | map(attribute='name') | join(', ') | default('none', true) }}.
+
+# ── Per-zone record files ────────────────────────────────────────────────────
+# Everything above is the zone LIST (which zones exist + their flags). Below is one
+# DNSEndpoint file per zone, listing the actual records.
+#
+# Driven from `pdns_zones` so EVERY zone regenerates in one run. A node add changes the
+# apex and wildcard in all of them, so a per-zone invocation would make that a checklist
+# — and the entry most likely to be missed is the zone nobody is currently looking at.
+- name: Collect every node's IP (workers + control planes)
+  # The set the apex and wildcard point at. ANY node serves these records' traffic: the
+  # Cilium mesh routes to whichever node hosts the destination pod, so the record lists
+  # the whole fleet and no per-service routing exists.
+  #
+  # Sorted, so the generated file's target order does not churn with inventory order.
+  ansible.builtin.set_fact:
+    pdns_all_node_ips: "{{ (groups['worker_nodes'] + groups['control_plane']) | map('extract', hostvars) | map(attribute='ansible_host') | sort }}"
+
+- name: Collect control plane node IPs
+  # For the API server endpoint records only. Distinct from the full node set on purpose:
+  # the apiserver listens on the control planes, so pointing an endpoint record at a
+  # worker's :6443 would add a dead target.
+  ansible.builtin.set_fact:
+    pdns_control_plane_ips: "{{ groups['control_plane'] | map('extract', hostvars) | map(attribute='ansible_host') | sort }}"
+
+- name: Gather the nameservers (workers with a namecheap_nameserver annotation)
+  # `host` is carried alongside the prefix and IP so the generated Service can label each
+  # externalIP with the node it belongs to — without it, an IP in the Service can only be
+  # traced to hosts.yml by matching addresses by eye.
+  ansible.builtin.set_fact:
+    pdns_nameservers: >-
+      {{ pdns_nameservers | default([])
+         + [{'prefix': hostvars[item].namecheap_nameserver,
+             'host': item,
+             'ip': hostvars[item].ansible_host}] }}
+  loop: "{{ groups['worker_nodes'] }}"
+  when: hostvars[item].namecheap_nameserver is defined
+
+- name: Report the node sets the zone records will carry
+  ansible.builtin.debug:
+    msg:
+      - "all node IPs (apex + wildcard): {{ pdns_all_node_ips | length }}"
+      - "control plane IPs (API endpoint): {{ pdns_control_plane_ips | length }}"
+      - "nameservers (ns glue + DNS Service): {{ pdns_nameservers | length }}"
+
+- name: Generate the DNSEndpoint file for every declared zone
+  ansible.builtin.include_tasks: generate_zone.yaml
+  loop: "{{ pdns_zones }}"
+  loop_control:
+    loop_var: zone
+    label: "{{ zone.name }}"
+
+# The DNS Service's externalIPs are the SAME node set as the glue records — the IPs that
+# bind :53 on the nodes the NS records point at. Generating it here is what makes the
+# three copies of this list (glue records, NS records, Service) impossible to disagree,
+# rather than merely checked by hand.
+#
+# Emitted once, not per zone: the content depends only on the nameserver list, never on
+# which zone was being generated, so the bytes are identical whichever zone ran last.
+- name: Generate the PowerDNS DNS Service from the same nameserver list
+  ansible.builtin.template:
+    src: pdns-service-dns.yaml.j2
+    dest: "{{ pdns_zones_output_dir }}/pdns-service-dns.yaml"
+    mode: '0644'
 
 # The seed Job reads this ConfigMap's CONTENT, so a zone change does not alter the
 # Job's pod template — which means no immutable-template error (good) but also no

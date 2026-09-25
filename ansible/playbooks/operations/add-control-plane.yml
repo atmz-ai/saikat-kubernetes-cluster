@@ -23,3 +23,17 @@
     - role: control-plane-join
     - role: node-labels
     - role: cloudflare-dns
+
+# Regenerate the DNS records from the updated inventory — a SECOND play, because the
+# generator reads hostvars and must run after the join rather than alongside it.
+#
+# This matters more for a control plane than a worker: the API server endpoint record
+# lists control plane IPs only, so a new control plane absent from it is not part of the
+# API endpoint's round-robin — the control plane is up but not used.
+- name: Regenerate the DNS records for the updated inventory
+  hosts: localhost
+  gather_facts: false
+  vars:
+    pdns_zones_output_dir: "{{ playbook_dir }}/../../kubernetes/infrastructure/external-dns"
+  roles:
+    - role: pdns-zones

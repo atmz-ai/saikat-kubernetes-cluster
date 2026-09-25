@@ -1,0 +1,65 @@
+---
+# Renders ONE zone's DNSEndpoint file: apex + wildcard + ns glue, plus the API server
+# endpoint records for names in this zone the certificate covers.
+#
+# Included once per entry in `pdns_zones`, so regenerating covers EVERY zone in one run
+# and there is no "which zone did I forget" step. That is the whole reason this is a loop
+# over the declared list rather than a per-zone playbook invoked by hand: a node add has
+# to update every zone's wildcard, and a per-zone invocation makes that a checklist.
+#
+# Split into an included file rather than a loop inside the main task list because the
+# per-zone values must be established BEFORE the template renders, and a plain `loop`
+# cannot sequence a set_fact ahead of the template for each item.
+
+- name: Record which zone is being generated
+  ansible.builtin.set_fact:
+    pdns_zone_name: "{{ zone.name }}"
+
+# Which API server endpoint names belong to this zone, derived from the certificate SAN
+# list rather than declared a second time.
+#
+# This is the point: `kubernetes-api.<zone>` is only useful if the API server certificate
+# actually carries that name. A DNS record for a name absent from the certificate sends
+# every client to a TLS verification failure, and a certificate for a name with no record
+# is unreachable — so neither can be declared independently without risking the other
+# being forgotten. Deriving the record from `api_server_cert_sans` means the record exists
+# exactly when the certificate covers it.
+#
+# `control_plane_endpoint` is included because kubeadm embeds it in the certificate even
+# though it is not necessarily listed in `api_server_cert_sans`. `unique` because the two
+# converge while both names are carried during an endpoint migration.
+#
+# A zone with no matching name emits no endpoint block at all — so generating saikat.dev,
+# whose certificate carries no kubernetes-api.saikat.dev, produces no record for it rather
+# than a broken one.
+#
+# The dot is escaped by PASSING IT THROUGH regex_escape rather than being written as a
+# literal backslash. A folded (">-") YAML scalar does not process escape sequences, so a
+# typed backslash survives doubled — a literal backslash then any-character — and the
+# pattern matches nothing, silently deleting the record instead of failing. regex_escape
+# emits the single backslash at render time, so the escaping cannot be gotten wrong. Do
+# NOT "simplify" this back to a literal backslash-dot.
+- name: Determine which declared API server endpoint names belong to this zone
+  ansible.builtin.set_fact:
+    pdns_zone_endpoint_names: >-
+      {{ ([control_plane_endpoint] + api_server_cert_sans)
+         | unique
+         | select('match', '.*' + (('.' + pdns_zone_name) | regex_escape) + '$')
+         | list }}
+
+- name: Display the zone being generated and its API server endpoint names
+  # Inputs as well as the result: an empty result is meaningful here (a zone with no
+  # matching endpoint name is valid), so the inputs are what distinguish "correctly
+  # nothing to do" from "the filter matched nothing because a variable was empty".
+  ansible.builtin.debug:
+    msg:
+      - "zone: {{ pdns_zone_name }}"
+      - "control_plane_endpoint: {{ control_plane_endpoint }}"
+      - "api_server_cert_sans: {{ api_server_cert_sans }}"
+      - "matched endpoint names: {{ pdns_zone_endpoint_names }}"
+
+- name: Generate the DNSEndpoint YAML for this zone
+  ansible.builtin.template:
+    src: dnsendpoint.yaml.j2
+    dest: "{{ pdns_zones_output_dir }}/dnsendpoint-{{ pdns_zone_name | replace('.', '-') }}.yaml"
+    mode: '0644'
