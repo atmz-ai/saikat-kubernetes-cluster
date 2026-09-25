@@ -1,0 +1,441 @@
+---
+# Regenerate the kube-apiserver serving certificate on a control plane node when
+# its Subject Alternative Names have changed.
+#
+# WHY A ROLE EXISTS FOR THIS AT ALL: the SAN list is declarative
+# (`api_server_cert_sans` in ansible/inventory/hosts.yml, rendered into the shared
+# kubeadm ClusterConfiguration template) but the certificate on a running node is
+# NOT — kubeadm only builds certificates at `init` and `join` time. Editing the
+# declaration therefore does nothing to a live cluster, and a name missing from the
+# certificate is a TLS verification failure for every client using it: total loss of
+# control-plane access while the API itself stays perfectly healthy. This role is
+# the missing convergence step.
+#
+# KUBEADM DECLINES TO DO THIS IN TWO WAYS, BOTH SILENT OR MISLEADING. Recorded
+# here because either one reads as success:
+#
+#   1. `kubeadm certs renew` CANNOT add a SAN. Per the kubeadm documentation it
+#      "uses the existing certificates as the authoritative source for attributes
+#      (Common Name, Organization, subject alternative name) and does not rely on
+#      the kubeadm-config ConfigMap". Run after adding a name to the config, it
+#      faithfully reproduces the certificate's CURRENT SANs and reports success.
+#      Nothing changes. The declaration and the certificate now disagree, and
+#      nothing says so.
+#
+#   2. `kubeadm init phase certs apiserver` ERRORS OUT rather than regenerating, if
+#      the certificate and key are already present. From
+#      cmd/kubeadm/app/phases/certs/certs.go, writeCertificateFilesIfNotExist():
+#      "if there already is a certificate file at the given path; kubeadm tries to
+#      load it and check if the values in the existing and the expected certificate
+#      equals. If they do; kubeadm will just skip writing the file as it's
+#      up-to-date, otherwise this function returns an error." The equality check
+#      runs validateCertificateWithConfig, which requires the existing certificate
+#      to be valid for EVERY SAN in the config — so the very mismatch we are here to
+#      fix is what makes the command fail, with a message about the certificate
+#      being invalid rather than about needing to replace it.
+#
+# The working sequence (kubeadm's "Reconfiguring a kubeadm cluster", which names
+# this exact case under "*SANs - requires writing new certificates with updated
+# Subject Alternative Names") is therefore: move the existing certificate and key
+# aside, generate anew from the config, then restart the API server so it loads the
+# result.
+#
+# THE RESTART IS THE THIRD WAY THIS GOES WRONG QUIETLY, so it is spelled out at the
+# task itself: a SAN lives in the certificate, not in any manifest, so the restart
+# cannot be triggered by rewriting the manifest — kubeadm writes an identical file and
+# the kubelet has nothing to react to. The task forces it the way the kubeadm
+# documentation prescribes for static pods.
+#
+# IDEMPOTENT: the live certificate is read first and compared against the declared
+# SANs. A converged node reports no change and is not touched — no backup, no
+# regeneration, no API server restart.
+#
+# Serial, one node at a time, always. The kubeadm documentation is explicit that
+# these changes should be rolled out one node at a time to leave the cluster without
+# downtime, and restarting every API server at once is the one way to turn a routine
+# certificate rotation into an outage.
+
+- name: Assert the declarative Subject Alternative Name list is usable
+  # An empty list cannot be distinguished from "nothing was declared", and it
+  # renders a config that would drop every SAN — the exact failure this role exists
+  # to prevent. Refuse rather than converge to a smaller certificate.
+  ansible.builtin.assert:
+    that:
+      - api_server_cert_sans is defined
+      - api_server_cert_sans | length > 0
+      - control_plane_endpoint is defined
+    fail_msg: >-
+      api_server_cert_sans is undefined or empty (see ansible/inventory/hosts.yml).
+      This role regenerates the API server certificate to match that list, so an
+      empty list would produce a certificate carrying neither the declared names nor
+      the control plane endpoint — locking every client out of the cluster. Set the
+      list before running.
+    success_msg: "Declared SANs and control plane endpoint are present."
+
+- name: Render kubeadm ClusterConfiguration from the shared declarative template
+  # Same template cluster-init and control-plane-metrics render, so the SANs come
+  # from one place and cannot drift from what those roles write.
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/../../manifests/kubeadm-cluster-configuration.yaml.j2"
+    dest: "{{ kubeadm_cluster_configuration_path }}"
+    mode: "0600"
+
+- name: Read the Subject Alternative Names from the live API server certificate
+  ansible.builtin.command: >-
+    openssl x509 -in {{ kubernetes_pki_directory }}/apiserver.crt -noout -ext subjectAltName
+  register: live_apiserver_certificate
+  changed_when: false
+  # A missing or unreadable certificate is a finding to report, not a task failure:
+  # the assertions below decide what it means.
+  failed_when: false
+
+- name: Extract the DNS and IP Subject Alternative Names from the live certificate
+  # All whitespace is removed before matching, not merely collapsed. `openssl x509
+  # -ext subjectAltName` wraps its output at a fixed width, so a long DNS name can be
+  # split mid-token ("DNS:kubernetes-api.oleole.\n    ai") — replacing the newline
+  # with a space leaves that token broken and the name reads as missing, which would
+  # trigger a needless regeneration. DNS names and IP addresses never contain
+  # whitespace, so removing it entirely is lossless. "IP Address:" also becomes
+  # "IPAddress:", hence the pattern below.
+  ansible.builtin.set_fact:
+    live_apiserver_subject_alternative_names: >-
+      {{ (live_apiserver_certificate.stdout ~ ' ' ~ live_apiserver_certificate.stderr)
+         | replace('\n', '') | replace(' ', '')
+         | regex_findall('(?:DNS|IPAddress):([^,]+)') }}
+
+- name: Build the full set of names this certificate must carry
+  # `control_plane_endpoint` is included deliberately. kubeadm derives it from
+  # controlPlaneEndpoint, but asserting it alongside the declared extras turns "the
+  # old endpoint name was dropped" from a silent outage into a loud failure.
+  ansible.builtin.set_fact:
+    required_apiserver_subject_alternative_names: "{{ api_server_cert_sans + [control_plane_endpoint] }}"
+
+- name: Compute which required Subject Alternative Names the certificate is missing
+  ansible.builtin.set_fact:
+    missing_apiserver_subject_alternative_names: >-
+      {{ required_apiserver_subject_alternative_names
+         | difference(live_apiserver_subject_alternative_names) }}
+
+- name: Display the certificate comparison for this node
+  ansible.builtin.debug:
+    msg:
+      - "Node: {{ ansible_facts['hostname'] }}"
+      - "Required (declared + control plane endpoint): {{ required_apiserver_subject_alternative_names | join(', ') }}"
+      - "Present on the live certificate: {{ live_apiserver_subject_alternative_names | join(', ') }}"
+      # Folded so the line stays within the linter's length limit. A folded scalar
+      # joins the fragments with spaces, which is exactly what the Jinja expression
+      # needs, so the rendered message is unchanged.
+      - >-
+        Missing: {{ missing_apiserver_subject_alternative_names | join(', ')
+        if missing_apiserver_subject_alternative_names | length > 0
+        else '(none — already converged)' }}
+
+- name: Reconcile the kubeadm-config ConfigMap with the declarative ClusterConfiguration
+  # Keeps the cluster's recorded configuration in step with the certificate.
+  # The kubeadm documentation recommends the two not be allowed to disagree, and
+  # the SAN list is now part of that configuration. Idempotent; uses the supported
+  # upload-config phase rather than patching the ConfigMap by hand, which would not
+  # propagate to any static pod manifest.
+  ansible.builtin.command: kubeadm init phase upload-config kubeadm --config {{ kubeadm_cluster_configuration_path }}
+  register: kubeadm_config_upload
+  changed_when: false
+
+- name: Regenerate the certificate and restart the API server
+  when: missing_apiserver_subject_alternative_names | length > 0
+  block:
+    - name: Determine the backup destination for this run
+      # now() rather than the ansible_date_time fact: fact caching is enabled for 24h
+      # in ansible.cfg, so a cached timestamp would reuse the previous run's backup
+      # directory and the `creates:` guard below would silently skip the backup.
+      ansible.builtin.set_fact:
+        kubernetes_backup_path: "{{ kubernetes_backup_directory }}/kubernetes-{{ now(utc=true).strftime('%Y%m%dT%H%M%SZ') }}"
+
+    - name: Ensure the backup directory exists
+      ansible.builtin.file:
+        path: "{{ kubernetes_backup_directory }}"
+        state: directory
+        mode: "0700"
+
+    - name: Back up /etc/kubernetes before touching PKI or static pod manifests
+      # Timestamped and unique per run, so no earlier backup is overwritten and the
+      # node keeps a rollback path for the certificate this role replaces.
+      ansible.builtin.command: cp -a /etc/kubernetes {{ kubernetes_backup_path }}
+      args:
+        creates: "{{ kubernetes_backup_path }}"
+
+    # The replacement itself is guarded: between moving the old certificate aside
+    # and the new one being loaded there is a window with no usable serving
+    # certificate, and if generation fails in that window the node is left with no
+    # certificate at all — worse than the problem this role set out to fix. The
+    # rescue path puts the original back and brings the API server up on it, so a
+    # failed run ends with a healthy node and a loud message rather than a
+    # half-applied change needing hands on the box.
+    - name: Replace the serving certificate and restart the API server
+      block:
+        - name: Move the existing serving certificate and key aside
+          # BOTH files, together. Leaving the key in place leaves CertOrKeyExist
+          # true, which is what makes step 2 of the header's failure list fail.
+          ansible.builtin.command: >-
+            mv {{ kubernetes_pki_directory }}/apiserver.{{ item }}
+            {{ kubernetes_pki_directory }}/apiserver.{{ item }}.replaced-{{ now(utc=true).strftime('%Y%m%dT%H%M%SZ') }}
+          loop:
+            - crt
+            - key
+          # Deliberate: this task only ever runs inside a block guarded by "the
+          # certificate is missing a required SAN", so it always changes state. The
+          # module cannot report that itself — a move is a move.
+          changed_when: true
+
+        - name: Generate the serving certificate from the declarative configuration
+          ansible.builtin.command: kubeadm init phase certs apiserver --config {{ kubeadm_cluster_configuration_path }}
+          register: kubeadm_certs_apiserver
+          changed_when: true
+
+        - name: Display kubeadm certificate generation output
+          ansible.builtin.debug:
+            msg: "{{ kubeadm_certs_apiserver.stdout_lines + kubeadm_certs_apiserver.stderr_lines }}"
+
+        - name: Restart the API server so it loads the new certificate
+          # The static pod manifest is deliberately NOT rewritten. A SAN lives in the
+          # certificate, not the manifest, so `kubeadm init phase control-plane
+          # apiserver` writes a byte-identical file — and the kubelet only restarts a
+          # static pod when the manifest CONTENT changes. The API server would carry on
+          # serving the certificate it read at startup, and the check below would
+          # correctly report the new SAN as absent: a change that worked, reported as a
+          # failure.
+          #
+          # Removing the manifest forces the kubelet to stop the pod; restoring it
+          # makes the kubelet start it again, this time reading the new certificate.
+          # This is the procedure the kubeadm documentation prescribes for restarting a
+          # static pod, and the 20s covers kubelet's fileCheckFrequency.
+          ansible.builtin.shell: |
+            set -o pipefail
+            manifest={{ kubernetes_manifests_directory }}/kube-apiserver.yaml
+            mv "$manifest" "${manifest}.restarting"
+            sleep {{ kubernetes_static_pod_restart_seconds }}
+            mv "${manifest}.restarting" "$manifest"
+          args:
+            executable: /bin/bash
+          changed_when: true
+
+        - name: Display the API server restart
+          ansible.builtin.debug:
+            msg: >-
+              Removed and restored {{ kubernetes_manifests_directory }}/kube-apiserver.yaml
+              to force a static pod restart, so the API server reloads its serving
+              certificate. The endpoint on this node is briefly unavailable.
+
+        - name: Wait for the API server on this node to serve requests again
+          # The restart task above took the manifest away and put it back, so this
+          # endpoint was briefly unavailable. Serial rollout limits the blast radius to
+          # one node's API server at a time; the other control planes keep serving. This
+          # also catches a new certificate that is broken in some way the assertions
+          # have not been written for yet.
+          ansible.builtin.command: >-
+            kubectl --kubeconfig {{ kubernetes_admin_kubeconfig }} get --raw /readyz
+          register: apiserver_readyz
+          until: apiserver_readyz is succeeded
+          retries: 36
+          delay: 5
+          changed_when: false
+
+      rescue:
+        - name: Report that regeneration failed
+          ansible.builtin.debug:
+            msg: >-
+              Certificate regeneration FAILED on {{ ansible_facts['hostname'] }}.
+              Restoring the original serving certificate.
+
+        - name: Restore the original serving certificate and key
+          # Newest match wins: the names sort chronologically because the timestamp is
+          # ISO 8601 basic format, so the LAST glob match is the most recent
+          # certificate — taken by letting the loop run to the end, which keeps this
+          # working under any bash.
+          #
+          # Written with positional parameters rather than array length tests on
+          # purpose. Ansible's argument splitter reads the sequence "${#..." as the
+          # start of a Jinja comment ("{#") that never closes, and refuses the whole
+          # task with "failed at splitting arguments". So no "${#" anywhere here.
+          #
+          # nullglob keeps the expansion empty when nothing was moved, so the branch is
+          # skipped instead of mv being handed a literal glob.
+          ansible.builtin.shell: |
+            set -o pipefail
+            shopt -s nullglob
+            restored=0
+            for extension in crt key; do
+              set -- {{ kubernetes_pki_directory }}/apiserver.${extension}.replaced-*
+              if [ "$#" -gt 0 ]; then
+                for candidate in "$@"; do :; done
+                mv "$candidate" {{ kubernetes_pki_directory }}/apiserver.${extension}
+                restored=$((restored + 1))
+              fi
+            done
+            echo "restored=${restored}"
+          args:
+            executable: /bin/bash
+          register: certificate_restore
+          changed_when: true
+
+        - name: Restart the API server so it loads the restored certificate
+          # Same forced restart as the success path, for the same reason: the manifest
+          # cannot carry the change, so the kubelet needs the remove/restore to notice
+          # anything at all.
+          ansible.builtin.shell: |
+            set -o pipefail
+            manifest={{ kubernetes_manifests_directory }}/kube-apiserver.yaml
+            mv "$manifest" "${manifest}.restarting"
+            sleep {{ kubernetes_static_pod_restart_seconds }}
+            mv "${manifest}.restarting" "$manifest"
+          args:
+            executable: /bin/bash
+          changed_when: true
+
+        - name: Wait for the API server to serve requests on the restored certificate
+          # The node must be left working. If this also fails, the failure below says
+          # so and the operator has a node to look at — but the cluster as a whole
+          # stays up on the other control planes.
+          ansible.builtin.command: >-
+            kubectl --kubeconfig {{ kubernetes_admin_kubeconfig }} get --raw /readyz
+          register: apiserver_readyz_restored
+          until: apiserver_readyz_restored is succeeded
+          retries: 36
+          delay: 5
+          changed_when: false
+
+        - name: Fail with the restore outcome
+          # Deliberately fails even though the node is healthy again. The change did
+          # NOT apply, and a green run would say otherwise. Because the original
+          # certificate is back, re-running after fixing the cause is safe.
+          ansible.builtin.fail:
+            msg: >-
+              Regeneration failed on {{ ansible_facts['hostname'] }} but the original
+              certificate was restored and the API server is serving again, so this
+              node is healthy. The new SANs are NOT in effect here. Diagnose the
+              cause reported above, then re-run this playbook. Do NOT proceed to the
+              next control plane node.
+
+
+- name: Verify every required Subject Alternative Name is served by the live TLS endpoint
+  # Read from the RUNNING server over TLS, not from the file on disk: the file
+  # proves what was written, this proves what clients will actually be offered.
+  # A file that was regenerated but never loaded would otherwise pass.
+  block:
+    - name: Read the certificate the API server is serving on its public address
+      # No -brief: the leaf certificate is printed to stdout by default and piped
+      # into openssl x509, which skips the surrounding non-PEM lines. -brief would
+      # replace that output with a summary and leave nothing to parse.
+      #
+      # Retried, because /readyz succeeding only means the API server is answering —
+      # the restart it just survived means this read can land a moment too early and
+      # return nothing. An unretried read makes a correct change look like a failure
+      # ("Could not find certificate from <stdin>").
+      ansible.builtin.shell: |
+        set -o pipefail
+        openssl s_client -connect {{ ansible_facts['default_ipv4']['address'] }}:6443 \
+          -servername {{ required_apiserver_subject_alternative_names | first }} < /dev/null 2>/dev/null \
+          | openssl x509 -noout -ext subjectAltName
+      args:
+        executable: /bin/bash
+      register: served_apiserver_certificate
+      until: served_apiserver_certificate.stdout is search('Subject Alternative Name')
+      retries: 12
+      delay: 5
+      changed_when: false
+
+    - name: Extract the Subject Alternative Names the API server is serving
+      # Same whitespace handling as the file read above, for the same reason.
+      ansible.builtin.set_fact:
+        served_apiserver_subject_alternative_names: >-
+          {{ served_apiserver_certificate.stdout
+             | replace('\n', '') | replace(' ', '')
+             | regex_findall('(?:DNS|IPAddress):([^,]+)') }}
+
+    - name: Assert the served certificate carries every required Subject Alternative Name
+      ansible.builtin.assert:
+        that:
+          - required_apiserver_subject_alternative_names | difference(served_apiserver_subject_alternative_names) | length == 0
+        fail_msg: >-
+          The API server on {{ ansible_facts['hostname'] }} is serving a certificate
+          missing {{ required_apiserver_subject_alternative_names | difference(served_apiserver_subject_alternative_names) | join(', ') }}.
+          Served names: {{ served_apiserver_subject_alternative_names | join(', ') }}.
+          Do NOT proceed to the next control plane node — investigate this one first.
+        success_msg: >-
+          Served certificate carries all required SANs ({{ served_apiserver_subject_alternative_names | join(', ') }}).
+
+    - name: Report any Subject Alternative Name the regeneration did not carry forward
+      # Regeneration builds the certificate from the configuration, so any name the
+      # previous certificate carried that the configuration does not is gone. That is
+      # not automatically wrong — an address from a decommissioned node SHOULD be
+      # dropped — but it must never happen without being seen, so it is reported on
+      # every run that regenerates. If a reported name is still needed, add it to
+      # `api_server_cert_sans` and re-run.
+      #
+      # Comparison is against what the API server is actually serving now, not against
+      # the required set: kubeadm's own defaults (kubernetes, kubernetes.default,
+      # kubernetes.default.svc, .cluster.local, the node name, the service IP, this
+      # node's IP) are regenerated by kubeadm and never appear in the required list,
+      # so comparing against the required list would report all of them as dropped.
+      ansible.builtin.debug:
+        msg: >-
+          NOTE: this regeneration dropped
+          {{ live_apiserver_subject_alternative_names | difference(served_apiserver_subject_alternative_names) | join(', ') }}
+          from the certificate. Expected if the entry is stale (a decommissioned node's
+          address). If any of these is still needed, add it to `api_server_cert_sans` in
+          ansible/inventory/hosts.yml and re-run.
+      when: >-
+        missing_apiserver_subject_alternative_names | length > 0
+        and (live_apiserver_subject_alternative_names | difference(served_apiserver_subject_alternative_names) | length > 0)
+
+- name: Verify a real TLS client can reach the API on every declared name
+  # openssl rather than curl, and rather than ansible.builtin.uri, on purpose:
+  #   - uri/get_url cannot be pointed at this cluster's private CA without putting
+  #     SSL_CERT_FILE into the task environment, which leaks into every other call
+  #     made under it. No role in this repo shells out to curl either.
+  #   - openssl is the strict client we want here anyway: -verify_return_error makes
+  #     a verification failure abort the handshake, and -verify_hostname checks the
+  #     name against the certificate. Verified against a public host — exit 0 for the
+  #     matching name, exit 1 for a mismatch — so a certificate lacking this name
+  #     fails this task.
+  #
+  # The connection targets this node's address directly, with no DNS lookup, which is
+  # the point: the certificate is proven correct for a name BEFORE any DNS record for
+  # it exists. That means the record and the certificate can be rolled out in either
+  # order, with no window where a client follows the name to a certificate that does
+  # not carry it.
+  #
+  # This proves TLS (chain + hostname). API reachability is proven separately by the
+  # admin kubeconfig check below.
+  ansible.builtin.command:
+    cmd: >-
+      openssl s_client -connect {{ ansible_facts['default_ipv4']['address'] }}:6443
+      -servername {{ item }} -verify_hostname {{ item }}
+      -verify_return_error -CAfile {{ kubernetes_pki_directory }}/ca.crt -brief
+    stdin: ""
+  loop: "{{ required_apiserver_subject_alternative_names }}"
+  register: apiserver_tls_verification
+  changed_when: false
+
+- name: Display the names verified against this node's certificate
+  ansible.builtin.debug:
+    msg: >-
+      {{ item.item }} — TLS chain and hostname verified against
+      {{ ansible_facts['default_ipv4']['address'] }}:6443
+  loop: "{{ apiserver_tls_verification.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Verify the local admin kubeconfig still reaches the cluster
+  ansible.builtin.command: >-
+    kubectl --kubeconfig {{ kubernetes_admin_kubeconfig }} get --raw /version
+  register: apiserver_admin_kubeconfig_check
+  changed_when: false
+
+- name: Display the certificate reconciliation summary
+  ansible.builtin.debug:
+    msg:
+      - "✅ API server certificate converged on {{ ansible_facts['hostname'] }}"
+      - "  - SANs served: {{ served_apiserver_subject_alternative_names | join(', ') }}"
+      - "  - Required names verified with a real TLS client: {{ required_apiserver_subject_alternative_names | join(', ') }}"
+      - "  - kubeadm-config ConfigMap reconciled with the declarative ClusterConfiguration"
+      - "  - Pre-change backup: {{ kubernetes_backup_path | default('(none needed — already converged)') }}"

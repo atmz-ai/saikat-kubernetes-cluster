@@ -5,6 +5,8 @@ kind: ClusterConfiguration
 #   - ansible/roles/cluster-init (renders at bootstrap, passes to kubeadm init --config)
 #   - ansible/roles/control-plane-metrics (renders on existing CP nodes, reconciles
 #     static pod manifests + the kubeadm-config ConfigMap)
+#   - ansible/roles/control-plane-certificates (renders on existing CP nodes,
+#     regenerates the apiserver serving certificate when its SANs have changed)
 # Never patch the kubeadm-config ConfigMap directly — kubeadm generates static
 # pod manifests from this config only at init/join/upgrade time, and ConfigMap
 # edits do NOT propagate to existing manifests.
@@ -35,6 +37,25 @@ encryptionAlgorithm: RSA-2048
 proxy:
   disabled: true
 apiServer:
+  # Additional Subject Alternative Names for the kube-apiserver serving certificate,
+  # beyond what kubeadm derives from controlPlaneEndpoint and the node name/IP.
+  # Sourced from `api_server_cert_sans` in ansible/inventory/hosts.yml.
+  #
+  # ADDING A NAME HERE DOES NOT ADD IT TO A CERTIFICATE THAT ALREADY EXISTS. The
+  # certificate is the gate — a name absent from it fails TLS verification, which
+  # loses all control-plane access even though the API itself is healthy — and
+  # kubeadm will not converge it from this file. Regeneration is a separate
+  # per-node PKI operation; see the control-plane-certificates role, which performs
+  # it and documents the two ways kubeadm silently declines to.
+  #
+  # Emitted as an empty list rather than omitted when the variable is unset, so this
+  # file stays valid YAML for `kubeadm config` parsing. kubeadm treats an empty
+  # certSANs the same as an absent one, so the fallback cannot change cluster
+  # behaviour.
+  certSANs:
+{% for subject_alternative_name in api_server_cert_sans | default([], true) %}
+    - {{ subject_alternative_name }}
+{% endfor %}
   extraArgs:
     - name: service-node-port-range
       value: "{{ service_node_port_range }}"

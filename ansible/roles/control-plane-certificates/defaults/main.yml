@@ -1,0 +1,32 @@
+---
+# Path to the rendered ClusterConfiguration consumed by the kubeadm phases in this
+# role. Rendered from the shared declarative template
+# (ansible/manifests/kubeadm-cluster-configuration.yaml.j2), which means the SAN
+# list comes from `api_server_cert_sans` in ansible/inventory/hosts.yml — there is
+# no second place to keep in step.
+kubeadm_cluster_configuration_path: /etc/kubernetes/kubeadm-control-plane-certificates.yaml
+
+# kubeadm's PKI and kubeconfig locations. These mirror ClusterConfiguration
+# `certificatesDir`; that field is not overridden in this repo, so they stay at
+# kubeadm's defaults. If certificatesDir is ever changed, change it here too —
+# the SAN assertions in this role read these paths and would otherwise check a
+# stale file and report a false pass.
+kubernetes_pki_directory: /etc/kubernetes/pki
+kubernetes_admin_kubeconfig: /etc/kubernetes/admin.conf
+
+# kubeadm's static pod manifest directory. A static pod only restarts when its
+# manifest CONTENT changes, so this role restarts the API server by removing and
+# restoring its manifest instead of rewriting it — see the restart task for why
+# rewriting cannot work here.
+kubernetes_manifests_directory: /etc/kubernetes/manifests
+
+# How long to leave the API server manifest out before restoring it. Must exceed
+# kubelet's fileCheckFrequency, which kubeadm sets at 20s, or the kubelet will not
+# notice the removal and no restart happens. This is the 20 seconds the kubeadm
+# documentation names for restarting a static Pod.
+kubernetes_static_pod_restart_seconds: 20
+
+# Where the pre-change /etc/kubernetes backup is written. Each regeneration writes a
+# uniquely timestamped copy, so replacing a certificate never destroys the previous
+# one — the node can be rolled back by restoring the files from here.
+kubernetes_backup_directory: /var/backups/kubernetes
