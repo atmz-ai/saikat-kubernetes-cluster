@@ -54,3 +54,22 @@ data:
     # oleole.ai — Google Workspace. Supplied by the admin console's Gmail activation
     # screen: priority 1, SMTP.GOOGLE.COM, TTL as low as possible.
     oleole.ai|oleole.ai|MX|300|1 smtp.google.com
+
+    # SPF for the same apex. Authorises Google to send mail as @oleole.ai; without it,
+    # receivers have no statement to evaluate and treat mail as unauthenticated.
+    #
+    # Apex TEXT, therefore here rather than in a DNSEndpoint — same block as the MX
+    # above (a-oleole.ai ownership marker ABSENT, so external-dns refuses to create a
+    # new type at this name).
+    #
+    # MUST REMAIN A SINGLE RECORD. Additional senders (a transactional provider, etc.)
+    # are appended INSIDE this one value:
+    #   v=spf1 include:_spf.google.com include:other.example ~all
+    # Multiple SPF TXT records are invalid — RFC 7208 §3.2 makes a second one a
+    # permanent error (PermError), which is worse than having no SPF at all, because
+    # receivers then have a malformed policy rather than a missing one. So never add a
+    # second line here; extend the value.
+    #
+    # The enclosing double quotes are literal, not YAML decoration: they are what makes
+    # this a valid TXT string, and they are preserved into PowerDNS.
+    oleole.ai|oleole.ai|TXT|300|"v=spf1 include:_spf.google.com ~all"
