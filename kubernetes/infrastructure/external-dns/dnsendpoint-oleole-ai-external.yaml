@@ -54,3 +54,27 @@ spec:
       recordTTL: 300
       targets:
         - gv-ijbp37komhcvmp.dv.googlehosted.com
+
+    # Google Workspace DKIM signing key, from Admin console → Apps → Gmail → Authenticate
+    # email. Google issues one key per domain; it is not derivable, so it is recorded
+    # verbatim as supplied.
+    #
+    # This is a SUBDOMAIN (google._domainkey) with type TXT, so unlike the apex MX it goes
+    # through external-dns normally — the apex-ownership block that forces the MX onto the
+    # pdnsutil path does not apply here, and TXT is in --managed-record-types.
+    #
+    # The value is 410 characters and is served as TWO quoted character-strings, split at
+    # the 255-byte limit. That is required, not incidental: a DKIM key exceeds one
+    # character-string, and RFC 6376 consumers concatenate the strings with no separator.
+    # Verified that PowerDNS splits and rejoins it automatically — the stored value
+    # round-trips identically — so the value below is written as a single string and
+    # should not be pre-split by hand.
+    #
+    # The surrounding double quotes are part of the DNSEndpoint target, not decoration:
+    # without them the target is not a valid TXT string. They are escaped as \" inside
+    # the single-quoted YAML scalar.
+    - dnsName: google._domainkey.oleole.ai
+      recordType: TXT
+      recordTTL: 300
+      targets:
+        - '"v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAyLh1QWyLAHvGEBItQ+tAcD+f8frA+x4gbc2dsKgpp1qBh91E4eup2hIj9BKyQuY2VF58RtO2Aq3VpSPswZCBRyzi1OooFNm5ARLWy73HkeSp0xl958NxFmplRNTpIgXY5epL8XQlb44p4FxhrtTGRO+edoexD+lq1QH/7tQNhkeVwb9f60bqfclcK2TnZ5FoG5fi4C1er/YYeM3tVfvxVInQiMKr3VaiFPj2b10bGVF5wnOo+2eRnBAIf1LaM/jLi1AmuThIHewdT7kh4uMVS4Zm3gd7icCVDOMsXRscSSiFGYvQDBTAu4BD42tXtx+x3tqizG9W64TfL7slNB2YBQIDAQAB"'
