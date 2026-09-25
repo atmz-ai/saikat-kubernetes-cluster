@@ -12,6 +12,30 @@
 - name: Join worker node to cluster
   when: not kubelet_conf_stat.stat.exists
   block:
+    # Same reasoning as control-plane-join, and it applies just as much here: a
+    # joining node reads no config file. `kubeadm token create --print-join-command`
+    # runs on the first control plane and reads the kubeadm-config ConfigMap, so that
+    # ConfigMap's controlPlaneEndpoint is what gets baked into this node's
+    # kubelet.conf. Left stale, a worker joins the OLD endpoint and only breaks when
+    # that name is retired — long after the join reported success.
+    #
+    # Done before the join command is generated below, including before the cached
+    # `worker_join_command` fallback is consulted (that value comes from cluster-init,
+    # which uploads the ConfigMap first, so the two are consistent either way).
+    - name: Render the declarative kubeadm ClusterConfiguration on the first control plane
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../../manifests/kubeadm-cluster-configuration.yaml.j2"
+        dest: /etc/kubernetes/kubeadm-cluster-configuration.yaml
+        mode: "0600"
+      delegate_to: "{{ groups['control_plane'][0] }}"
+
+    - name: Reconcile the kubeadm-config ConfigMap before joining
+      ansible.builtin.command: >-
+        kubeadm init phase upload-config kubeadm
+        --config /etc/kubernetes/kubeadm-cluster-configuration.yaml
+      delegate_to: "{{ groups['control_plane'][0] }}"
+      changed_when: false
+
     - name: Use cached join command from first control plane if available
       ansible.builtin.set_fact:
         join_command: "{{ hostvars[groups['control_plane'][0]]['worker_join_command'] }}"

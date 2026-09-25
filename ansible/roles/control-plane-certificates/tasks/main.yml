@@ -106,9 +106,13 @@
 - name: Build the full set of names this certificate must carry
   # `control_plane_endpoint` is included deliberately. kubeadm derives it from
   # controlPlaneEndpoint, but asserting it alongside the declared extras turns "the
-  # old endpoint name was dropped" from a silent outage into a loud failure.
+  # endpoint name was dropped" from a silent outage into a loud failure.
+  #
+  # `unique` because the two sources converge: while the endpoint is also listed in
+  # api_server_cert_sans (the migration's normal state — old and new names carried
+  # together), the same name arrives from both and would otherwise appear twice.
   ansible.builtin.set_fact:
-    required_apiserver_subject_alternative_names: "{{ api_server_cert_sans + [control_plane_endpoint] }}"
+    required_apiserver_subject_alternative_names: "{{ (api_server_cert_sans + [control_plane_endpoint]) | unique }}"
 
 - name: Compute which required Subject Alternative Names the certificate is missing
   ansible.builtin.set_fact:
