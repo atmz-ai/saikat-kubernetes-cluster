@@ -350,11 +350,39 @@
     - etcd_member_id.stdout | trim != ""
 
 - name: Delete node from Kubernetes
-  ansible.builtin.command: kubectl delete node {{ node_remove_k8s_name }}
+  # Tolerate NotFound (the node is already gone — a re-run, or the delete landed on a
+  # previous attempt) but NOT an API error. The previous `failed_when: false` could not
+  # tell the two apart: a timeout here returned nonzero with rc swallowed, so the play
+  # continued reporting success while the Node object was still present. The shell now
+  # normalises the two outcomes explicitly and exits nonzero for anything else, and the
+  # retries cover the same post-etcd-removal API blip that stalled the NotReady lookup
+  # below (see that task for the full explanation).
+  ansible.builtin.shell: |
+    out=$(kubectl delete node {{ node_remove_k8s_name }} --request-timeout=20s 2>&1) || rc=$?
+    if [ "${rc:-0}" -eq 0 ]; then
+      echo "deleted"
+      exit 0
+    fi
+    case "$out" in
+      *NotFound*)
+        echo "already absent"
+        exit 0
+        ;;
+      *"not found"*)
+        echo "already absent"
+        exit 0
+        ;;
+      *)
+        echo "$out" >&2
+        exit 1
+        ;;
+    esac
   delegate_to: "{{ kubectl_delegate }}"
   register: delete_result
-  failed_when: false
-  changed_when: delete_result.rc == 0   # deleting a nonexistent node exits nonzero (NotFound)
+  retries: 10
+  delay: 6
+  until: delete_result.rc == 0
+  changed_when: "'deleted' in delete_result.stdout"
 
 - name: Display deletion result
   ansible.builtin.debug:
@@ -545,13 +573,34 @@
   # mid-connection enter exponential backoff and do not self-recover. A kubelet restart
   # is non-destructive (pods keep running via the container runtime) and forces a clean
   # reconnect to the surviving API servers.
+  #
+  # RETRIES, because this read can legitimately time out. Removing a control plane
+  # deletes an etcd member, and the API server briefly cannot serve requests while
+  # the cluster re-elects and re-syncs — the removal playbook then continues
+  # immediately into this task and hits that window:
+  #
+  #   Error from server (Timeout): the server was unable to return a response in
+  #   the time allotted, but may still be processing the request (get nodes)
+  #
+  # That is a transient condition, not a failure of the removal, and the API is
+  # healthy again seconds later. Without retries the whole playbook aborts at the
+  # very last step — AFTER the node has already been drained, removed from etcd and
+  # deleted — so the operator sees a failure for work that in fact succeeded, and
+  # the NotReady-worker recovery below never runs.
+  #
+  # `--request-timeout` bounds EACH attempt (kubectl's default has no client-side
+  # cap, so one attempt can hang for a minute); the retries then give the API a
+  # real chance to settle rather than failing on the first blip.
   ansible.builtin.shell: |
     set -o pipefail
-    kubectl get nodes --no-headers \
+    kubectl get nodes --no-headers --request-timeout=15s \
       -l '!node-role.kubernetes.io/control-plane' \
       | awk '$2=="NotReady" {print $1}'
   delegate_to: "{{ kubectl_delegate }}"
   register: notready_workers
+  until: notready_workers.rc == 0
+  retries: 10
+  delay: 6
   changed_when: false
   when: is_control_plane
   run_once: true
