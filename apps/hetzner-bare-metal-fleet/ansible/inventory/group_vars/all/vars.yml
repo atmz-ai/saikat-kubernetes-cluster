@@ -22,21 +22,9 @@ beszel_agent_token: "{{ vault_beszel_agent_token }}"
 
 # Team member SSH keys for temporary access
 team_members:
-  ansuman:
-    email: "ansuman@gobazzinga.io"
-    ssh_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILGb2pAXEJeBmrfgkIKU9egGb5a0bDIYqpazZGnxLV4J ansuman@gobazzinga.io"
-  naitik:
-    email: "naitik@gobazzinga.io"
-    ssh_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEiXkPkZghjS+QfvScVTFRsUZCh7ibH80bb/ls4ddJHs naitik@gobazzinga.io"
-  prakash:
-    email: "prakash@gobazzinga.io"
-    ssh_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICetWiHXjTBs+Xw7k024xV5YGaIxtQiAk6O+Ge2OZ0kU prakash@gobazzinga.io"
-  sarvesh:
-    email: "sarvesh@gobazzinga.io"
-    ssh_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGPshcyPLqPEHcHnb3cM2VC9NDj+UYNwKlIDqtlsBGNR sarvesh@gobazzinga.io"
   rishi:
-    email: "rishi@gobazzinga.io"
-    ssh_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIE6RhsV0UkNgy/ngh2IyW4DOmnsyo3GgBvq/2eM8RLP9 rishi@gobazzinga.io"
+    email: "rishi"
+    ssh_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIE6RhsV0UkNgy/ngh2IyW4DOmnsyo3GgBvq/2eM8RLP9 rishi"
 
 # Canonical SSH keys (always included)
 # `name` is the key's LABEL IN THE HETZNER ROBOT ACCOUNT — the hetzner_rescue role
