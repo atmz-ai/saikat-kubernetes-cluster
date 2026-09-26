@@ -39,14 +39,32 @@ spec:
             # config (clientcmd.BuildConfigFromFlags("", "")), using the `kilo`
             # ServiceAccount from rbac.yaml. Same credentials, works everywhere.
 
-            # ADAPTATION 2 — --internal-cidr pins the node's mesh identity.
-            # Kilo considers a node's InternalIP to be its *private* address, and
-            # that is the address other nodes route to over WireGuard. kubelet,
-            # etcd and the API server all advertise `status.hostIP` too, so pinning
-            # Kilo to $(NODE_IP)/32 (status.hostIP) keeps a single, consistent node
-            # address across kubelet / etcd / Cilium / Kilo. Without it, Kilo's
-            # heuristic could pick a different interface (e.g. a secondary NIC) and
-            # cross-cloud etcd would break even though the mesh itself came up.
+            # ADAPTATION 2 — scope private-IP auto-detection to the kubelet IP.
+            # Kilo selects a node's *private* (internal) address from the addresses
+            # actually on its interfaces, and `--internal-cidr` restricts that search
+            # to the given CIDRs ("If allowedCIDRs is not empty, only IPs within these
+            # CIDRs will be considered for private IP selection" --
+            # pkg/mesh/discoverips.go). Pinning it to status.hostIP makes the choice
+            # deterministic on cloud VMs, which commonly carry several interfaces.
+            #
+            # KNOWN LIMITATION, measured on this cluster — do not treat the empty
+            # `kilo.squat.ai/internal-ip` annotation on Hetzner nodes as a fault.
+            # `--internal-cidr` FILTERS private candidates; it cannot reclassify a
+            # public address as private. getIP() sorts each candidate into public or
+            # private with isPublic() (an RFC1918 check) BEFORE this filter runs, so on
+            # Hetzner — whose only non-local address, e.g. 65.21.137.111, is public —
+            # the private candidate list is empty and the filter has nothing to act on.
+            # InternalIP stays nil, and Kilo then deliberately gives that node its own
+            # per-node location:
+            #     // Put node in a different location, if no private IP was found.
+            #     if node.InternalIP == nil { location = nodeLocationPrefix + node.Name }
+            # The consequence on an all-Hetzner cluster is a full node-to-node mesh
+            # rather than one link per location — more connectivity, not less.
+            #
+            # This flag earns its place once cloud nodes join: those DO have a private
+            # address, so InternalIP is set, the node is grouped into its real location,
+            # and the address Kilo picks must match the one kubelet/etcd/the API server
+            # advertise or cross-cloud etcd breaks while the mesh itself still looks up.
             - --internal-cidr=$(NODE_IP)/32
 
             # Cilium compatibility mode. Selected in cmd/kg/main.go:
@@ -55,12 +73,20 @@ spec:
             #   (a) NOT install its own CNI (`--cni=false` below) — Cilium owns that;
             #   (b) NOT manage in-location routes (`--local=false` below) — Cilium
             #       already routes pods within a location;
-            #   (c) encapsulate cross-location packets with IPIP and route the IPIP
-            #       outer packet THROUGH Cilium's VXLAN overlay, by advertising each
-            #       node's `cilium_host` address (CNICompatibilityIP) as the gateway.
+            #   (c) encapsulate cross-location packets with IPIP and, when it can, route
+            #       the IPIP outer packet THROUGH Cilium's VXLAN overlay by advertising
+            #       each node's `cilium_host` address (CNICompatibilityIP) as the gateway.
             # Consequence: Cilium must stay in tunnel/VXLAN mode. Switching it to
             # native routing removes the overlay (c) depends on.
             # Source: https://github.com/squat/kilo/blob/0.7.0/pkg/encapsulation/cilium.go
+            #
+            # NOTE on (c): the encapsulator is only constructed on nodes that HAVE a
+            # private IP — `if privateIP != nil { enc.Init(...) } else { enc =
+            # encapsulation.Noop(enc.Strategy()) }` in pkg/mesh/mesh.go. On a node with
+            # no private address the Noop encapsulator returns a nil CNICompatibilityIP,
+            # which is why `kilo.squat.ai/cni-compatibility-ip` is empty on the current
+            # all-Hetzner nodes (see --internal-cidr below for why they have no private
+            # address). That path is expected here, not a misconfiguration.
             - --compatibility=cilium
 
             # Kilo does not own the CNI config or the in-location datapath; Cilium

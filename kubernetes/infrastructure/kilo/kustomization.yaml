@@ -28,6 +28,23 @@ kind: Kustomization
 # packet over it). Setting Cilium to `routingMode: native` would delete the overlay
 # Kilo depends on. Do not "optimise" Cilium's routing mode while Kilo is installed.
 #
+# TOPOLOGY TODAY, and what changes when cloud nodes join.
+# Kilo groups nodes by their `topology.kubernetes.io/region` label and links one
+# leader per location; Cilium then handles traffic within each location. A node with
+# NO private IP is instead granted its own location, deliberately:
+#     // Put node in a different location, if no private IP was found.
+#     if node.InternalIP == nil { location = nodeLocationPrefix + node.Name }
+# On today's all-Hetzner cluster every node's only non-local address is public, so
+# every node has no private IP and the result is a full 40-way node-to-node mesh
+# rather than a helsinki↔falkenstein link. That is more connectivity than the
+# minimal path, not less — the mesh works, and intra-location traffic simply rides
+# WireGuard too. Nodes are also spread across many distinct Hetzner DCs within a
+# region (FSN1-DC1..DC20, HEL1-DC2..DC7), so a per-region link would have been a
+# coarse approximation anyway. Cloud nodes (which DO have private addresses) will
+# group into real locations, at which point the per-location topology takes effect.
+# Verify with: kubectl get node <n> -o jsonpath='{.metadata.annotations.kilo\.squat\.ai/granularity}'
+# and per-node peers: kubectl exec-free, via the pod's :1107/metrics (kilo_peers).
+#
 # VERSION PIN: 0.7.0 (released 2026-03-04) — latest upstream release; Kilo ships
 # NO Helm chart, so the upstream `manifests/` YAML is the distribution mechanism
 # and is vendored here verbatim (with the two adaptations noted in daemonset.yaml).
