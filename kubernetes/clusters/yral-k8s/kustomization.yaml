@@ -33,6 +33,7 @@ resources:
   - infrastructure-kafka-bridge.yaml
   - infrastructure-kafka-connect.yaml
   - infrastructure-kafka-console.yaml
+  - infrastructure-kilo.yaml
   - infrastructure-longhorn-backup.yaml
   - infrastructure-longhorn.yaml
   - infrastructure-loki.yaml

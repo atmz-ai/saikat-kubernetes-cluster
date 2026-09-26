@@ -1,0 +1,36 @@
+# PodMonitor for the Kilo agent's metrics (`kilo_nodes`, `kilo_peers`,
+# `kilo_leader`, `kilo_errors_total`, `kilo_reconciles_total`).
+#
+# Adapted from upstream `manifests/podmonitor.yaml`. Two changes from upstream:
+#   1. Deployed to the `monitoring` namespace, which is where the
+#      kube-prometheus-stack HelmRelease lives in this repo.
+#   2. The `release: kube-prometheus-stack` label is added — kube-prometheus-stack's
+#      Prometheus only selects PodMonitors matching its `podMonitorSelector`. This
+#      is the same label the existing flux-podmonitor.yaml uses, and omitting it
+#      means the monitor exists but is silently never scraped.
+#
+# `namespaceSelector.matchNames: [kube-system]` is required because Kilo runs in
+# kube-system, not alongside the monitor. Note the repo's existing convention is to
+# place PodMonitors for other namespaces in `monitoring` with such a selector; the
+# selector is what makes the cross-namespace scrape explicit rather than implicit.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: kilo
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: kilo
+    app.kubernetes.io/part-of: kilo
+    app.kubernetes.io/component: monitoring
+    release: kube-prometheus-stack
+spec:
+  namespaceSelector:
+    matchNames:
+      - kube-system
+  selector:
+    matchLabels:
+      app.kubernetes.io/part-of: kilo
+  podMetricsEndpoints:
+    - interval: 15s
+      port: metrics
+      path: /metrics

@@ -1,0 +1,43 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# Kilo — multi-cloud WireGuard mesh (squat/kilo, Apache-2.0).
+#
+# WHY THIS EXISTS
+# This cluster spans Hetzner HEL1, Hetzner FSN1, and (next) Azure/GCP/AWS regions.
+# Nodes in different providers/DCs have no shared L3 network:
+
+#   - Hetzner bare metal: public IP is ON the interface, so nodes are L3-adjacent
+#     to the internet but not to each other within a private range.
+#   - Cloud VMs (Azure/GCP/AWS): the OS only ever sees a PRIVATE address; the
+#     public IP is 1:1 stateless NAT owned by the provider and must never be
+#     configured on the interface ("Do not add any public IP addresses to the
+#     virtual machine operating system." — Azure docs).
+
+# Kilo builds a WireGuard mesh between logical locations, so cross-provider node
+# IPs and pod CIDRs become mutually routable. Cilium remains the CNI.
+#
+# ROLE SPLIT (do not blur this)
+#   Cilium → in-location pod networking, service load-balancing, Gateway API,
+#            NetworkPolicy, in-location encryption.
+#   Kilo   → cross-location reachability (the "wide area" half of the cluster).
+# Both use WireGuard; that is intentional and not redundant — they encrypt
+# different paths. See the `--encapsulate` note in daemonset.yaml.
+#
+# CILIUM STAYS IN TUNNEL MODE. Kilo's Cilium mode layers IPIP *through* Cilium's
+# VXLAN overlay (it advertises the `cilium_host` address and routes the IPIP outer
+# packet over it). Setting Cilium to `routingMode: native` would delete the overlay
+# Kilo depends on. Do not "optimise" Cilium's routing mode while Kilo is installed.
+#
+# VERSION PIN: 0.7.0 (released 2026-03-04) — latest upstream release; Kilo ships
+# NO Helm chart, so the upstream `manifests/` YAML is the distribution mechanism
+# and is vendored here verbatim (with the two adaptations noted in daemonset.yaml).
+# Manifest source: https://github.com/squat/kilo/tree/0.7.0/manifests
+# The version also appears in the DaemonSet image tag; bump BOTH together.
+#
+# Manual apply (before Flux is bootstrapped, or for a one-off):
+#   kubectl apply -k kubernetes/infrastructure/kilo
+resources:
+  - crds.yaml
+  - rbac.yaml
+  - daemonset.yaml
+  - podmonitor.yaml

@@ -1,0 +1,58 @@
+# Kilo RBAC — vendored from squat/kilo 0.7.0 `manifests/kilo-kubeadm-cilium.yaml`.
+#
+# The DaemonSet authenticates with this ServiceAccount via in-cluster config, so
+# these grants are what make Kilo able to run on the 33 *worker* nodes (which have
+# no /etc/kubernetes/admin.conf). See daemonset.yaml for that decision.
+#
+# Permissions, and why each is needed:
+#   nodes (list/patch/watch) — discover the cluster's nodes, and WRITE the
+#       `kilo.squat.ai/*` annotations/status back onto Node objects (this is how
+#       agents find each other's endpoints and public keys).
+#   peers (list/watch)       — observe `Peer` CRs (external WireGuard peers).
+#   customresourcedefinitions (get) — confirm the Peer CRD is installed before
+#       watching it, so a missing CRD is a clean error rather than a watch loop.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kilo
+  namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kilo
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - nodes
+    verbs:
+      - list
+      - patch
+      - watch
+  - apiGroups:
+      - kilo.squat.ai
+    resources:
+      - peers
+    verbs:
+      - list
+      - watch
+  - apiGroups:
+      - apiextensions.k8s.io
+    resources:
+      - customresourcedefinitions
+    verbs:
+      - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kilo
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kilo
+subjects:
+  - kind: ServiceAccount
+    name: kilo
+    namespace: kube-system
