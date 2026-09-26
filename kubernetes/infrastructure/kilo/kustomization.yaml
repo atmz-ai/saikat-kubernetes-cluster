@@ -1,3 +1,64 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# THIS BREAKS THE CLUSTER ON OUR CURRENT NODES. FLUX IS SUSPENDED. READ BEFORE USE.
+# ══════════════════════════════════════════════════════════════════════════════
+# Installed 2026-09-26; broke pod->ClusterIP service routing cluster-wide within
+# ~7 minutes and was removed the same day. Evidence: 78 pods across 18 namespaces
+# in crash loops (5 of 6 Flux controllers among them, so Flux could not deliver its
+# own fix), and `dial tcp 10.105.112.195:80: i/o timeout` / `10.96.0.1:443 context
+# deadline exceeded` from in-cluster clients. Stopping Kilo restored service: new
+# crashes 13/3min -> 0, not-ready pods 29 -> 10, Flux 5/6 crash-looping -> 6/6 ready.
+#
+# ROOT CAUSE — per-node locations + `--local=false` is a combination that installs a
+# default route for the pod CIDR of every other node.
+#
+# On Hetzner every node is PUBLIC-only (see daemonset.yaml: getIP/isPublic cannot
+# classify a public address as private, so InternalIP is nil). Kilo then gives each
+# node its own location (pkg/mesh/topology.go):
+#     if node.InternalIP == nil { location = nodeLocationPrefix + node.Name }
+# so the cluster becomes 40 locations of one node. Every node is therefore its OWN
+# leader — confirmed live via `kilo_leader 1` on every node — and the leader branch
+# of Topology.Routes (pkg/mesh/routes.go) runs.
+#
+# That branch only adds the *pod-CIDR* route for another segment (line ~229):
+#     for i := range segment.cidrs {
+#         routes = append(routes, &netlink.Route{Dst: segment.cidrs[i], Gw: segment.wireGuardIP, LinkIndex: kiloIface, ...})
+# while the guarded route that would pin the node's own private IP is skipped
+# whenever privateIP == externalIP — i.e. exactly on a public-only node:
+#     // Don't add routes through Kilo if the private IP equals the external IP.
+#     if segment.privateIPs == nil || segment.privateIPs[i].Equal(<endpoint IP>) { continue }
+# Net result: a route is installed for every other node's pod CIDR, with no matching
+# node-IP route to anchor it.
+#
+# Separately, the leader's return-path block — the code that exists to route return
+# traffic correctly when a non-leader uses overlay routing — is gated on `--local`:
+#     if !local && t.privateIP != nil && enc.Strategy() != encapsulation.Never { ... }
+# With `--local=false` (the upstream Cilium-mode setting) it is skipped entirely.
+#
+# So `--local=false` was a false assumption here: it means "Cilium owns all
+# in-location routing", which is only true if nodes actually group into locations.
+# With 40 single-node locations there IS no in-location traffic — every packet is
+# cross-location — and Kilo installed IPIP routes for all of it while skipping the
+# return paths. Cilium compounded it by adopting the Kilo interface and binding the
+# overlay IP into nodeport handling:
+#     msg="Devices changed" devices="[enp0s31f6 kilo0]"
+#     msg="Node addresses updated" addresses="10.4.0.1 (primary, nodeport)" device=kilo0
+#
+# WHY UPSTREAM DIDN'T CATCH IT: kilo-kubeadm-cilium.yaml is written for clusters whose
+# nodes HAVE private IPs, where locations are real and `--local=false` is correct.
+# The per-node-location fallback is meant as a graceful degradation; combined with
+# `--local=false` it is not graceful. This configuration is untested upstream.
+#
+# TO GO FORWARD (gated, one node at a time, per operator direction):
+#   1. Do NOT re-enable on all 40 nodes at once.
+#   2. Scope with nodeSelector to a SINGLE node first, and on that node verify
+#      pod->ClusterIP, pod->pod cross-node, and node->node *before* widening.
+#   3. Expect the public-only problem to persist on Hetzner regardless — it is the
+#      thing to solve first (likely: give nodes a private address, or supply
+#      `kilo.squat.ai/force-internal-ip` so nodes group into real locations and
+#      `--local` can be true).
+#   4. Re-enable only after (2) and (3) hold, and remove `suspend: true` from
+#      kubernetes/clusters/yral-k8s/infrastructure-kilo.yaml in the same commit.
+# ══════════════════════════════════════════════════════════════════════════════
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 # Kilo — multi-cloud WireGuard mesh (squat/kilo, Apache-2.0).
@@ -28,22 +89,12 @@ kind: Kustomization
 # packet over it). Setting Cilium to `routingMode: native` would delete the overlay
 # Kilo depends on. Do not "optimise" Cilium's routing mode while Kilo is installed.
 #
-# TOPOLOGY TODAY, and what changes when cloud nodes join.
-# Kilo groups nodes by their `topology.kubernetes.io/region` label and links one
-# leader per location; Cilium then handles traffic within each location. A node with
-# NO private IP is instead granted its own location, deliberately:
-#     // Put node in a different location, if no private IP was found.
-#     if node.InternalIP == nil { location = nodeLocationPrefix + node.Name }
-# On today's all-Hetzner cluster every node's only non-local address is public, so
-# every node has no private IP and the result is a full 40-way node-to-node mesh
-# rather than a helsinki↔falkenstein link. That is more connectivity than the
-# minimal path, not less — the mesh works, and intra-location traffic simply rides
-# WireGuard too. Nodes are also spread across many distinct Hetzner DCs within a
-# region (FSN1-DC1..DC20, HEL1-DC2..DC7), so a per-region link would have been a
-# coarse approximation anyway. Cloud nodes (which DO have private addresses) will
-# group into real locations, at which point the per-location topology takes effect.
-# Verify with: kubectl get node <n> -o jsonpath='{.metadata.annotations.kilo\.squat\.ai/granularity}'
-# and per-node peers: kubectl exec-free, via the pod's :1107/metrics (kilo_peers).
+# TOPOLOGY ON CURRENT NODES: 40 single-node locations (see the ROOT CAUSE block
+# above for why, and why that combination is what breaks the cluster). This is NOT
+# the "graceful degradation" it looks like — verify with:
+#   kubectl get node <n> -o jsonpath='{.metadata.annotations.kilo\.squat\.ai/granularity}'
+# Expect the cloud nodes to group into real locations once they join, since they DO
+# have private addresses. That is the condition under which this becomes viable.
 #
 # VERSION PIN: 0.7.0 (released 2026-03-04) — latest upstream release; Kilo ships
 # NO Helm chart, so the upstream `manifests/` YAML is the distribution mechanism
