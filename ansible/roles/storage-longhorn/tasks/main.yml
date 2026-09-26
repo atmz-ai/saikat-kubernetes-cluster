@@ -20,21 +20,50 @@
 # Detect drives and expand btrfs
 
 - name: Get list of all disk devices
-  ansible.builtin.shell: |
-    set -o pipefail
-    lsblk -d -o NAME,TYPE | grep disk | awk '{print $1}'
-  args:
-    executable: /bin/bash   # pipefail is bash-only; /bin/sh (dash) rejects it
-  register: disk_list
+  # Counts the whole disks this node has. `lsblk -d` lists top-level devices and
+  # `-n` drops the header, so no pipeline is needed — which is the point.
+  #
+  # PREVIOUS FORM: `lsblk -d -o NAME,TYPE | grep disk | awk '{print $1}'`. Two
+  # problems, both real:
+  #   - on a cloud VM no device is labelled `disk`, so grep exited 1 and — under
+  #     the `set -o pipefail` this task used to set — the task FAILED on exactly
+  #     the case it is meant to handle gracefully. Dropping pipefail fixed the
+  #     behaviour but tripped the linter, whose complaint was fair: the pipeline
+  #     was the wrong shape.
+  #   - filtering on the literal word "disk" is a string match on tool output
+  #     rather than a statement about the device. A device type that is a disk
+  #     but is not spelled that way (or vice versa) silently changes the answer.
+  #
+  # `lsblk -d -n -o TYPE,NAME` output is inspected in Ansible instead of by grep,
+  # so "no disks" is an empty list rather than an exit status — nothing can
+  # masquerade as a failure, and no `|| true` is needed to swallow a real one.
+  ansible.builtin.command: lsblk -d -n -o TYPE,NAME
+  register: lsblk_devices
   changed_when: false
+
+- name: Choose the whole-disk devices
+  # TYPE values worth knowing (lsblk semantics): `disk` is a whole disk; `part`
+  # is a partition; `loop`/`rom` are loopback and optical, never btrfs members.
+  # This keeps only whole disks, matching what the btrfs expansion below expects.
+  #
+  # NOT from ansible_facts['devices']: that dict includes loop devices and the
+  # optical drive, and carries no reliable whole-disk marker, so using it made
+  # `has_multiple_drives` true on every node — including cloud VMs with a single
+  # disk, where it would have triggered a btrfs expansion against no second disk.
+  ansible.builtin.set_fact:
+    disk_list: >-
+      {{ lsblk_devices.stdout_lines
+         | map('split')
+         | selectattr('0', 'equalto', 'disk')
+         | map('last') | list }}
 
 - name: Display available disks
   ansible.builtin.debug:
-    msg: "Available disks: {{ disk_list.stdout_lines }}"
+    msg: "Available disks: {{ disk_list }}"
 
 - name: Check if server has multiple drives
   ansible.builtin.set_fact:
-    has_multiple_drives: "{{ disk_list.stdout_lines | length > 1 }}"
+    has_multiple_drives: "{{ disk_list | length > 1 }}"
 
 - name: Display drive count decision
   ansible.builtin.debug:
@@ -105,7 +134,7 @@
         - name: Find second drive (not root, not already in btrfs)
           ansible.builtin.shell: |
             set -o pipefail
-            all_disks=({{ disk_list.stdout_lines | join(' ') }})
+            all_disks=({{ disk_list | join(' ') }})
             root_base="{{ root_base_device }}"
             btrfs_devs="{{ btrfs_devices.stdout_lines | join(' ') }}"
             for disk in "${all_disks[@]}"; do

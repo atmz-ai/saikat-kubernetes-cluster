@@ -38,6 +38,7 @@ age = "latest"
 # (invisible to every listing, owned by no operator, present in no git source)
 # and they leak billable storage and block the bucket's deletion.
 aws-cli = "latest"
+azure-cli = "latest"
 cargo-binstall = "latest"
 "cargo:trunk" = "latest"
 eza = "latest"
@@ -159,14 +160,7 @@ rust = { version = "stable", targets = [
 s5cmd = "latest"
 sops = "latest"
 sqlite = "latest"
-# NOTE: `swift` is intentionally NOT declared here. On macOS Xcode ships a
-# complete, SDK-matched toolchain (`xcrun --find swift`), and a mise-installed
-# swift.org toolchain SHADOWS it with an older release — Xcode 27's SDK passes
-# `-target-arch-variant`, which swift 6.3.3's driver does not understand, so
-# manifest compilation died with signal 11 across every SwiftPM command. We no
-# longer build Swift on Linux, so there is nothing for mise to provide.
-# If a Linux Swift toolchain is ever needed again, declare it OS-scoped:
-#   swift = { version = "...", os = ["linux"] }
+uv = "latest"
 
 # System packages — project-specific build dependencies (apt on Debian/Ubuntu).
 # Applied with: mise bootstrap packages apply --yes

@@ -1,0 +1,167 @@
+---
+# Node settings that differ by PROVIDER, applied before the join so kubelet
+# registers with the right identity.
+#
+# WHY THIS EXISTS: a node's address is not always an address its peers can reach.
+# On Hetzner the node's only IP IS its public IP, so kubelet's default (pick the
+# default-interface address) happens to be correct and nothing needs saying. On a
+# cloud VM the interface address is a PRIVATE address behind NAT, so the default
+# picks an address no other node in this cluster can reach — the join succeeds,
+# the node reports Ready, and it is silently unreachable. That is the same
+# silent-failure shape as the certificate and DNS traps: everything reports
+# success while the node cannot actually be talked to.
+#
+# The public address is published as `ansible_host` because that is what we
+# connect to and what every other consumer in the repo already treats as the
+# node's address (DNS records, the API endpoint list, etc.). Reading it from there
+# keeps one source of truth rather than introducing a second "real IP" field that
+# could disagree with the first.
+
+- name: Determine this node's address that cluster peers must use
+  # ansible_host is the address we reach the node on, which for every provider so
+  # far is also the address its peers must use. Hetzner: public IP on the
+  # interface. Azure: public IP attached to the NIC via NAT, absent from the
+  # interface entirely.
+  ansible.builtin.set_fact:
+    node_provider_address_peer: "{{ hostvars[inventory_hostname]['ansible_host'] }}"
+
+- name: Check whether that address is already on an interface
+  # Uses the gathered IPv4 address fact rather than shelling out to `ip`.
+  #
+  # NOTE THE EXACT FACT NAME. It is `ansible_facts['all_ipv4_addresses']`, NOT
+  # `ansible_all_ipv4_addresses`. Getting that wrong does not error — the lookup
+  # is undefined, the comparison is False, and the role concludes the address is
+  # behind NAT when it is not. On a Hetzner node that means pinning an address
+  # that was already correct, i.e. needlessly rewriting kubelet config on a live
+  # control plane. The assertion below makes an absent fact a loud failure
+  # instead, because silently treating "unknown" as "needs pinning" is the
+  # dangerous direction.
+  ansible.builtin.assert:
+    that:
+      - ansible_facts['all_ipv4_addresses'] is defined
+    fail_msg: >-
+      ansible_facts['all_ipv4_addresses'] is not defined. The setup module was
+      not run, or fact gathering was disabled, so this node's local addresses
+      are unknown and this role cannot tell whether the peer address needs
+      pinning. Refusing to guess — a wrong answer here rewrites kubelet config.
+    quiet: true
+
+  # Exact match, not substring: a node whose address ends in another node's
+  # address must not be treated as local.
+- name: Compare the peer address against this node's local addresses
+  ansible.builtin.set_fact:
+    node_provider_address_is_local: >-
+      {{ node_provider_address_peer in ansible_facts['all_ipv4_addresses'] }}
+
+- name: Report whether kubelet needs an explicit address override
+  ansible.builtin.debug:
+    msg: >-
+      Node peer address {{ node_provider_address_peer }} is
+      {{ 'on a local interface — kubelet default is correct, nothing to pin'
+         if node_provider_address_is_local
+         else 'NOT local (behind NAT) — pinning it for kubelet and kubeadm so the node joins with a reachable address' }}.
+
+- name: Pin the node address for kubelet and kubeadm
+  when: not node_provider_address_is_local
+  block:
+    # /etc/default/kubelet is read by the kubelet systemd unit via
+    # `EnvironmentFile=-/etc/default/kubelet` (the `-` makes it optional, so the
+    # file can be absent or empty — which is the current state on the Hetzner
+    # nodes). KUBELET_EXTRA_ARGS is appended to kubelet's command line.
+    #
+    # WHY HERE AND NOT kubeadm's nodeRegistration.kubeletExtraArgs: the join in
+    # control-plane-join runs a bare `kubeadm join` with no --config, so a
+    # JoinConfiguration in a local file would never be read. kubeadm does write
+    # this same file's contents (as KUBELET_KUBEADM_ARGS) from the ClusterConfig
+    # it downloads, but only at join time — writing it before the join means
+    # kubelet already carries the flag when it first registers, rather than being
+    # corrected afterwards.
+    #
+    # --node-ip also feeds the address kubeadm advertises as a control plane
+    # member (the API server's advertise address and the etcd peer URL derive
+    # from it), which is exactly the "peers cannot reach me" case being fixed.
+    - name: Write kubelet extra args
+      # become is per-task on purpose — see this role's meta/main.yml for why
+      # meta-level become is not an option (ansible-core ignores it).
+      ansible.builtin.copy:
+        dest: /etc/default/kubelet
+        content: |
+          KUBELET_EXTRA_ARGS=--node-ip={{ node_provider_address_peer }}
+        owner: root
+        group: root
+        mode: "0644"
+      become: true
+
+    - name: Restart kubelet to pick up the address
+      # kubelet is already installed and enabled by the kubernetes role. It has
+      # no cluster config yet at this stage, so it is cycling — an explicit
+      # restart is not strictly needed, but it removes any doubt about whether the
+      # flag is loaded before the join runs.
+      #
+      # `failed_when: false` because a kubelet that exits immediately (no cluster
+      # config yet) is the expected state here, not an error. The assertion below
+      # checks the CONFIGURATION, which is what this role is responsible for;
+      # kubelet's run state is the join's business.
+      ansible.builtin.systemd_service:
+        name: kubelet
+        state: restarted
+      become: true
+      failed_when: false
+
+    - name: Verify kubelet loaded the pinned address
+      # Two corrections over the previous form here, both the same lesson:
+      #
+      # 1. NO shell pipeline. `pgrep -a kubelet | grep -c -- '--node-ip=X'` is a
+      #    pipeline whose interesting outcome is "no match" — grep exits 1, and
+      #    with `set -o pipefail` the task failed on the case it was written to
+      #    detect. Reading the process list in Ansible removes the exit status
+      #    from the picture entirely: no match is an empty list, not a failure.
+      #
+      # 2. It does NOT require kubelet to be RUNNING. At this point in the
+      #    playbook kubelet has just been installed and has no cluster config,
+      #    so it exits immediately in a restart loop and may not be up at any
+      #    given moment. Asserting a running process would make this role fail
+      #    on a node whose configuration is perfectly correct — the flag is what
+      #    matters, and it is in the file kubelet reads at every start.
+      #
+      # The file content is therefore the thing checked, and the process check is
+      # a bonus that is reported but not required.
+      ansible.builtin.slurp:
+        src: /etc/default/kubelet
+      register: node_provider_address_kubelet_env
+
+    - name: Read the running kubelet arguments if kubelet is up yet
+      ansible.builtin.command: pgrep -a kubelet
+      register: node_provider_address_kubelet_procs
+      changed_when: false
+      failed_when: false
+
+    - name: Assert the pinned address is configured for kubelet
+      ansible.builtin.assert:
+        that:
+          - node_provider_address_kubelet_env['content'] | b64decode
+            is search('--node-ip=' ~ node_provider_address_peer)
+        fail_msg: >-
+          /etc/default/kubelet does not set --node-ip={{ node_provider_address_peer }}.
+          This node would join the cluster advertising an address its peers cannot
+          reach. Do NOT proceed — inspect /etc/default/kubelet.
+        success_msg: "kubelet configured with --node-ip={{ node_provider_address_peer }}"
+
+    - name: Report whether the running kubelet has picked the address up yet
+      # Informational only. kubelet cycles repeatedly while it has no cluster
+      # config, so "not seen in the process list yet" is expected and harmless —
+      # it reads this file on its next start, and a restart is forced above.
+      #
+      # The process output is checked for the flag directly. `search` on the
+      # combined stdout treats missing output as "no match" rather than an
+      # undefined-attribute error, and a regex that is absent from the string is
+      # simply falsy — so there is no Jinja `in <Undefined>` hazard here.
+      ansible.builtin.debug:
+        msg: >-
+          {{ 'kubelet process carries --node-ip=' ~ node_provider_address_peer
+             if (node_provider_address_kubelet_procs.stdout | default(''))
+                | regex_search('--node-ip=' ~ node_provider_address_peer | regex_escape)
+             else 'kubelet process not yet showing the flag (expected while it has no cluster config) — it reads /etc/default/kubelet on each start' }}
+      vars:
+        # Resolve the whole expression once so the conditional reads cleanly.
+        node_provider_address_kubelet_procs: "{{ node_provider_address_kubelet_procs | default({}) }}"

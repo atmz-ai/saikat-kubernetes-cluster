@@ -64,13 +64,23 @@
   register: containerd_install
 
 - name: Get installed containerd version
-  ansible.builtin.shell: |
-    set -o pipefail
-    dpkg -l containerd.io | grep '^ii' | awk '{print $3}'
-  args:
-    executable: /bin/bash   # pipefail is bash-only; /bin/sh (dash) rejects it
+  # Reports the installed version, and "not installed" has to be a legible answer
+  # rather than a crash.
+  #
+  # `dpkg -l containerd.io | grep '^ii'` is a pipeline whose interesting outcome
+  # is often "no match": grep exits 1, and with `set -o pipefail` the task FAILED
+  # on a node where the package simply was not yet present in the expected state.
+  # That is the fourth instance of this pattern in this repo, and the reason it
+  # keeps appearing is that a pipeline conflates "the command worked and found
+  # nothing" with "the command failed".
+  #
+  # `dpkg-query` asks the question directly and answers with an exit status about
+  # the QUERY rather than about a text match, so no pipeline and no pipefail are
+  # needed. The format string emits just the version.
+  ansible.builtin.command: dpkg-query -W -f='${Version}' containerd.io
   register: containerd_version
   changed_when: false
+  failed_when: false
 
 - name: Pin containerd to installed version
   ansible.builtin.dpkg_selections:
@@ -105,17 +115,40 @@
     state: present
 
 - name: Verify kernel modules are loaded
-  ansible.builtin.shell: |
-    set -o pipefail
-    lsmod | grep -E "overlay|br_netfilter"
-  args:
-    executable: /bin/bash   # pipefail is bash-only; /bin/sh (dash) rejects it
-  register: containerd_kernel_modules
+  # `lsmod | grep -E "overlay|br_netfilter"` was the previous form. It is the same
+  # pipeline trap as elsewhere in this repo: grep exits 1 when neither module
+  # appears, and under `set -o pipefail` that became a task failure. A module
+  # genuinely missing is exactly what this task exists to detect, so failing
+  # before reporting which one is absent hides the answer.
+  #
+  # `failed_when: false` lets the output be reported, and the assertion below
+  # decides. Reading the module list as data means the finding is a list, not an
+  # exit status.
+  ansible.builtin.command: lsmod
+  register: containerd_lsmod
   changed_when: false
 
-- name: Display loaded kernel modules
-  ansible.builtin.debug:
-    msg: "{{ containerd_kernel_modules.stdout_lines }}"
+- name: Identify which required kernel modules are loaded
+  ansible.builtin.set_fact:
+    containerd_loaded_required_modules: >-
+      {{ ['overlay', 'br_netfilter']
+         | select('in', containerd_lsmod.stdout | default(''))
+         | list }}
+
+- name: Assert the required kernel modules are loaded
+  # Asserted rather than merely printed: containerd cannot run overlayfs
+  # snapshots without `overlay`, and Kubernetes pod networking needs
+  # `br_netfilter`. A missing module is a failure to report, not a line of
+  # output to skim past.
+  ansible.builtin.assert:
+    that:
+      - containerd_loaded_required_modules | length == 2
+    fail_msg: >-
+      Missing kernel module(s):
+      {{ ['overlay', 'br_netfilter'] | difference(containerd_loaded_required_modules) | join(', ') }}.
+      containerd needs `overlay` for snapshots and Kubernetes networking needs
+      `br_netfilter`. Check /etc/modules-load.d/ and `modprobe`.
+    success_msg: "Kernel modules loaded: {{ containerd_loaded_required_modules | join(', ') }}"
 
 - name: Configure sysctl parameters for Kubernetes networking
   ansible.builtin.copy:

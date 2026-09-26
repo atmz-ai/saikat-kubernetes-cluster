@@ -84,3 +84,63 @@ scheduler:
 etcd:
   local:
     dataDir: /var/lib/etcd
+    # Bind etcd's listeners to 0.0.0.0 while it CONTINUES TO ADVERTISE this node's
+    # concrete address (advertise-client-urls / initial-advertise-peer-urls are
+    # still derived from AdvertiseAddress and are unchanged).
+    #
+    # WHY: kubeadm derives etcd's BIND and ADVERTISE addresses from the SAME value
+    # — `getEtcdCommand` sets both `listen-*-urls` and `*-advertise-*-urls` from
+    # `endpoint.AdvertiseAddress` — and there is no kubeadm field for a separate
+    # bind address (LocalEtcd exposes only dataDir/extraArgs/extraEnvs/certSANs).
+    # So a node that must advertise an address that is NOT on one of its interfaces
+    # gets a manifest etcd cannot start:
+    #
+    #     --listen-peer-urls=https://<public>:2380
+    #     {"level":"error","msg":"creating peer listener failed",
+    #      "error":"listen tcp <public>:2380: bind: cannot assign requested address"}
+    #
+    # That is the case on a NAT'd cloud VM, where the public IP is attached to the
+    # NIC by the provider and appears on no interface (Azure DNATs inbound traffic
+    # to the private address before the VM sees it, so the public address can never
+    # be bound — Microsoft's docs prohibit adding it to the OS). The etcd container
+    # never starts, yet kubeadm has already registered the member, so the join fails
+    # at `etcd-join` with "the etcd member <id> is not started" and leaves a phantom
+    # unstarted learner behind.
+    #
+    # 0.0.0.0 is correct for EVERY provider, which is why this belongs here in the
+    # cluster-wide config rather than in a per-node patch: it covers the public IP on
+    # a bare-metal node (where the public IP is on the interface) and the private
+    # address on a NAT'd VM (the interface address), so no node needs a different
+    # value and there is nothing to keep in per-node sync.
+    #
+    # This does NOT widen exposure. etcd already advertises and serves on the node's
+    # public address over mTLS with client-cert-auth on both the peer and client
+    # ports; 0.0.0.0 only adds coverage of the second interface on a multi-homed host.
+    #
+    # It also does not need a certificate change: TLS validates the address a client
+    # DIALS (the advertised public address, already in the certs), not the address the
+    # server BINDS.
+    #
+    # Setting an extraArg REPLACES kubeadm's generated argument of the same name
+    # (see ArgumentsToCommand: an override with no merge method drops the base arg and
+    # is appended as `--name=value`), so these do not end up duplicated. That makes
+    # this the supported mechanism for this change — unlike editing the generated
+    # manifest, which would depend on the argument's position in an alphabetically
+    # sorted list.
+    #
+    # listen-client-urls is 0.0.0.0 ALONE, deliberately NOT prepended with
+    # 127.0.0.1. kubeadm's generated value is "127.0.0.1,<advertise>" precisely
+    # because it names each address separately, but 0.0.0.0 already covers every
+    # local address INCLUDING loopback — so listing 127.0.0.1 alongside it makes
+    # etcd bind the same socket twice and refuse to start:
+    #
+    #     msg="closing peer listener","address":"0.0.0.0:2379",
+    #     error="listen tcp 127.0.0.1:2379: bind: address already in use"
+    #
+    # The local apiserver reaches etcd at 127.0.0.1:2379 either way: it connects to
+    # a loopback destination and 0.0.0.0 accepts it.
+    extraArgs:
+      - name: listen-peer-urls
+        value: https://0.0.0.0:2380
+      - name: listen-client-urls
+        value: https://0.0.0.0:2379

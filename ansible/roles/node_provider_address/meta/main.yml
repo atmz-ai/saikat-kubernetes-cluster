@@ -1,0 +1,13 @@
+---
+# NOTE: `become: true` is NOT a valid key in a role's meta/main.yml. ansible-core
+# only accepts `allow_duplicates`, `dependencies`, `galaxy_info` and
+# `argument_specs` here (see ansible/playbook/role/metadata.py, class
+# RoleMetadata) — anything else is silently ignored, so declaring it here would
+# look like it granted privilege while granting nothing.
+#
+# This role therefore sets `become: true` on each task that needs root. That is
+# also why it works on Azure at all: several existing roles in this repo declare
+# become in their meta, which does nothing, and they happen to work only because
+# `ansible_user: root` means escalation was never required. On a provider where
+# we connect as a non-root sudo-capable user, privilege must be requested
+# explicitly per task.

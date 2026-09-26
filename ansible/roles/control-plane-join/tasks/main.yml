@@ -1,15 +1,86 @@
 ---
 - name: Join control plane node
   block:
+    - name: Find a control plane node that is part of the running cluster
+      # Delegate for every cluster-side operation in this role: it holds admin.conf
+      # and a running etcd container. A node yet to join must never be selected,
+      # which is why unjoined nodes are kept out of the group in the inventory.
+      ansible.builtin.set_fact:
+        etcd_delegate: "{{ (groups['control_plane'] | reject('equalto', inventory_hostname) | list)[0] }}"
+
+    - name: Check whether a Node object for this host already exists in the cluster
+      # Read-only probe against an established control plane. rc == 0 means the name
+      # is already taken, which is the condition this role cannot safely proceed on.
+      ansible.builtin.command: >-
+        kubectl --kubeconfig /etc/kubernetes/admin.conf get node
+        {{ ansible_facts['hostname'] | default(inventory_hostname) }} --no-headers
+      delegate_to: "{{ etcd_delegate }}"
+      register: control_plane_join_existing_node
+      failed_when: false
+      changed_when: false
+
+    - name: Check whether this host already holds control plane manifests
+      ansible.builtin.stat:
+        path: /etc/kubernetes/manifests/kube-apiserver.yaml
+      register: control_plane_join_local_manifests
+
+    - name: Refuse to join a node that is already part of the cluster
+      # WHY THIS EXISTS. This role OPENS by destroying local state:
+      #
+      #     kubeadm reset --force
+      #     rm -rf /var/lib/etcd /etc/kubernetes/pki/etcd ...
+      #
+      # so re-running it against a node that has already joined does not "re-join"
+      # or no-op — it wipes that node's etcd data dir and PKI. The re-join then
+      # cannot reuse the existing etcd member (the certificates are gone), so
+      # kubeadm registers a NEW member with a new ID while the old one remains in
+      # the cluster, and the kubelet-start phase finally aborts because a Node of
+      # that name already exists:
+      #
+      #     error execution phase kubelet-start: a Node with name "X" and status
+      #     "Ready" already exists in the cluster
+      #
+      # The end state is a NotReady node with orphaned etcd members. Checking first
+      # turns that silent, destructive sequence into one clear refusal.
+      #
+      # Both signals are checked: the cluster-side Node object covers "already
+      # joined", and the local manifest covers the narrower case of a node that has
+      # control plane state but whose Node object was already deleted.
+      ansible.builtin.fail:
+        msg: |-
+          {{ inventory_hostname }} is already part of the cluster.
+
+          Refusing to continue. This role begins by running `kubeadm reset --force`
+          and deleting /var/lib/etcd and /etc/kubernetes/pki/etcd, so running it
+          against an already-joined node would destroy that node's local control
+          plane state and leave it NotReady with orphaned etcd members.
+
+          Remove the node from the cluster first, then join it again:
+
+            mise run ansible-playbook -- ansible/playbooks/operations/remove-node.yml -e target_host={{ inventory_hostname }}
+
+          Detection detail:
+            Node object in cluster: {{ 'yes' if control_plane_join_existing_node.rc == 0 else 'no' }}
+            Local control plane manifests: {{ 'present' if control_plane_join_local_manifests.stat.exists else 'absent' }}
+            (local state is reported for context only; it does not itself block a join)
+      # Guard on the CLUSTER-SIDE Node object only, deliberately NOT on local state.
+      # A node holding leftover manifests but with no Node object is not part of the
+      # cluster, so the reset below destroys nothing that is in use and is exactly
+      # what such a node needs before a re-join. Making local state a blocker would
+      # refuse the one path that recovers it, leaving no way to make progress.
+      when: control_plane_join_existing_node.rc | default(1) == 0
+
+    - name: Report that this node is not yet joined, proceeding
+      ansible.builtin.debug:
+        msg: >-
+          {{ inventory_hostname }} is not present in the cluster and holds no local
+          control plane state — proceeding with the join.
+
     - name: Reset any stale kubeadm state before join
       ansible.builtin.shell: |
         kubeadm reset --force 2>/dev/null || true
         rm -rf /var/lib/etcd /etc/kubernetes/pki/etcd /etc/kubernetes/kubelet.conf /etc/kubernetes/bootstrap-kubelet.conf
       changed_when: true
-
-    - name: Find a v1.36.x control plane node for etcd operations
-      ansible.builtin.set_fact:
-        etcd_delegate: "{{ (groups['control_plane'] | reject('equalto', inventory_hostname) | list)[0] }}"
 
     - name: Remove stale etcd member at this node's IP if exists
       ansible.builtin.shell: |
@@ -19,7 +90,17 @@
           echo "No etcd container found"
           exit 0
         fi
-        NODE_IP="{{ ansible_facts['default_ipv4']['address'] }}"
+        # Match on the ADVERTISED address, not the interface address: that is the URL
+        # the member is registered under. On Hetzner the two are the same, but on a
+        # node whose address is behind NAT the member registers at the public address
+        # while the interface holds a private one — grepping the interface address
+        # would find nothing and silently leave the phantom member behind, which is
+        # the exact case this cleanup exists to handle.
+        #
+        # NOTE: no apostrophes or unbalanced quotes in this block. This is a shell
+        # task, so the whole script is run through the argument splitter, and a single
+        # stray quote makes the task fail to parse rather than fail at run time.
+        NODE_IP="{{ node_provider_address_peer | default(ansible_facts['default_ipv4']['address']) }}"
         STALE_ID=$(ctr -n k8s.io tasks exec --exec-id etcd-check "$ETCD_CID" \
           etcdctl member list \
           --endpoints=https://127.0.0.1:2379 \
@@ -98,13 +179,49 @@
       register: join_command
       changed_when: true   # token create always mints a new bootstrap token
 
+    - name: Determine the address this node must advertise to the cluster
+      # The advertise address becomes the API server's serving address, the etcd
+      # peer URL, and (via kubelet) the node's registered address — so it must be
+      # an address every OTHER node can reach.
+      #
+      # `ansible_facts['default_ipv4']['address']` satisfies that on Hetzner,
+      # where the interface address IS the public address. It does not on a
+      # cloud VM: the interface holds a NAT'd private address that no other node
+      # can route to. Joining with it produces a node that reports Ready and is
+      # unreachable — the API server listens on an address nothing can dial, and
+      # the etcd peer URL is wrong.
+      #
+      # node-provider-address already decided this (it runs earlier in the
+      # playbook); reuse its conclusion rather than re-deriving it here, so the
+      # check exists in one place. Falls back to the interface address for nodes
+      # where that role found nothing to pin — i.e. the Hetzner case.
+      ansible.builtin.set_fact:
+        node_advertise_address: "{{ node_provider_address_peer | default(ansible_facts['default_ipv4']['address']) }}"
+
     - name: Build final join command
       ansible.builtin.set_fact:
         join_command_final: >-
           {{ join_command.stdout }}
           {{ '' if '--control-plane' in join_command.stdout else '--control-plane' }}
-          {{ '' if '--apiserver-advertise-address' in join_command.stdout else '--apiserver-advertise-address=' + ansible_facts['default_ipv4']['address'] }}
+          {{ '' if '--apiserver-advertise-address' in join_command.stdout else '--apiserver-advertise-address=' + node_advertise_address }}
 
+    - name: Display the address this node will join with
+      # Printed before the join because it is the single most consequential value
+      # in this role: if it is unreachable from the rest of the cluster, the join
+      # still succeeds and every subsequent symptom appears somewhere else.
+      ansible.builtin.debug:
+        msg: >-
+          Joining as control plane, advertising {{ node_advertise_address }}
+          (provider: {{ provider | default('hetzner') }}).
+
+    # etcd's bind address is handled cluster-wide in the ClusterConfiguration
+    # (`etcd.local.extraArgs` binding 0.0.0.0, rendered from
+    # manifests/kubeadm-cluster-configuration.yaml.j2 and uploaded above). Binding
+    # 0.0.0.0 is valid on every provider, so the joining node picks the right
+    # manifest up from the ConfigMap during the join and this role needs no
+    # per-node patch. That is why there is no `--patches` flag on the join below:
+    # the advertise address stays the node's concrete reachable address, and only
+    # the bind address is widened.
     - name: Join as control plane
       ansible.builtin.command: "{{ join_command_final }}"
       register: join_result
@@ -129,14 +246,25 @@
 
 - name: Query Cloudflare for existing CP A record at this IP
   ansible.builtin.uri:
-    url: >-
-      https://api.cloudflare.com/client/v4/zones/{{ cloudflare_zone_id }}/dns_records
-      ?type=A&name={{ kubernetes_api_hostname }}&content={{ hostvars[inventory_hostname]['ansible_host'] }}
+    # Double-quoted scalar with a trailing backslash. Both details matter: a `>-`
+    # folded scalar joins the lines with a SPACE (producing ".../dns_records ?type=A",
+    # which the module rejects with "URL can't contain control characters"), and a
+    # SINGLE-quoted scalar treats the backslash literally. Only an escaped line break
+    # inside a DOUBLE-quoted scalar joins the lines with nothing at all.
+    url: "https://api.cloudflare.com/client/v4/zones/{{ cloudflare_zone_id }}/dns_records\
+      ?type=A&name={{ kubernetes_api_hostname }}&content={{ hostvars[inventory_hostname]['ansible_host'] }}"
     method: GET
     headers:
       Authorization: "Bearer {{ cloudflare_api_token }}"
     return_content: true
   delegate_to: localhost
+  # These tasks run on the CONTROLLER, not on the node. The play sets become: true
+  # so nodes reached as a non-root user (cloud VMs) can escalate — but a task that is
+  # BOTH delegated to localhost and become: true asks sudo of the workstation, which
+  # has no passwordless sudo. It then fails with "sudo: a password is required"
+  # AFTER the join has already succeeded, so the run reports a failure that reads
+  # like a broken join when the join was in fact fine.
+  become: false
   register: cf_existing_cp_record
   changed_when: false
 
@@ -148,6 +276,7 @@
       Authorization: "Bearer {{ cloudflare_api_token }}"
     status_code: 200
   delegate_to: localhost
+  become: false
   when: cf_existing_cp_record.json.result | length > 0
   register: cf_cp_delete
   changed_when: true
@@ -168,6 +297,7 @@
       proxied: false
     status_code: 200
   delegate_to: localhost
+  become: false
   register: control_plane_join_cf_result
   changed_when: true
 
@@ -179,14 +309,15 @@
 
 - name: Query Cloudflare for existing app wildcard A record at this IP
   ansible.builtin.uri:
-    url: >-
-      https://api.cloudflare.com/client/v4/zones/{{ cloudflare_zone_id }}/dns_records
-      ?type=A&name={{ cloudflare_app_wildcard_hostname }}&content={{ hostvars[inventory_hostname]['ansible_host'] }}
+    # Double-quoted continuation, for the same reason as the CP query above.
+    url: "https://api.cloudflare.com/client/v4/zones/{{ cloudflare_zone_id }}/dns_records\
+      ?type=A&name={{ cloudflare_app_wildcard_hostname }}&content={{ hostvars[inventory_hostname]['ansible_host'] }}"
     method: GET
     headers:
       Authorization: "Bearer {{ cloudflare_api_token }}"
     return_content: true
   delegate_to: localhost
+  become: false
   register: cf_existing_wildcard_record
   changed_when: false
 
@@ -198,6 +329,7 @@
       Authorization: "Bearer {{ cloudflare_api_token }}"
     status_code: 200
   delegate_to: localhost
+  become: false
   when: cf_existing_wildcard_record.json.result | length > 0
   register: cf_wildcard_delete
   changed_when: true
@@ -218,6 +350,7 @@
       proxied: true
     status_code: 200
   delegate_to: localhost
+  become: false
   register: control_plane_join_cf_wildcard_result
   changed_when: true
 

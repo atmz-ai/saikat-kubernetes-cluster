@@ -3,4 +3,16 @@
 # the NoSchedule taint is removed after joining so workloads can schedule.
 # When false (default), the node joins as a dedicated control plane
 # with the NoSchedule taint preserved.
-stacked_mode: false
+#
+# Two spellings exist for the same intent, and BOTH must work:
+#   - `stacked_mode`          set per host in the inventory for the original CPs
+#   - `stacked_control_plane` the attribute name used going forward
+#
+# The default resolves the newer name so a host that declares only
+# `stacked_control_plane: true` is not silently treated as unstacked. That silence
+# is what made this worth handling explicitly: the taint-removal tasks are guarded
+# by this value, so a host setting only the new name had them SKIPPED with no
+# error, leaving a control plane that joined successfully but could never schedule
+# a workload. Inventory values still win over this default, so the hosts that
+# already set `stacked_mode` directly are unaffected.
+stacked_mode: "{{ stacked_control_plane | default(false) }}"

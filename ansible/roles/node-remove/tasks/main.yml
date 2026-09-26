@@ -117,9 +117,13 @@
 
 - name: Query Cloudflare for CP A record (control plane only)
   ansible.builtin.uri:
-    url: >-
-      https://api.cloudflare.com/client/v4/zones/{{ cloudflare_zone_id }}/dns_records
-      ?type=A&name={{ kubernetes_api_hostname }}&content={{ node_remove_target_ip }}
+    # Double-quoted scalar with a trailing backslash. Both details matter and both
+    # were wrong before: a `>-` folded scalar joins the lines with a SPACE, producing
+    # ".../dns_records ?type=A", and a SINGLE-quoted scalar treats the backslash as a
+    # literal character (leaving "...dns_records\\ ?type=A"). Only an escaped line
+    # break inside a DOUBLE-quoted scalar joins the lines with nothing at all.
+    url: "https://api.cloudflare.com/client/v4/zones/{{ cloudflare_zone_id }}/dns_records\
+      ?type=A&name={{ kubernetes_api_hostname }}&content={{ node_remove_target_ip }}"
     method: GET
     headers:
       Authorization: "Bearer {{ cloudflare_api_token }}"
@@ -167,9 +171,9 @@
 
 - name: Query Cloudflare for app wildcard A record (all nodes)
   ansible.builtin.uri:
-    url: >-
-      https://api.cloudflare.com/client/v4/zones/{{ cloudflare_zone_id }}/dns_records
-      ?type=A&name={{ cloudflare_app_wildcard_hostname }}&content={{ node_remove_target_ip }}
+    # Double-quoted continuation, for the same reason as the CP query above.
+    url: "https://api.cloudflare.com/client/v4/zones/{{ cloudflare_zone_id }}/dns_records\
+      ?type=A&name={{ cloudflare_app_wildcard_hostname }}&content={{ node_remove_target_ip }}"
     method: GET
     headers:
       Authorization: "Bearer {{ cloudflare_api_token }}"
