@@ -4,24 +4,32 @@ metadata:
   name: infrastructure-kilo
   namespace: flux-system
 spec:
-  # SUSPENDED — DO NOT UNSUSPEND WITHOUT READING kubernetes/infrastructure/kilo/.
+  # ENABLED 2026-09-27 after the topology fault was fixed and verified.
   #
-  # Kilo was installed on 2026-09-26 and broke pod->ClusterIP service routing
-  # cluster-wide within ~7 minutes: 78 pods across 18 namespaces entered crash loops
-  # (5 of the 6 Flux controllers among them; kustomize-controller could not reach
-  # source-controller, so Flux could not deliver a fix). Stopping Kilo restored
-  # service: new crashes fell from 13/3min to 0, not-ready pods from 29 to 10.
+  # `suspend` was removed in this commit, together with the node annotations that
+  # make it safe (ansible/roles/node-labels applies
+  # kilo.squat.ai/force-internal-ip + force-endpoint to every node). The previous
+  # breakage was NOT a datapath bug: on public-only Hetzner nodes Kilo gave each
+  # node its own location, so every packet counted as cross-location while
+  # --local=false skipped the return paths. force-internal-ip makes InternalIP
+  # non-nil, which groups nodes into their real region -- verified against live
+  # node objects BEFORE enabling:
+  #     0 nodes without a private IP; 2 locations
+  #     location:falkenstein 22 nodes   location:helsinki 18 nodes
+  # With locations that large, --local=false is finally the correct setting.
   #
-  # The cause is a structural incompatibility between Kilo's per-node-location
-  # fallback and --local=false, triggered because Hetzner nodes have no private IP.
-  # The full mechanism and the evidence are documented at the top of
-  # kubernetes/infrastructure/kilo/kustomization.yaml.
+  # The first thing to check after this reconciles is that `kilo_leader` reads 1 on
+  # ONLY node-1 and node-2. `kilo_leader 1` on all 40 nodes means the per-node
+  # locations are back and the topology fix did not take -- re-add `suspend: true`
+  # immediately.
   #
-  # Suspending HERE (rather than in the kilo directory) is what actually disables it:
-  # flux-system re-applies this file on every reconcile, so a live `kubectl patch
-  # suspend` or a DaemonSet nodeSelector is reverted within about a minute. Only the
-  # git-side suspend holds.
-  suspend: true
+  # KILL SWITCH (standby): point spec.template.spec.nodeSelector at a non-existent
+  # label, e.g. `kilo-disabled: "true"`, which drives pods to 0 and lets kubelet tear
+  # down kilo0. Do NOT use `scale --replicas=0`; the scale subresource returns
+  # NotFound on this cluster even when the API is healthy. A live patch stops the
+  # bleeding in seconds, but add `suspend: true` here in the same breath, because
+  # flux-system re-applies this file every reconcile and will revert a live patch
+  # within about a minute.
   interval: 1h
   path: ./kubernetes/infrastructure/kilo
   prune: true
