@@ -53,6 +53,31 @@ helm = "latest"
 # resolution never falls through to a stale installer-managed binary.
 # `spacetimedb-standalone` stays untouched: `spacetime start` execs it.
 "github:clockworklabs/SpacetimeDB" = { version = "latest", rename_exe = { "spacetimedb-cli" = "spacetime" } }
+# kgctl — Kilo's CLI (`kgctl`), for INSPECTING a Kilo mesh without installing it.
+#
+# Why this is worth a tool: Kilo's failure mode on this cluster was a TOPOLOGY
+# mistake (nodes with no private IP each became their own "location", which made
+# `--local=false` wrong and broke pod->ClusterIP routing cluster-wide). `kgctl
+# graph` computes the topology Kilo WOULD build, straight from the node objects,
+# so that can be checked BEFORE a privileged DaemonSet touches the datapath. It
+# is the only way to answer "will this be sane?" read-only.
+#
+# `kgctl showconf node <n>` is the other half — it renders the WireGuard config a
+# given node should have, which is what to compare against when a link is up but
+# traffic is not flowing.
+#
+# VERSION MUST MATCH THE INSTALLED AGENT (kubernetes/infrastructure/kilo/
+# daemonset.yaml pins squat/kilo:0.7.0). kgctl reads and interprets the same
+# node annotations the agent writes, so a version skew is a silent
+# misinterpretation, not an error. Bump both together.
+#
+# Installed as a bare binary per platform (upstream ships `kgctl-darwin-arm64`,
+# `kgctl-linux-amd64`, ... and no archives), so `bin` names the executable mise
+# puts on PATH rather than relying on the automatic OS/arch suffix strip.
+#
+# NOTE: `kgctl` requires a `CAP_NET_ADMIN` context only for `connect`, which we do
+# not use — `graph` and `showconf` are pure API reads.
+"github:squat/kilo" = { version = "0.7.0", bin = "kgctl" }
 kubectl = "latest"
 maestro = { version = "latest", os = ["macos"] }
 node = "latest"
