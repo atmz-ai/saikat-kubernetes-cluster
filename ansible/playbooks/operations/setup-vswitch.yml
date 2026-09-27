@@ -1,0 +1,24 @@
+---
+# Hetzner vSwitch for the Kubernetes mesh — attach every cluster node to one L2
+# domain so each gains a private address (Kilo needs one that differs from its
+# public endpoint; see ansible/roles/vswitch/defaults/main.yml for the full why).
+#
+# Thin single-play wrapper. All logic lives in the role.
+#
+# Runs against localhost: the role drives the Robot API, not the nodes themselves.
+# The nodes' VLAN subinterfaces are a separate concern (own role), applied one node
+# at a time.
+#
+# Usage:
+#   mise run ansible-playbook -- ansible/playbooks/operations/setup-vswitch.yml
+#   mise run ansible-playbook -- ansible/playbooks/operations/setup-vswitch.yml --check --diff
+#
+# --check is genuinely useful here: community.hrobot.v_switch supports check_mode
+# fully, so a dry run reports what would change (and would have told us the vSwitch
+# already exists and membership is already correct).
+- name: Manage the Hetzner vSwitch for the cluster mesh
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  roles:
+    - role: vswitch

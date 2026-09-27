@@ -1,0 +1,85 @@
+---
+# Hetzner vSwitch — the private L2 network that gives these nodes a PRIVATE address.
+#
+# WHY THIS EXISTS. Every node in this cluster is Hetzner bare metal whose only
+# address is its public /32 (`ip -4 addr` shows `enp0s31f6 65.21.137.111/32` and
+# nothing else). Kilo classifies a node's "internal" address with an RFC1918 test
+# (pkg/mesh/discoverips.go `isPublic`), so with no private address `InternalIP` stays
+# nil and Kilo gives each node its own location:
+#
+#     if node.InternalIP == nil { location = nodeLocationPrefix + node.Name }
+#
+# Every packet then counts as cross-location, and combined with `--local=false`
+# (which asserts "the CNI owns in-location routing") that broke pod->ClusterIP across
+# the cluster. `kilo.squat.ai/force-internal-ip` does not fix it either: pointing it
+# at the public IP makes the node's internal address EQUAL its endpoint, and
+# Topology.Routes then skips the node entirely —
+#
+#     // Don't add routes through Kilo if the private IP equals the external IP ...
+#     // we cannot encapsulate traffic to an IP through the IP.
+#     if segment.privateIPs[i].Equal(t.updateEndpoint(...).IP()) { continue }
+#
+# So the address has to genuinely EXIST and genuinely DIFFER from the endpoint. A
+# vSwitch provides exactly that: an L2 domain carrying RFC1918 addresses, with the
+# public /32 left untouched for SSH, DNS and the Kilo endpoint.
+#
+# ── LAYOUT: one vSwitch, PER-REGION subnets ──────────────────────────────────
+# A vSwitch is a single L2 domain but this cluster spans two Hetzner regions
+# (helsinki 18 nodes, falkenstein 22). Kilo groups by
+# `topology.kubernetes.io/region`, so all nodes in a region share a location and
+# Kilo only links BETWEEN locations. If both regions shared one subnet, every
+# location would contain peers reachable only via another location — a black hole,
+# the same failure class as the outage this is meant to fix.
+#
+# Giving each region its own subnet on the same VLAN makes that coherent:
+# traffic to a peer in the SAME subnet is on-link local; traffic to the other
+# region is off-subnet and is precisely what Kilo encapsulates. That is what makes
+# `--encapsulate=crosssubnet` do the right thing here.
+#
+#   172.20.10.0/24  falkenstein   .10+ per host
+#   172.20.20.0/24  helsinki      .20+ per host
+#
+# WHY 172.20: it is clear of every range this cluster already uses —
+# 10.244/16 (pods), 10.96/12 (services), 10.4/16 (Kilo's WireGuard pool),
+# 172.16/16 (Azure VNet), 172.31/16 (AWS default VPC, future) and 10.128/20
+# (GCP, future). Verified absent from the node routing tables before it was used.
+#
+# ── DELIBERATELY NOT SET BY THIS ROLE ───────────────────────────────────────
+# The VLAN subinterface itself. Hetzner's own docs recommend an MTU of 1400 on the
+# VLAN device, and note that netplan does not reliably apply it (they suggest a
+# manual `ip link set mtu` plus an `@reboot` entry to work around it). That is a
+# per-node network-stack change on a live control plane, so it gets its own role
+# where it can be applied one node at a time and verified — not smuggled into the
+# role that manages vSwitch membership.
+
+# ── vSwitch identity ─────────────────────────────────────────────────────────
+# Name and VLAN together identify the vSwitch: if either differs from what exists,
+# the Robot API creates a NEW one rather than renaming. VLAN must be 4000-4091
+# (Hetzner's range); a server may belong to at most 5.
+vswitch_name: "k8s-mesh"
+vswitch_vlan: 4000
+
+# Which inventory hosts to attach. Defaults to every node: the mesh is cluster-wide,
+# and a node left off keeps its public-only address — the exact condition that caused
+# the outage. Partial membership is worse than none.
+vswitch_hosts: "{{ groups['k8s_cluster'] }}"
+
+# Fail rather than silently skip a host we cannot resolve to a Robot server ID.
+# "Attached the wrong set of servers" is not worth recovering from quietly — it IS
+# the partial-membership case above.
+vswitch_fail_on_missing_server_id: true
+
+# ── Private addressing ───────────────────────────────────────────────────────
+# Per-region subnets on the one VLAN (see the header for why they are split).
+# Keys are `topology.kubernetes.io/region` values, so adding a region is one entry.
+vswitch_subnets:
+  falkenstein: "172.20.10.0/24"
+  helsinki: "172.20.20.0/24"
+
+# Host octet within the region subnet, from the node's position in the sorted list
+# of nodes in that region: deterministic, so a re-run assigns the same address and
+# reports no change.
+#
+# Starts at 10 (not 1) to leave the low addresses free for a future gateway or
+# router on the VLAN, which is where one conventionally goes.
+vswitch_host_octet_base: 10

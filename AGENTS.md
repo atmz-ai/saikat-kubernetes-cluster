@@ -545,6 +545,10 @@ For any external service the repo calls (SpacetimeDB Maincloud, third-party APIs
 
 ### Ansible / Playbook Execution
 - `become` is globally false; remote plays SSH as root; localhost plays as vscode user.
+- **Prefer a collection module over a raw `uri`/`command` call.** If a maintained
+  collection module exists for the API being touched, use it — `community.hrobot`
+  covers the Hetzner Robot API. Raw `uri` calls in older roles are legacy, not
+  precedent. Details, the two parameter traps, and the reasoning: `ansible/AGENTS.md`.
 - Always run playbooks in foreground.
 - **Always use mise tasks for Ansible operations.** Never invoke `ansible-playbook`, `ansible-vault`, `ansible-lint`, or `.venv/bin/ansible-*` directly — use the corresponding mise task instead:
   - `mise run ansible-playbook -- ansible/playbooks/operations/<playbook>.yml [-e target_host=...]` — run a playbook
