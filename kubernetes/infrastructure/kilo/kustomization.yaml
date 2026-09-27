@@ -48,16 +48,58 @@
 # The per-node-location fallback is meant as a graceful degradation; combined with
 # `--local=false` it is not graceful. This configuration is untested upstream.
 #
-# TO GO FORWARD (gated, one node at a time, per operator direction):
-#   1. Do NOT re-enable on all 40 nodes at once.
-#   2. Scope with nodeSelector to a SINGLE node first, and on that node verify
-#      pod->ClusterIP, pod->pod cross-node, and node->node *before* widening.
-#   3. Expect the public-only problem to persist on Hetzner regardless — it is the
-#      thing to solve first (likely: give nodes a private address, or supply
-#      `kilo.squat.ai/force-internal-ip` so nodes group into real locations and
-#      `--local` can be true).
-#   4. Re-enable only after (2) and (3) hold, and remove `suspend: true` from
-#      kubernetes/clusters/yral-k8s/infrastructure-kilo.yaml in the same commit.
+# TO GO FORWARD — CORRECTED. An earlier version of this note said to scope the
+# DaemonSet to a SINGLE node first. That would not have been a valid test: the
+# breakage comes from the OTHER nodes each being in their own location, so with one
+# node Kilo would simply look idle and pass for the wrong reason. Three constraints
+# follow, and they must be satisfied together, not sequentially:
+#
+#   (a) EVERY node the DaemonSet touches must end up in a POPULATED location —
+#       otherwise we are right back in the per-node-location failure mode. On a
+#       public-only node this means setting `kilo.squat.ai/force-internal-ip`
+#       (verified in pkg/k8s/backend.go: the annotation sets node.InternalIP, and
+#       pkg/mesh/topology.go then groups by region instead of `node:<name>`).
+#       On Hetzner the routable IP IS on the interface, unlike Azure, so pointing
+#       the annotation at the node's public IP is legitimate.
+#   (b) `--local` must match the topology. `--local=false` means "the CNI owns
+#       in-location routing", which is only true when locations are real.
+#   (c) There is NO way to make Kilo fail safe on a subset of nodes. Scaling the
+#       DaemonSet down, or pointing a nodeSelector at a node that does not exist,
+#       kills EVERY pod — so the first node we touch is already a whole-cluster
+#       change. There is no small blast radius to be had; see below.
+#
+# The only honest way to test is therefore STAGED, with a kill switch prepared
+# before each stage and the cluster's health measured after each:
+#
+#   Stage 0 — PREPARE, change nothing. Confirm the kill switch works (scale to 0 /
+#       non-matching nodeSelector => 0 pods, verified) and that a baseline is
+#       green. Note the blast radius: Kilo must run on the nodes that host Cilium's
+#       own pods, so even one meshed node changes Cilium's datapath there.
+#   Stage 1 — the topology fix at small scale. Apply `force-internal-ip` to a
+#       handful of nodes in ONE region (start with 3, all worker-N in FSN1) and
+#       re-enable with a nodeSelector matching only those. With >=2 nodes in one
+#       real location, `--local=false` is finally the correct setting, and the
+#       per-node-location failure cannot occur. Measure: pod->ClusterIP, pod->pod
+#       same-node and cross-node, node->node, Kilo logs, Cilium Cluster health.
+#   Stage 2 — the same region, more nodes. Widen the nodeSelector within FSN1.
+#   Stage 3 — a second region (HEL1). This is the first genuine cross-location
+#       test and the first time Kilo does its real job.
+#   Stage 4 — remaining nodes, then Hetzner retirement.
+#
+# KILL SWITCH (needs no cluster access to reason about, only kubectl): point
+# spec.template.spec.nodeSelector at a non-existent label, e.g.
+# `kilo-disabled: "true"`, which drives every pod to 0 and lets kubelet tear down
+# kilo0. Do NOT use `scale --replicas=0`; the scale subresource has returned
+# NotFound on this cluster even when the API is healthy (kubectl patch and delete
+# work, scale does not). A git-side change is still the only way to stop Flux from
+# reverting the switch, but for stopping the bleeding mid-incident the patch is
+# enough and takes effect in seconds.
+#
+# RE-ENABLE requires: removing `suspend: true` from
+# kubernetes/clusters/yral-k8s/infrastructure-kilo.yaml IN THE SAME COMMIT as the
+# nodeSelector and the force-internal-ip annotations, then watching the stages. Never
+# un-suspend without a nodeSelector and annotations already in place — that is
+# exactly the all-40-at-once rollout that took the cluster down.
 # ══════════════════════════════════════════════════════════════════════════════
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
