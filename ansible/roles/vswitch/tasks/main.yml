@@ -3,43 +3,70 @@
 # rationale. This role manages vSwitch EXISTENCE and MEMBERSHIP only; the per-node
 # VLAN subinterface is a separate, deliberately-staged concern.
 
-# ── Resolve inventory hosts to Robot server IDs ──────────────────────────────
-# The module accepts a server's numeric ID or its main IPv4/IPv6, so the node's
-# public address (ansible_host) is enough and no lookup is required for the common
-# case. The ID is resolved anyway where cheap, because the numeric ID is stable
-# across IP changes while the IP is not.
-- name: Gather the topology region and public address for each vSwitch host
+# ── Select the target hosts ──────────────────────────────────────────────────
+# Iterate once and decide in the loop body. Ansible CAN express the whole thing as
+# one selectattr chain, but "provider is hetzner OR undefined" plus an optional
+# region filter is not legible that way, and this is the part worth reading
+# carefully: getting it wrong means attaching the wrong set of servers.
+- name: Build the region + address map for the target nodes
   ansible.builtin.set_fact:
     vswitch_host_servers: >-
       {{ vswitch_host_servers | default({}) | combine({ item: {
-           'region': hostvars[item]['location'] | default(''),
+           'region': _region,
            'address': hostvars[item]['ansible_host']
          } }) }}
-  loop: "{{ vswitch_hosts }}"
+  loop: "{{ vswitch_hosts | select('in', hostvars) | list }}"
   loop_control:
     label: "{{ item }}"
-  when: hostvars[item]['ansible_host'] is defined
+  vars:
+    # `provider` defaults to hetzner to match ssh-hardening and provision, which
+    # treat nodes predating the annotation as Hetzner.
+    _provider: "{{ hostvars[item]['provider'] | default('hetzner') }}"
+    # REGION, not datacenter. Hetzner carries `region: helsinki|falkenstein` and
+    # `datacenter: HEL1-DC3|FSN1-DC8`; cloud nodes carry `location` (Azure's
+    # centralindia). This mirrors how node-labels derives the
+    # topology.kubernetes.io/region LABEL, which is the label Kilo groups by:
+    #   region <- region (Hetzner) | location (cloud)
+    # Using `datacenter`/`location` here would key the subnets by HEL1-DC3/FSN1-DC8
+    # — per-DC, not per-region — so no node would match a vswitch_subnets entry.
+    _region: >-
+      {{ hostvars[item]['region'] | default(hostvars[item]['location'] | default('')) }}
+  when:
+    - hostvars[item]['ansible_host'] is defined
+    # Hetzner-only: a vSwitch is a Robot concept, and cloud nodes already carry
+    # private addressing on their own interface (an Azure node's eth0 has 172.16.x),
+    # so attaching them would be both impossible and wrong.
+    - _provider == 'hetzner'
+    - vswitch_regions | length == 0 or _region in vswitch_regions
 
-- name: Fail when a host has no resolvable public address
+- name: Fail when nothing was resolved
   ansible.builtin.assert:
     that:
-      - vswitch_host_servers | length == (vswitch_hosts | length)
+      - vswitch_host_servers | length > 0
     fail_msg: >-
-      {{ vswitch_hosts | length - (vswitch_host_servers | length) }} host(s) in
-      vswitch_hosts have no ansible_host. Refusing to attach a partial set: a node
-      left off the vSwitch keeps its public-only address, which is the exact
-      condition that caused the outage this role exists to fix.
+      No hosts resolved for the vSwitch. Check that vswitch_hosts names real
+      inventory hosts with ansible_host set, that provider is 'hetzner', and that
+      vswitch_regions (if set) matches at least one node's location.
+    success_msg: >-
+      resolved {{ vswitch_host_servers | length }} Hetzner node(s) across {{
+      vswitch_host_servers | dict2items | map(attribute='value.region') | unique | join(', ') }}
   when: vswitch_fail_on_missing_server_id | bool
 
-# ── Create the vSwitch and attach every node ─────────────────────────────────
+# ── Create the vSwitch and attach every target node ──────────────────────────
 # One task, because the module treats `servers` as "the desired membership" and is
 # idempotent: it adds what is missing and removes what is not listed. Splitting
 # create from attach would therefore be wrong — the create call would either remove
 # everyone (servers unset) or claim membership it does not own.
 #
+# NOTE ON STAGING: `servers` is the COMPLETE desired set, so running this with
+# vswitch_regions narrowed to one region would REMOVE the other region's servers.
+# That is intentional and honest (the module is declarative), but it means staged
+# runs must either keep every region listed or accept the removal. Defaults keep
+# every region, so a plain run is the safe one.
+#
 # The module blocks until the API reports every server `ready`, so a returned
 # success means the VLAN is actually configured, not merely accepted.
-- name: Create the vSwitch and attach every cluster node
+- name: Create the vSwitch and attach the target cluster nodes
   community.hrobot.v_switch:
     hetzner_user: "{{ hetzner_robot_api_user }}"
     hetzner_password: "{{ hetzner_robot_api_password }}"

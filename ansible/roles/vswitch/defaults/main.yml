@@ -59,10 +59,28 @@
 vswitch_name: "k8s-mesh"
 vswitch_vlan: 4000
 
-# Which inventory hosts to attach. Defaults to every node: the mesh is cluster-wide,
-# and a node left off keeps its public-only address — the exact condition that caused
-# the outage. Partial membership is worse than none.
+# Which inventory hosts to attach. Defaults to every HETZNER node in the cluster:
+# the mesh is cluster-wide, and a node left off keeps its public-only address — the
+# exact condition that caused the outage. Partial membership is worse than none.
+#
+# `k8s_cluster` rather than `groups['all']` because it is exactly the cluster
+# membership. It is then filtered to `provider == 'hetzner'` in the tasks: a vSwitch
+# is a Hetzner Robot concept, and cloud nodes have their own private addressing
+# already (an Azure node's eth0 carries 172.16.x), so attaching them would be both
+# impossible and wrong.
 vswitch_hosts: "{{ groups['k8s_cluster'] }}"
+
+# Restrict to ONE topology region, for staged rollout. Empty = every region.
+#
+# This is real isolation for the NETWORK step: each node configures its own VLAN
+# subinterface, and the per-region subnets are independent, so a bad change in
+# falkenstein cannot affect helsinki. Set to a region name (e.g. "falkenstein") to
+# roll that region alone.
+#
+# It is NOT isolation for the Kilo-enable step — Kilo is one DaemonSet with one
+# topology across all regions, so the two steps have genuinely different blast
+# radii and should not be treated the same.
+vswitch_regions: []
 
 # Fail rather than silently skip a host we cannot resolve to a Robot server ID.
 # "Attached the wrong set of servers" is not worth recovering from quietly — it IS
