@@ -69,7 +69,10 @@ spec:
 # Replication:
 #   default.replication.factor=3   — every topic replicated to all 3 brokers
 #   min.insync.replicas=2          — producer acks=all requires 2/3 in-sync
-apiVersion: kafka.strimzi.io/v1beta2
+# `v1` rather than the deprecated `v1beta2`: the CRD serves both, and every other
+# Strimzi CR in this repo (KafkaNodePool, KafkaTopic, KafkaUser, KafkaBridge) is
+# already on `v1`. Verified the API server accepts this CR as `v1` unchanged.
+apiVersion: kafka.strimzi.io/v1
 kind: Kafka
 metadata:
   name: kafka-cluster
@@ -78,10 +81,24 @@ metadata:
   # enabled by default from Strimzi 0.48.0 onwards and no longer need to be set.
 spec:
   kafka:
-    # Verify latest Kafka version supported by Strimzi 0.50.1 at:
-    # https://github.com/strimzi/strimzi-kafka-operator/releases/tag/0.50.1
-    version: 4.1.1
-    metadataVersion: "4.1-IV1"
+    # 4.3.1 is the default Kafka version for Strimzi 1.2.0 (the chart pinned in
+    # kubernetes/infrastructure/strimzi/helmrelease.yaml), so it is the version
+    # the operator exercises most. Verify at:
+    # https://github.com/strimzi/strimzi-kafka-operator/releases/tag/1.2.0
+    #
+    # This MUST stay within the set the running operator supports. Renovate bumped
+    # the Strimzi chart 0.51.0 -> 1.2.0 on 2026-09-03, which dropped support for the
+    # previously pinned 4.1.1; the operator then refused to reconcile the Kafka CR:
+    #   Unsupported Kafka.spec.kafka.version: 4.1.1.
+    #   Supported versions are: [4.2.0, 4.2.1, 4.3.0, 4.3.1]
+    # The brokers kept serving, but the CR went NotReady, which stalled
+    # infrastructure-kafka (wait: true) and would have blocked any broker restart or
+    # node-pool change. When bumping the Strimzi chart, bump this in the same change.
+    version: 4.3.1
+    # metadataVersion tracks the broker's on-disk/wire format and CANNOT be
+    # downgraded, so this is a one-way door. 4.3-IV0 is the metadata version paired
+    # with Kafka 4.3.x (from the operator's own kafka-versions.yaml).
+    metadataVersion: "4.3-IV0"
     listeners:
       - name: plain
         port: 9092
