@@ -59,6 +59,64 @@
   changed_when: "'labeled' in label_result.stdout"
   when: node_topology_labels | length > 0
 
+# ── Kilo mesh annotations ────────────────────────────────────────────────────
+# Kilo groups nodes into "locations" by their topology.kubernetes.io/region label
+# and links one leader per location. A node with NO private address is instead
+# given its own single-node location (pkg/mesh/topology.go):
+#
+#     if node.InternalIP == nil { location = nodeLocationPrefix + node.Name }
+#
+# which is the behaviour that took this cluster down: with every node in its own
+# location, every packet is "cross-location", so Kilo installed routing for all of
+# it while --local=false (which asserts "the CNI owns in-location routing") skipped
+# the return paths, and pod->ClusterIP broke cluster-wide.
+#
+# Kilo decides "private" with isPublic() in pkg/mesh/discoverips.go — an RFC1918
+# test. A Hetzner node's only address is its public /32, so it is classified public,
+# InternalIP stays nil, and the node lands in its own location. `force-internal-ip`
+# is the documented way out: it sets InternalIP directly (pkg/k8s/backend.go reads
+# the annotation BEFORE falling back to the agent-written internal-ip), so the node
+# groups into its real region instead. The address does not have to be RFC1918 to be
+# the node's internal identity — that is the point of the word "force".
+#
+# `force-endpoint` is the other half: a cloud VM's public IP is provider-side NAT and
+# is absent from the interface, so Kilo's endpoint heuristic cannot find it. This is
+# the case Kilo's own docs describe verbatim ("nodes are allocated a public IP but
+# the Ethernet devices are only configured with the private network address; in this
+# case the allocated public IP should be specified").
+#
+# Both point at `ansible_host` — the address this repo already treats as the
+# node's reachable identity (SSH, DNS records, the API endpoint list). Using it
+# here rather than a fact set by another role matters for two reasons:
+#   * `node_provider_address` runs ONLY in add-control-plane.yml, so its fact is
+#     undefined in add-worker.yml and init-control-plane.yml. Depending on it would
+#     silently skip every worker (or fail), which is the worst kind of bug here —
+#     a partial rollout that looks successful.
+#   * for every provider so far `ansible_host` IS the peer-reachable address.
+#
+# WHEN CLOUD NODES JOIN, THE TWO ANNOTATIONS DIVERGE and this must be revisited:
+# a Hetzner node has one address (public, on the interface) so both are the same,
+# but an Azure node has a private address on eth0 AND a provider-NAT public one.
+# There, force-internal-ip must become the PRIVATE address (what etcd/kubelet bind
+# to and what the mesh routes to) while force-endpoint stays PUBLIC (where peers
+# dial). That is the same inversion node_provider_address needs, and `ansible_host`
+# will not be right for force-internal-ip on those nodes.
+#
+# Applied BEFORE Kilo ever runs, because Kilo reads these at topology-build time.
+# With Kilo suspended these annotations are INERT — nothing consumes them — which is
+# what makes this step safe to apply to all 40 nodes and verify before enabling.
+- name: Apply Kilo mesh annotations to node
+  ansible.builtin.command: >
+    kubectl annotate node {{ ansible_facts['hostname'] }}
+    kilo.squat.ai/force-internal-ip={{ hostvars[inventory_hostname]['ansible_host'] }}/32
+    kilo.squat.ai/force-endpoint={{ hostvars[inventory_hostname]['ansible_host'] }}:51820
+    --overwrite
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  delegate_to: "{{ groups['control_plane'][0] }}"
+  register: kilo_annotation_result
+  changed_when: "'not annotated' not in kilo_annotation_result.stdout"
+
 - name: Apply disk type label to node
   ansible.builtin.command: >
     kubectl label node {{ ansible_facts['hostname'] }}
