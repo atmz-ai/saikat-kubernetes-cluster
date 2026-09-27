@@ -1,0 +1,48 @@
+---
+# Per-node VLAN subinterface for the Hetzner vSwitch.
+#
+# WHY THIS IS SEPARATE FROM THE `vswitch` ROLE. `vswitch` drives the Robot API
+# (membership only, no node is touched). This role changes each node's NETWORK STACK,
+# which is the step that can lose SSH to a live control plane — so it is applied one
+# node at a time and verified, and the two concerns are deliberately not mixed.
+#
+# WHY A SEPARATE NETPLAN FILE. The role writes /etc/netplan/60-vswitch.yaml rather
+# than editing Hetzner's /etc/netplan/01-netcfg.yaml. netplan merges files, so this
+# adds the VLAN without touching the addresses, routes and nameservers installimage
+# produced. Consequences that matter:
+#   * revert is `rm` + `netplan apply` — no in-place surgery on the file that carries
+#     the node's public IP
+#   * the dead-man's switch below only has to delete one file
+#   * a later `installimage` or reprovision cannot conflict with our edits
+# The 60- prefix makes netplan order it after Hetzner's 01-, which is conventional
+# but not load-bearing (netplan merges rather than overriding by filename).
+#
+# MTU 1400 on the VLAN device: a VLAN tag adds 4 bytes, so the device must stay under
+# the parent's 1500. Hetzner's docs specify 1400 and note that netplan does not
+# always apply it, suggesting a manual `ip link set mtu` plus an `@reboot` entry as a
+# workaround. This role therefore verifies the MTU after apply rather than trusting
+# that the config took — see the assertions.
+
+# ── VLAN parameters ──────────────────────────────────────────────────────────
+# vswitch_vlan_id, vswitch_vlan_parent, vswitch_vlan_mtu and vswitch_subnets live in
+# ansible/inventory/group_vars/all/vars.yml — they are shared with the `vswitch` role
+# (which owns the Robot API side), and duplicating them here would let the two drift
+# into a VLAN-id or subnet mismatch, which comes up cleanly and carries nothing.
+
+# netplan fragment. Deliberately a constant, not derived from vswitch_vlan_id, so a
+# VLAN change leaves the old file behind for inspection rather than silently
+# overwriting it — the stale file is then an obvious thing to find, not a mystery.
+vswitch_vlan_netplan_file: "/etc/netplan/60-vswitch.yaml"
+
+# ── Dead-man's switch ────────────────────────────────────────────────────────
+# Scheduled BEFORE netplan apply, cancelled after verification. If applying the
+# config takes the node off the network (bad parent, bad YAML, MTU mismatch), SSH
+# is gone — but `at` runs locally and restores the previous state unattended.
+#
+# This is the mechanism that makes the step safe to take at all: without it, a
+# mistake on a control plane means a physical rescue, and per the repo's rules a
+# node that gets stuck is reprovisioned from scratch.
+#
+# Kept short enough to recover quickly, long enough that a human notices nothing:
+# the operator should never see this fire.
+vswitch_vlan_deadman_minutes: 10

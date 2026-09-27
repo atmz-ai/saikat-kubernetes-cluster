@@ -1,0 +1,31 @@
+---
+# Per-node VLAN subinterface for the Hetzner vSwitch.
+#
+# ONE NODE AT A TIME (serial: 1). This changes a live node's network stack — the
+# step that can take it off the network — so it is never batched. The role has its
+# own dead-man's switch (see tasks/main.yml): an `at` job scheduled before the change
+# that restores the previous state unattended if verification does not complete.
+#
+# ORDER: run `setup-vswitch.yml` first. That attaches the nodes to the vSwitch via
+# the Robot API (no node change); this then gives them addresses on it. Configuring
+# this before the vSwitch membership exists produces an interface that is up but
+# carries nothing.
+#
+# Start with a NON-CRITICAL node. worker-3 is the usual choice: it runs only one
+# kafka-connect replica (2 replicas exist), so losing it briefly is survivable.
+#
+# Usage:
+#   # one node, to validate the procedure
+#   mise run ansible-playbook -- ansible/playbooks/operations/setup-vswitch-vlan.yml -e target_host=worker-3
+#
+#   # then a region, still serial
+#   mise run ansible-playbook -- ansible/playbooks/operations/setup-vswitch-vlan.yml -e vswitch_region=falkenstein
+- name: Configure the vSwitch VLAN interface, one node at a time
+  hosts: "{{ target_host | default('all') }}"
+  # serial: 1 is the point of this playbook. Batching would take several nodes off
+  # the network simultaneously, and etctd loses quorum if control-plane nodes go at
+  # once — the failure mode this serialisation exists to prevent.
+  serial: 1
+  become: false
+  roles:
+    - role: vswitch-vlan

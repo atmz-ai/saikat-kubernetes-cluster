@@ -109,3 +109,48 @@ pdns_zones:
   # empty for external-dns to populate from its DNSEndpoint CRDs.
   - name: oleole.ai
     snapshot: false
+
+# ── Hetzner vSwitch (the cluster's private L2 network) ──────────────────────
+# Shared data for TWO roles — `vswitch` (Robot API membership) and `vswitch-vlan`
+# (the per-node VLAN interface). It lives here rather than in either role's
+# defaults because role defaults are not shared between roles, and duplicating the
+# VLAN id or the subnets would let the two drift: a mismatch produces an interface
+# that comes up cleanly and carries nothing.
+#
+# WHY A VSWITCH AT ALL. Every node's only address is its public /32, so Kilo finds
+# no "private" address (it classifies with an RFC1918 test), gives each node its own
+# location, and that is what broke pod->ClusterIP cluster-wide. Pointing
+# kilo.squat.ai/force-internal-ip at the public IP does not help either: the internal
+# address then EQUALS the endpoint, and Kilo skips the node entirely —
+#   "we cannot encapsulate traffic to an IP through the IP".
+# The address has to genuinely exist AND differ from the endpoint.
+#
+# PER-REGION SUBNETS, one VLAN. Kilo groups by region and links only BETWEEN
+# locations, so a single shared subnet would put each region's peers behind another
+# location — a black hole. Splitting by region makes same-subnet traffic on-link and
+# cross-region traffic exactly what Kilo encapsulates (--encapsulate=crosssubnet).
+#
+# 172.20 is clear of 10.244/16 (pods), 10.96/12 (services), 10.4/16 (Kilo WireGuard),
+# 172.16/16 (Azure), 172.31/16 (AWS) and 10.128/20 (GCP), and was verified absent
+# from the node routing tables. Keys are topology.kubernetes.io/region values.
+vswitch_name: "k8s-mesh"
+vswitch_vlan_id: 4000
+vswitch_subnets:
+  falkenstein: "172.20.10.0/24"
+  helsinki: "172.20.20.0/24"
+
+# First host octet handed out inside a region subnet; a node's octet is this plus its
+# position in the region's sorted node list (see the vswitch-vlan role). Starting at
+# 10 rather than 1 leaves the low addresses free for a future gateway or router on
+# the VLAN, which is where one conventionally goes.
+vswitch_host_octet_base: 10
+
+# Parent interface — every Hetzner bare-metal node in this cluster reports this
+# (the provisioning role's installimage layout). NOT auto-detected: guessing the
+# wrong parent would take the node's primary interface down.
+vswitch_vlan_parent: "enp0s31f6"
+
+# A VLAN tag costs 4 bytes, so the device must stay under the parent's 1500.
+# Hetzner's docs specify 1400 and note netplan does not always apply it, so the role
+# verifies and corrects it after apply.
+vswitch_vlan_mtu: 1400

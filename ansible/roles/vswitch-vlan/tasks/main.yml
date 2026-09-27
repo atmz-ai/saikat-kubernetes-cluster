@@ -1,0 +1,227 @@
+---
+# Per-node VLAN subinterface for the Hetzner vSwitch — see defaults/main.yml for the
+# design rationale (separate netplan file, MTU 1400, dead-man's switch).
+#
+# Applied ONE NODE AT A TIME (serial: 1 at the playbook level), because this is the
+# step that can take a live node off the network.
+#
+# Deliberately uses NO collection filter plugins. `ansible.utils` (ipaddr/ipmath) is
+# NOT installed in this repo's vendored collections, and adding a collection
+# dependency to compute a host octet is not worth it — the arithmetic is one
+# addition and the subnets are /24s, so the address is assembled from a string. If a
+# non-/24 subnet is ever needed, this is the place to revisit.
+
+# ── Derive this node's private address ───────────────────────────────────────
+- name: Determine this node's region from inventory
+  ansible.builtin.set_fact:
+    vswitch_node_region: >-
+      {{ hostvars[inventory_hostname]['region']
+         | default(hostvars[inventory_hostname]['location'] | default('')) }}
+
+- name: Fail if this node has no usable region
+  ansible.builtin.assert:
+    that:
+      - vswitch_node_region | length > 0
+      - vswitch_node_region in vswitch_subnets
+    fail_msg: >-
+      Node {{ inventory_hostname }} has region '{{ vswitch_node_region }}', which is
+      not in vswitch_subnets ({{ vswitch_subnets.keys() | list }}). Refusing to guess
+      a subnet — the wrong one breaks peer reachability silently.
+
+- name: Start the region node list empty
+  # Reset explicitly: a set_fact persists for the rest of the play, so without this a
+  # second run of the role would append to the previous list and hand out doubled
+  # octets.
+  ansible.builtin.set_fact:
+    vswitch_region_nodes: []
+
+- name: Collect the nodes in this region
+  # An accumulating loop, deliberately not a selectattr chain. The list is hostname
+  # STRINGS and selectattr tests attributes on the items themselves, so
+  # selectattr('region', 'equalto', X) silently matches nothing — `region` lives in
+  # hostvars[hostname], not on the string. That produced an empty list which then
+  # failed much later, at list.index(), pointing nowhere near the cause.
+  #
+  # `groups['k8s_cluster'] | sort` so the accumulated order is sorted and the octet
+  # each node derives is stable across runs. If it were inventory-order-dependent, a
+  # re-run could renumber peers and take the VLAN down for nodes already working.
+  #
+  # Built from groups['k8s_cluster'] rather than the `vswitch` role's vswitch_hosts:
+  # role defaults are not shared between roles, and region is all that matters here.
+  ansible.builtin.set_fact:
+    vswitch_region_nodes: "{{ vswitch_region_nodes + [item] }}"
+  loop: "{{ groups['k8s_cluster'] | sort }}"
+  when:
+    - item in hostvars
+    - (hostvars[item]['region'] | default(hostvars[item]['location'] | default(''))) == vswitch_node_region
+
+- name: Derive this node's host octet and CIDR
+  ansible.builtin.set_fact:
+    vswitch_node_octet: >-
+      {{ vswitch_host_octet_base + (vswitch_region_nodes.index(inventory_hostname)) }}
+    vswitch_node_cidr: >-
+      {{ vswitch_subnets[vswitch_node_region].split('/')[0].split('.')[0:3] | join('.') }}.{{
+         vswitch_host_octet_base + (vswitch_region_nodes.index(inventory_hostname)) }}/{{
+         vswitch_subnets[vswitch_node_region].split('/')[1] }}
+
+- name: Show the derived addressing
+  ansible.builtin.debug:
+    msg:
+      - "region:  {{ vswitch_node_region }} ({{ vswitch_region_nodes | length }} nodes)"
+      - "subnet:  {{ vswitch_subnets[vswitch_node_region] }}"
+      - "address: {{ vswitch_node_cidr }}"
+
+# ── Dead-man's switch: schedule the revert BEFORE any change ─────────────────
+- name: Record whether the vlan netplan file already exists
+  ansible.builtin.stat:
+    path: "{{ vswitch_vlan_netplan_file }}"
+  register: vswitch_prev_netplan
+
+- name: Back up the existing vlan netplan file, if any
+  ansible.builtin.copy:
+    src: "{{ vswitch_vlan_netplan_file }}"
+    dest: "{{ vswitch_vlan_netplan_file }}.prev"
+    remote_src: true
+    mode: "0600"
+  when: vswitch_prev_netplan.stat.exists
+
+- name: Schedule an unattended revert
+  # Runs on the NODE via `at`, so it fires even if this playbook's SSH session dies
+  # with the network. Restores the exact previous state, then re-applies netplan.
+  #
+  # This is what makes the step safe to take at all: a wrong parent interface or VLAN
+  # id takes the node off the network, and without this the recovery is a physical
+  # rescue — and per the repo's rules a node that gets stuck is reprovisioned from
+  # scratch. The operator should never see it fire.
+  #
+  # `shell` rather than `command`: the script is piped to `at` on stdin, which
+  # `command` cannot do. The lint exception for that is declared inline below.
+  ansible.builtin.shell:
+    cmd: "at now + {{ vswitch_vlan_deadman_minutes }} minutes"
+    stdin: |
+      #!/bin/sh
+      # Kilo vSwitch VLAN dead-man's switch. Fires only if the playbook failed to
+      # cancel it, which means verification did not complete — i.e. this node may be
+      # off the network right now.
+      set -x
+      {% if vswitch_prev_netplan.stat.exists %}
+      cp -f {{ vswitch_vlan_netplan_file }}.prev {{ vswitch_vlan_netplan_file }}
+      {% else %}
+      rm -f {{ vswitch_vlan_netplan_file }}
+      {% endif %}
+      netplan apply
+  changed_when: false
+  # noqa: command-instead-of-shell — stdin to `at` requires a shell.
+
+- name: Record the scheduled job id so it can be cancelled precisely
+  # Cancelling by id rather than `atrm -t "$(atq ...)"`: the latter removes whatever
+  # happens to be listed first, which on a node with other scheduled jobs would be
+  # the wrong one.
+  ansible.builtin.shell:
+    cmd: "set -o pipefail; atq -q a -o | sort -k1,1nr | head -1 | awk '{print $1}'"
+  register: vswitch_deadman_job
+  changed_when: false
+
+# ── Apply the VLAN configuration ─────────────────────────────────────────────
+- name: Write the VLAN netplan fragment
+  ansible.builtin.copy:
+    dest: "{{ vswitch_vlan_netplan_file }}"
+    mode: "0600"
+    content: |
+      # Managed by Ansible (role: vswitch-vlan). Do not edit by hand.
+      #
+      # VLAN {{ vswitch_vlan_id }} on {{ vswitch_vlan_parent }}, carrying this node's
+      # PRIVATE address on the Hetzner vSwitch. A separate file from Hetzner's
+      # 01-netcfg.yaml on purpose: netplan merges them, so this adds the VLAN without
+      # touching the public address, routes or nameservers, and revert is a file
+      # deletion rather than surgery on the node's primary config.
+      #
+      # MTU {{ vswitch_vlan_mtu }} because a VLAN tag costs 4 bytes under the parent's 1500.
+      network:
+        version: 2
+        renderer: networkd
+        vlans:
+          {{ vswitch_vlan_parent }}.{{ vswitch_vlan_id }}:
+            id: {{ vswitch_vlan_id }}
+            link: {{ vswitch_vlan_parent }}
+            mtu: {{ vswitch_vlan_mtu }}
+            addresses:
+              - {{ vswitch_node_cidr }}
+  register: vswitch_netplan_write
+
+- name: Validate the netplan fragment before applying it
+  # `netplan generate` parses and writes backend config WITHOUT touching the running
+  # network, so a syntax error is caught while the node is still reachable rather
+  # than during `netplan apply`.
+  ansible.builtin.command: netplan generate
+  changed_when: false
+
+- name: Apply the netplan configuration
+  ansible.builtin.command: netplan apply
+  when: vswitch_netplan_write.changed
+  changed_when: true
+  # noqa: no-handler — this is deliberately a conditional task, not a handler.
+  # A handler would fire at the end of the play, AFTER the assertions below. The
+  # whole point of this sequence is apply-then-verify-then-cancel-the-dead-man's-
+  # switch; deferring the apply to a handler would verify nothing and leave the
+  # safety mechanism cancelled before the change landed.
+
+- name: Read back the applied address and MTU
+  # Skipped in check mode: these read LIVE state that check mode deliberately did not
+  # create, so asserting on it would fail on a dry run for no useful reason and train
+  # the operator to ignore the result.
+  ansible.builtin.command: "ip -o addr show dev {{ vswitch_vlan_parent }}.{{ vswitch_vlan_id }}"
+  register: vswitch_vlan_addr
+  changed_when: false
+  retries: 5
+  delay: 2
+  until: vswitch_vlan_addr.rc == 0
+  when: not ansible_check_mode
+
+- name: Assert the address actually took
+  ansible.builtin.assert:
+    that:
+      - vswitch_node_cidr.split('/')[0] in vswitch_vlan_addr.stdout
+    fail_msg: >-
+      VLAN interface is up but does not carry {{ vswitch_node_cidr }} — got
+      '{{ vswitch_vlan_addr.stdout }}'. The vSwitch VLAN and this device must match
+      for traffic to flow.
+    success_msg: "VLAN interface up with {{ vswitch_node_cidr }}"
+  when: not ansible_check_mode
+
+- name: Apply the MTU manually if netplan did not
+  # A documented netplan/VLAN defect, which Hetzner's own docs also point at. Without
+  # it the device works but fragments on large packets, surfacing as odd TLS/etcd
+  # failures rather than a clear error.
+  ansible.builtin.command: "ip link set mtu {{ vswitch_vlan_mtu }} dev {{ vswitch_vlan_parent }}.{{ vswitch_vlan_id }}"
+  when: >-
+    (not ansible_check_mode) and
+    ((vswitch_vlan_addr.stdout | regex_search('mtu ([0-9]+)', '\\1') | first | default('')) != (vswitch_vlan_mtu | string))
+  changed_when: true
+
+# ── Peer-reachability note, then cancel the switch ──────────────────────────
+- name: Report the VLAN interface state
+  # Deliberately no peer ping here on the first node: a same-region peer has no VLAN
+  # address until its OWN run, so the ping would fail for a reason that says nothing
+  # about this node. The L2 path is proven on the SECOND node of a region, where the
+  # ping reaches the first. Making it a gate now would train the operator to ignore a
+  # failing check.
+  ansible.builtin.debug:
+    msg: >-
+      VLAN {{ vswitch_vlan_id }} configured with {{ vswitch_node_cidr }} on
+      {{ vswitch_vlan_parent }}. Peer reachability becomes a meaningful check once a
+      second node in {{ vswitch_node_region }} is configured.
+
+# ── Cancel the dead-man's switch ─────────────────────────────────────────────
+- name: Cancel the unattended revert, now that the node is verified
+  # Only reached if every assertion above passed. If any failed, the play stops and
+  # the scheduled job fires, restoring the node unattended.
+  #
+  # Not run in check mode: nothing was applied, so there is nothing to verify, and the
+  # at-job scheduled earlier would be cancelled for a change that never happened.
+  ansible.builtin.command: "atrm {{ vswitch_deadman_job.stdout | trim }}"
+  when:
+    - not ansible_check_mode
+    - vswitch_deadman_job.stdout | trim | length > 0
+  changed_when: false
+  failed_when: false

@@ -71,7 +71,7 @@
     hetzner_user: "{{ hetzner_robot_api_user }}"
     hetzner_password: "{{ hetzner_robot_api_password }}"
     name: "{{ vswitch_name }}"
-    vlan: "{{ vswitch_vlan }}"
+    vlan: "{{ vswitch_vlan_id }}"
     state: present
     servers: "{{ vswitch_host_servers.values() | map(attribute='address') | list }}"
     wait: true

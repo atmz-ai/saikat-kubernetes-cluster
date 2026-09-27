@@ -53,11 +53,14 @@
 # role that manages vSwitch membership.
 
 # ── vSwitch identity ─────────────────────────────────────────────────────────
-# Name and VLAN together identify the vSwitch: if either differs from what exists,
-# the Robot API creates a NEW one rather than renaming. VLAN must be 4000-4091
-# (Hetzner's range); a server may belong to at most 5.
-vswitch_name: "k8s-mesh"
-vswitch_vlan: 4000
+# `vswitch_name`, `vswitch_vlan_id` and `vswitch_subnets` live in
+# ansible/inventory/group_vars/all/vars.yml — shared with the `vswitch-vlan` role,
+# which configures the per-node interface. Role defaults are NOT shared between
+# roles, so duplicating them would let the two drift into a VLAN-id or subnet
+# mismatch: an interface that comes up cleanly and carries nothing.
+#
+# The `_id` suffix is used there (`vswitch_vlan_id`, not `vswitch_vlan`) because the
+# value is a VLAN number, not the vSwitch object.
 
 # Which inventory hosts to attach. Defaults to every HETZNER node in the cluster:
 # the mesh is cluster-wide, and a node left off keeps its public-only address — the
@@ -86,18 +89,3 @@ vswitch_regions: []
 # "Attached the wrong set of servers" is not worth recovering from quietly — it IS
 # the partial-membership case above.
 vswitch_fail_on_missing_server_id: true
-
-# ── Private addressing ───────────────────────────────────────────────────────
-# Per-region subnets on the one VLAN (see the header for why they are split).
-# Keys are `topology.kubernetes.io/region` values, so adding a region is one entry.
-vswitch_subnets:
-  falkenstein: "172.20.10.0/24"
-  helsinki: "172.20.20.0/24"
-
-# Host octet within the region subnet, from the node's position in the sorted list
-# of nodes in that region: deterministic, so a re-run assigns the same address and
-# reports no change.
-#
-# Starts at 10 (not 1) to leave the low addresses free for a future gateway or
-# router on the VLAN, which is where one conventionally goes.
-vswitch_host_octet_base: 10
