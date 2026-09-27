@@ -7,18 +7,31 @@
 # DNS-01 challenge flow (two solvers):
 #
 #   1. RFC2136 (self-hosted DNS): cert-manager sends TSIG-signed dynamic updates
-#      to PowerDNS to create _acme-challenge TXT records. Used for saikat.dev
-#      and yral.com (self-hosted zones). Supports wildcards.
+#      to PowerDNS to create _acme-challenge TXT records. Only usable for zones
+#      PowerDNS actually hosts (see `pdns_zones` in
+#      ansible/inventory/group_vars/all/vars.yml) — currently saikat.dev and
+#      oleole.ai. Supports wildcards.
 #      TSIG key: rfc2136-tsig-secret in cert-manager namespace.
 #
-#   2. Cloudflare (legacy): cert-manager calls the Cloudflare API to create
-#      _acme-challenge TXT records. Used for yral.com until the NS switch to
-#      self-hosted DNS is complete (Phase 2). Will be removed after migration.
+#   2. Cloudflare: cert-manager calls the Cloudflare API to create
+#      _acme-challenge TXT records. Used for yral.com until its NS moves to
+#      self-hosted DNS (Phase 2). Will be removed after migration.
 #      Cloudflare API token: cloudflare-api-token in cert-manager namespace.
 #
-# cert-manager tries solvers in order — RFC2136 first, then Cloudflare fallback.
-# The RFC2136 solver only matches domains PowerDNS is authoritative for (via
-# the nameserver field). Cloudflare solver handles everything else.
+# EVERY solver needs an explicit `selector.dnsZones`, and cert-manager uses the
+# FIRST solver whose selector matches the requested domain. A solver with no
+# selector matches EVERY domain — it is not limited by `nameserver` or by which
+# provider is configured. An earlier version of this file had no selectors at all
+# on the (incorrect) belief that RFC2136 self-limited to PowerDNS's zones, so
+# every yral.com challenge was sent to PowerDNS, which is not authoritative for
+# yral.com and refused it:
+#
+#   DNS update failed: dns: bad authentication
+#
+# Because the RFC2136 list came first, the Cloudflare solver was never reached and
+# yral.com renewals failed silently for ~32 days, expiring kube-system/
+# wildcard-yral-com-tls and kafka/kafka-external-tls. Keep the selectors disjoint
+# so each domain has exactly one home.
 #
 # Switching from staging to prod:
 #   1. Change cert-manager.io/cluster-issuer annotation on Gateway to letsencrypt-prod
@@ -36,8 +49,12 @@ spec:
     privateKeySecretRef:
       name: letsencrypt-staging-account-key
     solvers:
-      # RFC2136 — self-hosted PowerDNS (saikat.dev, yral.com)
-      - dns01:
+      # RFC2136 — only the zones PowerDNS hosts. Keep in step with `pdns_zones`.
+      - selector:
+          dnsZones:
+            - saikat.dev
+            - oleole.ai
+        dns01:
           rfc2136:
             nameserver: powerdns-dns.external-dns.svc.cluster.local:53
             tsigKeyName: saikat-dev-key
@@ -45,8 +62,11 @@ spec:
             tsigSecretSecretRef:
               name: rfc2136-tsig-secret
               key: tsig-key
-      # Cloudflare — legacy fallback (yral.com until NS switch complete)
-      - dns01:
+      # Cloudflare — everything PowerDNS does not host (yral.com until NS switch)
+      - selector:
+          dnsZones:
+            - yral.com
+        dns01:
           cloudflare:
             apiTokenSecretRef:
               name: cloudflare-api-token
@@ -63,8 +83,12 @@ spec:
     privateKeySecretRef:
       name: letsencrypt-prod-account-key
     solvers:
-      # RFC2136 — self-hosted PowerDNS (saikat.dev, yral.com)
-      - dns01:
+      # RFC2136 — only the zones PowerDNS hosts. Keep in step with `pdns_zones`.
+      - selector:
+          dnsZones:
+            - saikat.dev
+            - oleole.ai
+        dns01:
           rfc2136:
             nameserver: powerdns-dns.external-dns.svc.cluster.local:53
             tsigKeyName: saikat-dev-key
@@ -72,8 +96,11 @@ spec:
             tsigSecretSecretRef:
               name: rfc2136-tsig-secret
               key: tsig-key
-      # Cloudflare — legacy fallback (yral.com until NS switch complete)
-      - dns01:
+      # Cloudflare — everything PowerDNS does not host (yral.com until NS switch)
+      - selector:
+          dnsZones:
+            - yral.com
+        dns01:
           cloudflare:
             apiTokenSecretRef:
               name: cloudflare-api-token
