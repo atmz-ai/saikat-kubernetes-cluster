@@ -62,6 +62,17 @@
     # must already be running with --node-ip when the join registers the node, or
     # the node joins advertising an address its peers cannot reach.
     - role: node_provider_address
+    # BEFORE the join, and before node-labels. Two reasons:
+    #   * node-labels writes the Kilo annotation from the address this role puts on the
+    #     interface, so the interface has to exist first for the two to agree.
+    #   * the mesh address must be up by the time the node registers, so that etcd comes
+    #     up on an address its peers can reach — otherwise a rejoining control plane
+    #     advertises the public address and the mesh routes to a different one.
+    #
+    # It has its own dead-man's switch (see the role), which is what makes this safe to
+    # run unattended inside a join: a failure here returns the node's networking to its
+    # pre-role state rather than stranding it.
+    - role: vswitch-vlan
     - role: control-plane-join
     - role: node-labels
     - role: cloudflare-dns

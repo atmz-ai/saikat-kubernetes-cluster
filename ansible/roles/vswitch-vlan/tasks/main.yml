@@ -11,7 +11,7 @@
 # addition and the subnets are /24s, so the address is assembled from a string. If a
 # non-/24 subnet is ever needed, this is the place to revisit.
 
-# ── Derive this node's private address ───────────────────────────────────────
+# ── Resolve this node's private address ──────────────────────────────────────
 - name: Determine this node's region from inventory
   ansible.builtin.set_fact:
     vswitch_node_region: >-
@@ -28,6 +28,35 @@
       not in vswitch_subnets ({{ vswitch_subnets.keys() | list }}). Refusing to guess
       a subnet — the wrong one breaks peer reachability silently.
 
+# The address comes from `vswitch_node_addresses` (group_vars/all/vars.yml), which is
+# the source of truth and is also what the node-labels role puts in the Kilo
+# annotation. Both roles read the same map, so the address the mesh routes to and the
+# address configured on the interface cannot drift apart — which is exactly how the
+# first attempt at this work ended up with 40 VLAN interfaces that nothing used.
+#
+# The map is keyed by region then hostname. Missing means an unlisted node, and the
+# assert below names it rather than silently deriving a different address here.
+- name: Fail if this node has no address in vswitch_node_addresses
+  ansible.builtin.assert:
+    that:
+      - vswitch_node_addresses[vswitch_node_region] is defined
+      - inventory_hostname in vswitch_node_addresses[vswitch_node_region]
+    fail_msg: >-
+      Node {{ inventory_hostname }} (region {{ vswitch_node_region }}) has no entry in
+      vswitch_node_addresses ({{ vswitch_node_addresses.keys() | list }}). Add it
+      there — deriving one instead would hand out an address the mesh does not know.
+
+# ── Verify the derived position still agrees with the explicit map ───────────
+# The map is authoritative and this role does NOT use the derivation. It is computed
+# only to be CHECKED, because the derivation is what the live fleet was originally
+# addressed with, and a silent disagreement between the two would mean one of them is
+# stale. A position-derived octet is not safe to keep using: removing a node RENUMBERS
+# every node sorted after it, so an address computed this way can move under a running
+# node — and two nodes sharing an address fails as an intermittent outage, not an error.
+#
+# Kept as a cross-check specifically while the fleet transitions: if this ever fires,
+# the map is wrong for this node and the VLAN would come up carrying an address the
+# mesh does not route to.
 - name: Start the region node list empty
   # Reset explicitly: a set_fact persists for the rest of the play, so without this a
   # second run of the role would append to the previous list and hand out doubled
@@ -42,9 +71,8 @@
   # hostvars[hostname], not on the string. That produced an empty list which then
   # failed much later, at list.index(), pointing nowhere near the cause.
   #
-  # `groups['k8s_cluster'] | sort` so the accumulated order is sorted and the octet
-  # each node derives is stable across runs. If it were inventory-order-dependent, a
-  # re-run could renumber peers and take the VLAN down for nodes already working.
+  # `groups['k8s_cluster'] | sort` so the accumulated order is sorted, making the
+  # cross-check below reproducible rather than inventory-order-dependent.
   #
   # Built from groups['k8s_cluster'] rather than the `vswitch` role's vswitch_hosts:
   # role defaults are not shared between roles, and region is all that matters here.
@@ -55,16 +83,34 @@
     - item in hostvars
     - (hostvars[item]['region'] | default(hostvars[item]['location'] | default(''))) == vswitch_node_region
 
-- name: Derive this node's host octet and CIDR
-  ansible.builtin.set_fact:
-    vswitch_node_octet: >-
-      {{ vswitch_host_octet_base + (vswitch_region_nodes.index(inventory_hostname)) }}
-    vswitch_node_cidr: >-
+- name: Fail if the position-derived address disagrees with the explicit map
+  ansible.builtin.assert:
+    that:
+      - >-
+        vswitch_node_addresses[vswitch_node_region][inventory_hostname]
+        == (vswitch_subnets[vswitch_node_region].split('/')[0].split('.')[0:3] | join('.'))
+           ~ '.' ~ (vswitch_host_octet_base + vswitch_region_nodes.index(inventory_hostname))
+    fail_msg: >-
+      Node {{ inventory_hostname }} is listed as
+      {{ vswitch_node_addresses[vswitch_node_region][inventory_hostname] }} in
+      vswitch_node_addresses, but its position in the sorted
+      {{ vswitch_node_region }} node list (index
+      {{ vswitch_region_nodes.index(inventory_hostname) }} of
+      {{ vswitch_region_nodes | length }}) derives
       {{ vswitch_subnets[vswitch_node_region].split('/')[0].split('.')[0:3] | join('.') }}.{{
-         vswitch_host_octet_base + (vswitch_region_nodes.index(inventory_hostname)) }}/{{
+         vswitch_host_octet_base + vswitch_region_nodes.index(inventory_hostname) }}.
+      The map is authoritative and is applied; this means the fleet list changed and
+      the two have diverged. Update the map deliberately rather than relying on the
+      derivation, which renumbers nodes when the list changes.
+
+- name: Set this node's address from the map
+  ansible.builtin.set_fact:
+    vswitch_node_address: "{{ vswitch_node_addresses[vswitch_node_region][inventory_hostname] }}"
+    vswitch_node_cidr: >-
+      {{ vswitch_node_addresses[vswitch_node_region][inventory_hostname] }}/{{
          vswitch_subnets[vswitch_node_region].split('/')[1] }}
 
-- name: Show the derived addressing
+- name: Show the resolved addressing
   ansible.builtin.debug:
     msg:
       - "region:  {{ vswitch_node_region }} ({{ vswitch_region_nodes | length }} nodes)"
@@ -93,10 +139,15 @@
   # happened while rolling these nodes out and stranded two jobs which would have
   # deleted a verified VLAN interface. A self-identifying job cannot be confused with
   # someone else's, no matter how many runs overlap.
+  #
+  # Deliberately NOT derived from a gathered fact (`ansible_facts['date_time']`): the
+  # join playbooks run `gather_facts: false`, so those facts do not exist there and the
+  # marker would depend on a fallback that only works in this role's standalone
+  # playbook. `now()` is a Jinja global and always available, with microseconds so two
+  # concurrent runs cannot generate the same marker.
   ansible.builtin.set_fact:
     vswitch_deadman_marker: >-
-      kilo-vswitch-deadman-{{ inventory_hostname }}-{{
-      ansible_facts['date_time']['iso8601_basic_short'] | default(now(True) | to_uuid) }}
+      kilo-vswitch-deadman-{{ inventory_hostname }}-{{ now(True).strftime('%Y%m%d%H%M%S%f') }}
 
 - name: Schedule an unattended revert
   # Runs on the NODE via `at`, so it fires even if this playbook's SSH session dies

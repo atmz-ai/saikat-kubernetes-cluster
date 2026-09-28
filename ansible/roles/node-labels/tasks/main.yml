@@ -85,31 +85,92 @@
 # the Ethernet devices are only configured with the private network address; in this
 # case the allocated public IP should be specified").
 #
-# Both point at `ansible_host` — the address this repo already treats as the
-# node's reachable identity (SSH, DNS records, the API endpoint list). Using it
-# here rather than a fact set by another role matters for two reasons:
-#   * `node_provider_address` runs ONLY in add-control-plane.yml, so its fact is
-#     undefined in add-worker.yml and init-control-plane.yml. Depending on it would
-#     silently skip every worker (or fail), which is the worst kind of bug here —
-#     a partial rollout that looks successful.
-#   * for every provider so far `ansible_host` IS the peer-reachable address.
+# The peer address is resolved in two steps, and the ORDER matters:
+#   1. `kilo_peer_address`, set per host in the inventory — the escape hatch, and the
+#      only correct source for a cloud node, whose private address is not derivable
+#      from anything else in the inventory.
+#   2. `vswitch_node_addresses` (group_vars/all/vars.yml), keyed by region + hostname —
+#      the VLAN address the vswitch-vlan role configured. This is what makes the fix
+#      reach the node: without it the peer address falls through to the public IP,
+#      equals the endpoint, and the assert below stops the run.
+#   3. `ansible_host`, only as a last resort so a failure names the node rather than
+#      raising `undefined` far from the cause.
 #
-# WHEN CLOUD NODES JOIN, THE TWO ANNOTATIONS DIVERGE and this must be revisited:
-# a Hetzner node has one address (public, on the interface) so both are the same,
-# but an Azure node has a private address on eth0 AND a provider-NAT public one.
-# There, force-internal-ip must become the PRIVATE address (what etcd/kubelet bind
-# to and what the mesh routes to) while force-endpoint stays PUBLIC (where peers
-# dial). That is the same inversion node_provider_address needs, and `ansible_host`
-# will not be right for force-internal-ip on those nodes.
+# Read from group_vars rather than a fact set by the vswitch-vlan role: that role runs
+# in its own play, so its facts never reach this one, and the earlier attempt to use
+# them left every annotation pointing at the public IP. A cluster-wide variable cannot
+# be missed that way.
 #
-# Applied BEFORE Kilo ever runs, because Kilo reads these at topology-build time.
-# With Kilo suspended these annotations are INERT — nothing consumes them — which is
-# what makes this step safe to apply to all 40 nodes and verify before enabling.
+# The endpoint needs no such lookup: it is the address peers DIAL, which for every
+# provider is the public one already in `ansible_host`.
+#
+# Applied BEFORE Kilo ever runs, because Kilo reads these at topology-build time. With
+# Kilo suspended these annotations are INERT — nothing consumes them — which is what
+# makes this step safe to apply to every node and verify before enabling.
+#
+# `force-internal-ip` OVERRIDES THE AGENT-WRITTEN VALUE (pkg/k8s/backend.go reads the
+# annotation BEFORE falling back to the agent-written internal-ip), so this annotation
+# is what decides the node's mesh identity.
+#
+# TODO(advertise-private-address): etcd and kubelet still advertise the PUBLIC address,
+# so the private address this annotation points at is not yet what the control plane
+# binds. Nothing needs it to be while Kilo is the only thing routing on it, but it must
+# be done before the mesh is relied on for control-plane traffic — kubelet's --node-ip
+# and the etcd peer/advertise addresses have to move to the private address, which is
+# the same change `node_provider_address` makes for cloud nodes.
+- name: Resolve the addresses the Kilo mesh uses for this node
+  # The region lookup is inlined into the peer-address expression rather than read from
+  # `kilo_node_region` below: facts defined in ONE set_fact are not visible to their
+  # siblings during evaluation, so referencing it here fails with
+  # "'kilo_node_region' is undefined" — a confusing error, since the key is right there.
+  ansible.builtin.set_fact:
+    kilo_node_endpoint_address: >-
+      {{ kilo_endpoint_address | default(hostvars[inventory_hostname]['ansible_host']) }}
+    kilo_node_peer_address: >-
+      {{ kilo_peer_address
+         | default(vswitch_node_addresses.get(
+             hostvars[inventory_hostname]['region']
+               | default(hostvars[inventory_hostname]['location'] | default('')),
+             {}).get(inventory_hostname, hostvars[inventory_hostname]['ansible_host']), true) }}
+    kilo_node_region: >-
+      {{ hostvars[inventory_hostname]['region']
+         | default(hostvars[inventory_hostname]['location'] | default('')) }}
+
+- name: Fail if the mesh identity and the endpoint are the same address
+  # This is the second outage, turned into a precondition. Kilo skips any node whose
+  # internal address equals its endpoint:
+  #
+  #   // Topology.Routes, pkg/mesh/topology.go
+  #   if segment.privateIPs[i].Equal(t.updateEndpoint(...).IP()) {
+  #       continue   // "we cannot encapsulate traffic to an IP through the IP"
+  #   }
+  #
+  # so the node gets no route at all and goes NotReady — exactly the five-node failure.
+  # The cluster-wide outage was the same guard reached differently: with no internal
+  # address the node was given its own single-node location, making every packet
+  # cross-location while --local=false skipped the return paths.
+  #
+  # Neither is detectable from the annotation being present, so the annotations cannot
+  # be validated by their own presence. Catching it here turns a silent datapath failure
+  # into a named error at the node that would cause it.
+  ansible.builtin.assert:
+    that:
+      - kilo_node_peer_address | length > 0
+      - kilo_node_endpoint_address | length > 0
+      - kilo_node_peer_address != kilo_node_endpoint_address
+    fail_msg: >-
+      Node {{ inventory_hostname }} would get peer address
+      '{{ kilo_node_peer_address }}' and endpoint '{{ kilo_node_endpoint_address }}'.
+      Kilo requires them to DIFFER — an internal address equal to the endpoint makes
+      Kilo skip the node entirely ("we cannot encapsulate traffic to an IP through the
+      IP"), leaving it NotReady. Check `kilo_peer_address` / `kilo_endpoint_address`
+      in the inventory and `vswitch_node_addresses` in group_vars/all/vars.yml.
+
 - name: Apply Kilo mesh annotations to node
   ansible.builtin.command: >
     kubectl annotate node {{ ansible_facts['hostname'] }}
-    kilo.squat.ai/force-internal-ip={{ hostvars[inventory_hostname]['ansible_host'] }}/32
-    kilo.squat.ai/force-endpoint={{ hostvars[inventory_hostname]['ansible_host'] }}:51820
+    kilo.squat.ai/force-internal-ip={{ kilo_node_peer_address }}/32
+    kilo.squat.ai/force-endpoint={{ kilo_node_endpoint_address }}:51820
     --overwrite
   environment:
     KUBECONFIG: /etc/kubernetes/admin.conf
