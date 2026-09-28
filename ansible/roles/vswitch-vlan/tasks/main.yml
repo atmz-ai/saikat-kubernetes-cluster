@@ -85,6 +85,16 @@
     mode: "0600"
   when: vswitch_prev_netplan.stat.exists
 
+- name: Capture the set of at-jobs before scheduling, to identify ours afterwards
+  # `at` does not return the job id it created, and `atq -o` requires a time-format
+  # argument on this version (`-o` alone exits 1), so the id has to be inferred.
+  # Diffing before/after is the reliable way: taking `atq | head -1` would cancel
+  # whatever happens to be first, which on a node with other scheduled jobs is not
+  # necessarily ours.
+  ansible.builtin.command: atq
+  register: vswitch_atq_before
+  changed_when: false
+
 - name: Schedule an unattended revert
   # Runs on the NODE via `at`, so it fires even if this playbook's SSH session dies
   # with the network. Restores the exact previous state, then re-applies netplan.
@@ -95,7 +105,7 @@
   # scratch. The operator should never see it fire.
   #
   # `shell` rather than `command`: the script is piped to `at` on stdin, which
-  # `command` cannot do. The lint exception for that is declared inline below.
+  # `command` cannot do.
   ansible.builtin.shell:
     cmd: "at now + {{ vswitch_vlan_deadman_minutes }} minutes"
     stdin: |
@@ -113,14 +123,17 @@
   changed_when: false
   # noqa: command-instead-of-shell — stdin to `at` requires a shell.
 
-- name: Record the scheduled job id so it can be cancelled precisely
-  # Cancelling by id rather than `atrm -t "$(atq ...)"`: the latter removes whatever
-  # happens to be listed first, which on a node with other scheduled jobs would be
-  # the wrong one.
-  ansible.builtin.shell:
-    cmd: "set -o pipefail; atq -q a -o | sort -k1,1nr | head -1 | awk '{print $1}'"
-  register: vswitch_deadman_job
+- name: Identify the job we just scheduled
+  ansible.builtin.command: atq
+  register: vswitch_atq_after
   changed_when: false
+
+- name: Record our job id
+  ansible.builtin.set_fact:
+    vswitch_deadman_job_id: >-
+      {{ (vswitch_atq_after.stdout_lines | map('split') | map('first') | list)
+         | difference(vswitch_atq_before.stdout_lines | map('split') | map('first') | list)
+         | first | default('') }}
 
 # ── Apply the VLAN configuration ─────────────────────────────────────────────
 - name: Write the VLAN netplan fragment
@@ -166,8 +179,8 @@
   # switch; deferring the apply to a handler would verify nothing and leave the
   # safety mechanism cancelled before the change landed.
 
-- name: Read back the applied address and MTU
-  # Skipped in check mode: these read LIVE state that check mode deliberately did not
+- name: Read back the applied address
+  # Skipped in check mode: this reads LIVE state that check mode deliberately did not
   # create, so asserting on it would fail on a dry run for no useful reason and train
   # the operator to ignore the result.
   ansible.builtin.command: "ip -o addr show dev {{ vswitch_vlan_parent }}.{{ vswitch_vlan_id }}"
@@ -189,39 +202,101 @@
     success_msg: "VLAN interface up with {{ vswitch_node_cidr }}"
   when: not ansible_check_mode
 
+- name: Read the applied MTU
+  # From sysfs, NOT from `ip addr`. The first version of this parsed `ip -o addr
+  # show` for an "mtu N" field — but that output does not contain the MTU at all, so
+  # the regex never matched. `| first` on an empty match list then raised
+  # "'NoneType' object is not iterable", failing the play AFTER the VLAN had already
+  # been applied and verified — which left the dead-man's switch armed against a
+  # change that had actually succeeded.
+  #
+  # /sys/class/net/<iface>/mtu is the authoritative value and cannot be absent when
+  # the interface exists.
+  ansible.builtin.slurp:
+    src: "/sys/class/net/{{ vswitch_vlan_parent }}.{{ vswitch_vlan_id }}/mtu"
+  register: vswitch_vlan_mtu_now
+  when: not ansible_check_mode
+
 - name: Apply the MTU manually if netplan did not
-  # A documented netplan/VLAN defect, which Hetzner's own docs also point at. Without
-  # it the device works but fragments on large packets, surfacing as odd TLS/etcd
-  # failures rather than a clear error.
+  # A documented netplan/VLAN defect, which Hetzner's own docs also point at (they
+  # suggest exactly this `ip link set mtu` plus an `@reboot` entry). Without it the
+  # device works but fragments on large packets, surfacing as odd TLS/etcd failures
+  # rather than a clear error.
   ansible.builtin.command: "ip link set mtu {{ vswitch_vlan_mtu }} dev {{ vswitch_vlan_parent }}.{{ vswitch_vlan_id }}"
-  when: >-
-    (not ansible_check_mode) and
-    ((vswitch_vlan_addr.stdout | regex_search('mtu ([0-9]+)', '\\1') | first | default('')) != (vswitch_vlan_mtu | string))
+  when:
+    - not ansible_check_mode
+    - (vswitch_vlan_mtu_now.content | b64decode | trim) != (vswitch_vlan_mtu | string)
   changed_when: true
 
-# ── Peer-reachability note, then cancel the switch ──────────────────────────
-- name: Report the VLAN interface state
-  # Deliberately no peer ping here on the first node: a same-region peer has no VLAN
-  # address until its OWN run, so the ping would fail for a reason that says nothing
-  # about this node. The L2 path is proven on the SECOND node of a region, where the
-  # ping reaches the first. Making it a gate now would train the operator to ignore a
-  # failing check.
+- name: Re-read the MTU after the correction
+  ansible.builtin.slurp:
+    src: "/sys/class/net/{{ vswitch_vlan_parent }}.{{ vswitch_vlan_id }}/mtu"
+  register: vswitch_vlan_mtu_final
+  when: not ansible_check_mode
+
+- name: Assert the MTU is correct
+  # Asserted rather than left as a silent fix-up: an MTU mismatch fragments only on
+  # large packets, so it surfaces much later as an unrelated-looking TLS/etcd failure.
+  # Cheap to check now, expensive to diagnose later.
+  ansible.builtin.assert:
+    that:
+      - (vswitch_vlan_mtu_final.content | b64decode | trim) == (vswitch_vlan_mtu | string)
+    fail_msg: >-
+      MTU on {{ vswitch_vlan_parent }}.{{ vswitch_vlan_id }} is
+      {{ vswitch_vlan_mtu_final.content | b64decode | trim }}, expected
+      {{ vswitch_vlan_mtu }}. Large packets will fragment.
+    success_msg: "MTU {{ vswitch_vlan_mtu }} confirmed on {{ vswitch_vlan_parent }}.{{ vswitch_vlan_id }}"
+  when: not ansible_check_mode
+
+# ── Cancel the dead-man's switch ─────────────────────────────────────────────
+# Placed HERE, immediately after the change is verified, and deliberately NOT at the
+# end of the role.
+#
+# The first version put it last. That is the wrong ordering: an earlier run applied
+# the VLAN successfully, then failed on an unrelated task several steps later — so the
+# play never reached the cancel, the switch stayed armed, and it was minutes from
+# reverting a change that had already been verified good. A safety net that undoes
+# correct work is worse than no safety net.
+#
+# The rule: once the change itself is proven, the revert is cancelled. Anything that
+# fails after this point is a reporting or advisory problem and must not trigger a
+# rollback of a verified change.
+#
+# Not run in check mode: nothing was applied, so there is nothing to protect, and the
+# at-job would be cancelled for a change that never happened.
+- name: Cancel the unattended revert, now that the change is verified
+  ansible.builtin.command: "atrm {{ vswitch_deadman_job_id }}"
+  when:
+    - not ansible_check_mode
+    - vswitch_deadman_job_id | length > 0
+  changed_when: false
+  failed_when: false
+
+- name: Confirm no revert is left scheduled
+  # Reported rather than asserted: a leftover job is not a reason to fail an otherwise
+  # successful rollout, but the operator should see it. It would delete a verified
+  # VLAN interface minutes later, which is confusing if unexpected.
+  ansible.builtin.command: atq
+  register: vswitch_atq_final
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Report any jobs still scheduled
+  ansible.builtin.debug:
+    msg: >-
+      {{ 'No at-jobs scheduled — the dead-man\'s switch is disarmed.'
+         if vswitch_atq_final.stdout_lines | length == 0
+         else 'WARNING: at-jobs still scheduled: ' ~ vswitch_atq_final.stdout_lines | join('; ') }}
+  when: not ansible_check_mode
+
+# ── Advisory notes (nothing below can roll the change back) ──────────────────
+- name: Note peer-reachability expectations
+  # Deliberately no peer ping on the first node of a region: a same-region peer has no
+  # VLAN address until its OWN run, so the ping would fail for a reason that says
+  # nothing about this node. The L2 path is proven on the SECOND node, where the ping
+  # reaches the first. Making it a gate now would train the operator to ignore it.
   ansible.builtin.debug:
     msg: >-
       VLAN {{ vswitch_vlan_id }} configured with {{ vswitch_node_cidr }} on
       {{ vswitch_vlan_parent }}. Peer reachability becomes a meaningful check once a
       second node in {{ vswitch_node_region }} is configured.
-
-# ── Cancel the dead-man's switch ─────────────────────────────────────────────
-- name: Cancel the unattended revert, now that the node is verified
-  # Only reached if every assertion above passed. If any failed, the play stops and
-  # the scheduled job fires, restoring the node unattended.
-  #
-  # Not run in check mode: nothing was applied, so there is nothing to verify, and the
-  # at-job scheduled earlier would be cancelled for a change that never happened.
-  ansible.builtin.command: "atrm {{ vswitch_deadman_job.stdout | trim }}"
-  when:
-    - not ansible_check_mode
-    - vswitch_deadman_job.stdout | trim | length > 0
-  changed_when: false
-  failed_when: false
