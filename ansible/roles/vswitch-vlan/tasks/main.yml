@@ -82,15 +82,21 @@
     path: "{{ vswitch_vlan_netplan_file }}.prev"
     state: absent
 
-- name: Capture the set of at-jobs before scheduling, to identify ours afterwards
-  # `at` does not return the job id it created, and `atq -o` requires a time-format
-  # argument on this version (`-o` alone exits 1), so the id has to be inferred.
-  # Diffing before/after is the reliable way: taking `atq | head -1` would cancel
-  # whatever happens to be first, which on a node with other scheduled jobs is not
-  # necessarily ours.
-  ansible.builtin.command: atq
-  register: vswitch_atq_before
-  changed_when: false
+- name: Generate a unique marker for this run's revert job
+  # `at` does not return the job id it created, so the job has to be findable some
+  # other way. A unique token embedded in the script, then located in the spool file,
+  # is robust; diffing `atq` before/after is NOT.
+  #
+  # The difference approach breaks under concurrency: with two runs in flight, run A's
+  # "after" snapshot contains run B's job, so A can conclude B's job is its own and
+  # cancel it — leaving B's revert armed against a change B is still verifying. That
+  # happened while rolling these nodes out and stranded two jobs which would have
+  # deleted a verified VLAN interface. A self-identifying job cannot be confused with
+  # someone else's, no matter how many runs overlap.
+  ansible.builtin.set_fact:
+    vswitch_deadman_marker: >-
+      kilo-vswitch-deadman-{{ inventory_hostname }}-{{
+      ansible_facts['date_time']['iso8601_basic_short'] | default(now(True) | to_uuid) }}
 
 - name: Schedule an unattended revert
   # Runs on the NODE via `at`, so it fires even if this playbook's SSH session dies
@@ -122,20 +128,38 @@
       rm -f {{ vswitch_vlan_netplan_file }}
       rm -f {{ vswitch_vlan_netplan_file }}.prev
       netplan apply
+      # Marker: {{ vswitch_deadman_marker }}
   changed_when: false
   # noqa: command-instead-of-shell — stdin to `at` requires a shell.
 
-- name: Identify the job we just scheduled
-  ansible.builtin.command: atq
-  register: vswitch_atq_after
+- name: Identify our job by its marker
+  # `at -c <id>` prints the spooled script, so the marker written above locates OUR
+  # job regardless of what else is scheduled on the node.
+  ansible.builtin.shell:
+    cmd: >-
+      set -o pipefail;
+      for id in $(atq | awk '{print $1}'); do
+        if at -c "$id" 2>/dev/null | grep -qF '{{ vswitch_deadman_marker }}'; then echo "$id"; fi;
+      done | head -1
+  register: vswitch_deadman_lookup
   changed_when: false
+  failed_when: false
 
 - name: Record our job id
   ansible.builtin.set_fact:
-    vswitch_deadman_job_id: >-
-      {{ (vswitch_atq_after.stdout_lines | map('split') | map('first') | list)
-         | difference(vswitch_atq_before.stdout_lines | map('split') | map('first') | list)
-         | first | default('') }}
+    vswitch_deadman_job_id: "{{ vswitch_deadman_lookup.stdout | trim }}"
+
+- name: Fail if our revert job could not be located
+  # Loud, because the alternative is silent: proceeding without the id would mean the
+  # switch can never be cancelled, so it fires and removes a verified interface.
+  ansible.builtin.assert:
+    that:
+      - vswitch_deadman_job_id | length > 0
+    fail_msg: >-
+      Scheduled the revert but could not find its job. The dead-man's switch will fire
+      in {{ vswitch_vlan_deadman_minutes }} minutes. Find it with `atq` and either
+      cancel it by hand or let it run — the node returns to its pre-role networking
+      either way, so this is not unsafe, just untidy.
 
 # ── Apply the VLAN configuration ─────────────────────────────────────────────
 - name: Write the VLAN netplan fragment
