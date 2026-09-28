@@ -72,18 +72,15 @@
       - "address: {{ vswitch_node_cidr }}"
 
 # ── Dead-man's switch: schedule the revert BEFORE any change ─────────────────
-- name: Record whether the vlan netplan file already exists
-  ansible.builtin.stat:
-    path: "{{ vswitch_vlan_netplan_file }}"
-  register: vswitch_prev_netplan
-
-- name: Back up the existing vlan netplan file, if any
-  ansible.builtin.copy:
-    src: "{{ vswitch_vlan_netplan_file }}"
-    dest: "{{ vswitch_vlan_netplan_file }}.prev"
-    remote_src: true
-    mode: "0600"
-  when: vswitch_prev_netplan.stat.exists
+- name: Remove any backup left by an earlier version of this role
+  # Nothing else writes 60-vswitch.yaml, so there is no "previous configuration" worth
+  # preserving and no .prev file is created any more. An earlier version did create
+  # one, and a stale copy of our OWN config is worse than useless: the revert path
+  # treats its existence as "restore this", which would restore the very state we are
+  # trying to back out of. Removed for cleanliness on re-runs.
+  ansible.builtin.file:
+    path: "{{ vswitch_vlan_netplan_file }}.prev"
+    state: absent
 
 - name: Capture the set of at-jobs before scheduling, to identify ours afterwards
   # `at` does not return the job id it created, and `atq -o` requires a time-format
@@ -97,7 +94,14 @@
 
 - name: Schedule an unattended revert
   # Runs on the NODE via `at`, so it fires even if this playbook's SSH session dies
-  # with the network. Restores the exact previous state, then re-applies netplan.
+  # with the network.
+  #
+  # ALWAYS deletes the netplan fragment and re-applies, rather than restoring a backup.
+  # The role is the only writer of 60-vswitch.yaml, so there is no previous
+  # configuration to restore — "no VLAN interface" IS the previous state, and the
+  # public address, default route and nameservers live in Hetzner's 01-netcfg.yaml,
+  # which this role never touches. An earlier version backed up and restored its own
+  # file, which on a re-run would have restored the state it was meant to back out of.
   #
   # This is what makes the step safe to take at all: a wrong parent interface or VLAN
   # id takes the node off the network, and without this the recovery is a physical
@@ -112,13 +116,11 @@
       #!/bin/sh
       # Kilo vSwitch VLAN dead-man's switch. Fires only if the playbook failed to
       # cancel it, which means verification did not complete — i.e. this node may be
-      # off the network right now.
+      # off the network right now. Deleting the fragment returns the node to exactly
+      # its pre-role networking.
       set -x
-      {% if vswitch_prev_netplan.stat.exists %}
-      cp -f {{ vswitch_vlan_netplan_file }}.prev {{ vswitch_vlan_netplan_file }}
-      {% else %}
       rm -f {{ vswitch_vlan_netplan_file }}
-      {% endif %}
+      rm -f {{ vswitch_vlan_netplan_file }}.prev
       netplan apply
   changed_when: false
   # noqa: command-instead-of-shell — stdin to `at` requires a shell.
