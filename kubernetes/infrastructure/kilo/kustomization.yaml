@@ -48,43 +48,62 @@
 # The per-node-location fallback is meant as a graceful degradation; combined with
 # `--local=false` it is not graceful. This configuration is untested upstream.
 #
-# TO GO FORWARD — CORRECTED. An earlier version of this note said to scope the
-# DaemonSet to a SINGLE node first. That would not have been a valid test: the
-# breakage comes from the OTHER nodes each being in their own location, so with one
-# node Kilo would simply look idle and pass for the wrong reason. Three constraints
-# follow, and they must be satisfied together, not sequentially:
+# TO GO FORWARD — CORRECTED TWICE. Both earlier versions of this note were wrong, and
+# in opposite directions, so read the reasoning rather than just the conclusion.
 #
-#   (a) EVERY node the DaemonSet touches must end up in a POPULATED location —
-#       otherwise we are right back in the per-node-location failure mode. On a
-#       public-only node this means setting `kilo.squat.ai/force-internal-ip`
-#       (verified in pkg/k8s/backend.go: the annotation sets node.InternalIP, and
-#       pkg/mesh/topology.go then groups by region instead of `node:<name>`).
-#       On Hetzner the routable IP IS on the interface, unlike Azure, so pointing
-#       the annotation at the node's public IP is legitimate.
-#   (b) `--local` must match the topology. `--local=false` means "the CNI owns
-#       in-location routing", which is only true when locations are real.
-#   (c) There is NO way to make Kilo fail safe on a subset of nodes. Scaling the
-#       DaemonSet down, or pointing a nodeSelector at a node that does not exist,
-#       kills EVERY pod — so the first node we touch is already a whole-cluster
-#       change. There is no small blast radius to be had; see below.
+# WRONG (v1): "test on a SINGLE node first." Not a valid test — the breakage comes from
+# the OTHER nodes each being in their own location, so with one node Kilo looks idle and
+# passes for the wrong reason.
 #
-# The only honest way to test is therefore STAGED, with a kill switch prepared
-# before each stage and the cluster's health measured after each:
+# WRONG (v2): "On Hetzner the routable IP IS on the interface, so pointing
+# force-internal-ip at the node's public IP is legitimate." This is the second outage.
+# With internal == endpoint Kilo SKIPS the node outright (Topology.Routes,
+# pkg/mesh/topology.go):
+#     if segment.privateIPs[i].Equal(t.updateEndpoint(...).IP()) { continue }
+#     // "we cannot encapsulate traffic to an IP through the IP"
+# so the node gets no route at all and goes NotReady. Observed on five nodes with
+# exactly these annotations. The address must genuinely DIFFER from the endpoint; it is
+# not enough for it to be routable.
 #
-#   Stage 0 — PREPARE, change nothing. Confirm the kill switch works (scale to 0 /
-#       non-matching nodeSelector => 0 pods, verified) and that a baseline is
-#       green. Note the blast radius: Kilo must run on the nodes that host Cilium's
-#       own pods, so even one meshed node changes Cilium's datapath there.
-#   Stage 1 — the topology fix at small scale. Apply `force-internal-ip` to a
-#       handful of nodes in ONE region (start with 3, all worker-N in FSN1) and
-#       re-enable with a nodeSelector matching only those. With >=2 nodes in one
-#       real location, `--local=false` is finally the correct setting, and the
-#       per-node-location failure cannot occur. Measure: pod->ClusterIP, pod->pod
-#       same-node and cross-node, node->node, Kilo logs, Cilium Cluster health.
-#   Stage 2 — the same region, more nodes. Widen the nodeSelector within FSN1.
-#   Stage 3 — a second region (HEL1). This is the first genuine cross-location
-#       test and the first time Kilo does its real job.
-#   Stage 4 — remaining nodes, then Hetzner retirement.
+# THE ACTUAL FIX. Each node needs a private identity that is (a) present on an
+# interface and (b) different from its endpoint. Hetzner has exactly one address per
+# node, so one had to be created: a vSwitch (L2 network) carrying per-region subnets,
+# with a VLAN subinterface per node —
+#     falkenstein 172.20.10.0/24   helsinki 172.20.20.0/24
+# Per-region rather than one shared subnet because Kilo routes only BETWEEN locations:
+# a single subnet would put each region's peers behind another location — a black hole.
+#
+# WHY --local=false IS NOW CORRECT (it was the false assumption that sealed v1 and v2):
+# it means "the CNI owns in-location routing", which requires locations to be REAL.
+# With every node annotated it does group into regions, so this finally holds. Under
+# the 40-single-node-location topology there was no in-location traffic at all and every
+# packet was cross-location, so Kilo installed routes for all of it while skipping the
+# return paths gated on `if !local && ...`.
+#
+# STAGING IS STILL NOT AVAILABLE, but it no longer matters. There is no way to make Kilo
+# fail safe on a subset: scaling the DaemonSet down or pointing a nodeSelector at a
+# non-existent node kills EVERY pod, so the first node touched is already a whole-cluster
+# change (constraint (c) from v1, still true). What made v1's staged plan necessary was
+# an unknown fix; that is no longer the situation — the annotations exist on all 40
+# nodes, so there is nothing to stage. The equivalent safety now comes from the
+# preconditions being enforced in Ansible before Kilo ever runs (see below).
+#
+# ENABLE PROCEDURE
+#   1. Confirm every node's force-internal-ip differs from its force-endpoint AND is an
+#      address the node actually holds. The node-labels role asserts this per node and
+#      vswitch-vlan asserts the configured address matches the shared
+#      vswitch_node_addresses map, so a wrong node fails the playbook rather than the
+#      cluster. Do not skip this because the annotations "look set" — presence proves
+#      nothing about whether they differ.
+#   2. Remove `suspend: true` from
+#      kubernetes/clusters/yral-k8s/infrastructure-kilo.yaml. There is no nodeSelector
+#      to add: all 40 nodes are in scope and all 40 are ready.
+#   3. Watch until Ready, then run the DECISIVE CHECK documented on that file:
+#      kilo.squat.ai/leader must be true on EXACTLY 2 nodes (one per location). A leader
+#      on every node means each node still got its own single-node location — the
+#      original outage condition. Re-add `suspend: true` immediately.
+#   4. Only then check the datapath: pod->ClusterIP, pod->pod cross-node, node->node
+#      across regions, `kgctl showconf node <n>` against the live `wg show`.
 #
 # KILL SWITCH (needs no cluster access to reason about, only kubectl): point
 # spec.template.spec.nodeSelector at a non-existent label, e.g.
@@ -95,11 +114,8 @@
 # reverting the switch, but for stopping the bleeding mid-incident the patch is
 # enough and takes effect in seconds.
 #
-# RE-ENABLE requires: removing `suspend: true` from
-# kubernetes/clusters/yral-k8s/infrastructure-kilo.yaml IN THE SAME COMMIT as the
-# nodeSelector and the force-internal-ip annotations, then watching the stages. Never
-# un-suspend without a nodeSelector and annotations already in place — that is
-# exactly the all-40-at-once rollout that took the cluster down.
+# Expect Cilium to adopt kilo0 — `msg="Devices changed" devices="[enp0s31f6 kilo0]"` —
+# which is normal, not a fault sign.
 # ══════════════════════════════════════════════════════════════════════════════
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
