@@ -11,7 +11,10 @@
   # the default exists only so ansible-lint syntax-check can resolve the hosts
   # keyword. Same convention as add-control-plane.yml.
   hosts: "{{ target_host | default('control_plane') }}"
-  gather_facts: false
+  # ! gather_facts MUST stay true — see add-control-plane.yml. The `provision` role is
+  # ! the only other fact gatherer, and the roles here need ansible_facts, so without
+  # ! this a fresh host depends on a populated local fact cache.
+  gather_facts: true
   serial: 1
 
   roles:
