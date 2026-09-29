@@ -16,21 +16,23 @@ age = "latest"
 # the local server's pre-publish check, so no Maincloud access is needed.
 # Bump only together with a verified `spacetime build` + publish cycle.
 "aqua:WebAssembly/binaryen" = "131"
-# aws-cli — the S3 client for Hetzner Object Storage. Chosen because the
-# credentials in [env] are ALREADY in AWS's standard variable names
-# (AWS_ACCESS_KEY_ID / AWS_ENDPOINT_URL / AWS_DEFAULT_REGION, with
-# AWS_SECRET_ACCESS_KEY in fnox), so aws-cli authenticates against Hetzner
-# with no extra config: `aws s3 ls` just works. Hetzner's Object Storage is
-# S3-compatible, so any S3 client would do — this one needs no new variables
-# and no config file.
+# aws-cli — the S3 client for Hetzner Object Storage. Its credentials are the
+# HETZNER_S3_* values in [env] (access key) plus fnox (secret), which each
+# s3-* task maps into AWS_* in its own `env` table. Hetzner's Object Storage is
+# S3-compatible, so any S3 client would do; aws-cli is chosen because it needs
+# no config file once those two variables are set.
 #
-# NOTE the endpoint in [env] is a SINGLE location (fsn1). Buckets live in the
+# ! The mapping is per-task ON PURPOSE. Setting AWS_* globally would shadow the
+# ! real AWS credentials for every command in the repo — see the note on
+# ! HETZNER_S3_* in [env] for the measured failure.
+#
+# NOTE the default endpoint is a SINGLE location (fsn1). Buckets live in the
 # location they were created in, and this account has buckets in more than one
-# (fsn1 / hel1 ...), so a listing against AWS_ENDPOINT_URL shows only that
-# location's buckets. To reach another location use `--endpoint-url
+# (fsn1 / hel1 ...), so a listing against the default shows only that
+# location's buckets. To reach another location pass `--endpoint-url
 # https://<loc>.your-objectstorage.com` with the same credentials. The etcd
 # backup role does exactly this with hel1 (see ansible/inventory/hosts.yml),
-# which is why its endpoint differs from AWS_ENDPOINT_URL.
+# which is why its endpoint differs from HETZNER_S3_ENDPOINT.
 # Read-only by default — do not mutate buckets from a shell (repo rule: the
 # declarative source is Ansible/git; see AGENTS.md "Immutable GitOps"). The one
 # carve-out is `mise run s3-abort-multipart-uploads`, which clears orphaned
@@ -90,8 +92,9 @@ python = "latest"
 #
 # For Hetzner use `--s3-provider Hetzner` — rclone's docs list Hetzner as a
 # first-class provider (regions hel1/fsn1/nbg1), so no `Other` fallback is
-# needed. Credentials come from the same AWS_* variables in [env] + fnox, and
-# `--s3-endpoint` replaces `--endpoint-url`.
+# needed. Credentials come from the same HETZNER_S3_* + fnox pair as aws-cli,
+# mapped into AWS_* by the task that runs rclone; `--s3-endpoint` replaces
+# `--endpoint-url`.
 #
 # Two knobs worth knowing when a bucket misbehaves (both are documented rclone
 # flags, and both change the server-side code path — useful when one listing or
@@ -154,8 +157,8 @@ rust = { version = "stable", targets = [
 # the same bucket empties in a fraction of the time. Use it for bucket cleanup
 # and any bulk transfer; use aws-cli for anything bucket-scoped.
 #
-# Same credentials as aws-cli — it reads the standard AWS_* variables from
-# [env] + fnox, and takes the location endpoint via --endpoint-url exactly like
+# Same credentials as aws-cli — the s3-* task that runs it maps HETZNER_S3_*
+# into AWS_*, and it takes the location endpoint via --endpoint-url exactly like
 # aws-cli (see the aws-cli note above for why the location matters).
 s5cmd = "latest"
 sops = "latest"
@@ -183,9 +186,34 @@ FNOX_AGE_KEY_FILE = "{{config_root}}/.saikat-machine-access-ed25519"
 CARGO_HOME = "{{env.HOME}}/.cargo"
 RUSTUP_HOME = "{{env.HOME}}/.rustup"
 CARGO_BINSTALL_DIR = "{{env.HOME}}/.local/share/cargo-binstall"
-AWS_ACCESS_KEY_ID = "XO5X9A1W8AMHY3DSTKMS"
-AWS_ENDPOINT_URL = "https://fsn1.your-objectstorage.com"
-AWS_DEFAULT_REGION = "fsn1"
+# ── Hetzner Object Storage (S3-compatible) ─────────────────────────────────
+# ! These are deliberately NOT named AWS_* . aws-cli gives real environment
+# ! variables precedence over EVERY other credential source — including an
+# ! `aws login` session and ~/.aws/credentials — so repo-wide AWS_* vars broke
+# ! all real AWS access: every `aws` call made inside this repo was redirected
+# ! at Hetzner and, since AWS_SECRET_ACCESS_KEY lives encrypted in fnox and is
+# ! absent from a bare shell, failed with "Partial credentials found in env,
+# ! missing: AWS_SECRET_ACCESS_KEY" before it ever reached the login provider.
+# ! Verified with `aws sts get-caller-identity` both ways.
+# !
+# ! So the values are named for what they are, and each s3-* task maps them
+# ! into AWS_* via its own `env` table — scoped to that task only. Nothing
+# ! global is named AWS_* any more; that is the whole point of the split.
+# * HETZNER_S3_ACCESS_KEY_ID is a public access key id, not a secret.
+# * The matching secret is NOT here — it is the fnox secret AWS_SECRET_ACCESS_KEY
+# * (named AWS_* because it feeds the S3 clients), injected by each s3-* task.
+# !
+# ! NOT the same credential as fnox's HETZNER_S3_ACCESS_KEY / HETZNER_S3_SECRET_KEY
+# ! (no _ID): that pair is the yral-web app's separate "profile storage" key, used
+# ! by kubernetes/apps/yral-web/secrets.sops.yaml and the yral-web dev daemon.
+# ! Two different Hetzner keys live in this repo — the ones below are the cluster
+# ! object-storage key (velero / etcd / longhorn backups).
+HETZNER_S3_ACCESS_KEY_ID = "XO5X9A1W8AMHY3DSTKMS"
+# Default location endpoint. Buckets live where they were CREATED
+# (fsn1 / hel1 / nbg1 ...), so this is a fallback only — pass the bucket's real
+# location as the task's endpoint argument or `url` variable.
+HETZNER_S3_ENDPOINT = "https://fsn1.your-objectstorage.com"
+HETZNER_S3_REGION = "fsn1"
 KUBECONFIG = "{{env.HOME}}/.kube/config"
 # SpacetimeDB Maincloud (SaaS) — DB identity/name for the yral-database-spacetime
 # module. The Maincloud base URL is fixed; the DB name matches `spacetime.json`.
@@ -449,6 +477,9 @@ run = "mise bootstrap packages apply --yes && mise install && mise run bootstrap
 #  bucket deleted on the first try.)
 [tasks.s3-abort-multipart-uploads]
 description = "Abort orphaned multipart uploads on a bucket (usage: mise run s3-abort-multipart-uploads -- <bucket> [endpoint] [max_chunks] [jobs])"
+# ! The AWS_* names are set HERE, not in [env], so they exist only for this task
+# ! and cannot shadow real AWS credentials elsewhere in the repo.
+env = { AWS_ACCESS_KEY_ID = "{{env.HETZNER_S3_ACCESS_KEY_ID}}", AWS_ENDPOINT_URL = "{{env.HETZNER_S3_ENDPOINT}}", AWS_DEFAULT_REGION = "{{env.HETZNER_S3_REGION}}" }
 run = '''
 #!/usr/bin/env bash
 set -euo pipefail
@@ -463,8 +494,8 @@ if [ -z "$bucket" ] || [ -z "$endpoint" ]; then
   exit 2
 fi
 
-# aws-cli picks up AWS_ACCESS_KEY_ID / AWS_DEFAULT_REGION / AWS_ENDPOINT_URL from
-# [env], but the secret lives only in fnox — inject it so the task also works
+# AWS_ACCESS_KEY_ID / AWS_DEFAULT_REGION / AWS_ENDPOINT_URL come from this task's
+# `env` above; only the secret lives in fnox — inject it so the task also works
 # under a bare `mise run` and not just inside `mise x -- fnox exec --`.
 export AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY:-$(fnox get AWS_SECRET_ACCESS_KEY 2>/dev/null || true)}"
 if [ -z "$AWS_SECRET_ACCESS_KEY" ]; then
@@ -561,22 +592,33 @@ exit 1
 # requires the bucket name to be typed back unless `-y` is passed for
 # non-interactive use, and it refuses outright when there is no TTY and no -y.
 [tasks.s3-retire-bucket]
-description = "Delete every object in a bucket and the bucket itself (usage: mise run s3-retire-bucket -- <bucket> [endpoint] [-y])"
+description = "Delete every object in a bucket and the bucket itself (edit bucket/url at the top of the task, then run)"
+# ! The AWS_* names are set HERE, not in [env], so they exist only for this task
+# ! and cannot shadow real AWS credentials elsewhere in the repo.
+env = { AWS_ACCESS_KEY_ID = "{{env.HETZNER_S3_ACCESS_KEY_ID}}", AWS_ENDPOINT_URL = "{{env.HETZNER_S3_ENDPOINT}}", AWS_DEFAULT_REGION = "{{env.HETZNER_S3_REGION}}" }
 run = '''
 #!/usr/bin/env bash
 set -euo pipefail
 
-bucket="${1:-}"
-endpoint="${2:-${AWS_ENDPOINT_URL:-}}"
-assume_yes="${3:-}"
+# ── edit these two ──────────────────────────────────────────────────────────
+bucket="CHANGE-ME"
+endpoint="https://fsn1.your-objectstorage.com"
+assume_yes=""
+# ────────────────────────────────────────────────────────────────────────────
 
-if [ -z "$bucket" ] || [ -z "$endpoint" ]; then
-  echo "usage: mise run s3-retire-bucket -- <bucket> [endpoint] [-y]" >&2
+if [ "$bucket" = "CHANGE-ME" ]; then
+  echo "edit 'bucket' (and 'endpoint' if the bucket is not in fsn1) at the top of this task, then re-run" >&2
   exit 2
 fi
 
-# Same secret injection as s3-abort-multipart-uploads: aws-cli and s5cmd both
-# read the standard AWS_* variables, but only the secret lives in fnox.
+if [ -z "$bucket" ] || [ -z "$endpoint" ]; then
+  echo "bucket and endpoint must both be non-empty" >&2
+  exit 2
+fi
+
+# AWS_ACCESS_KEY_ID / AWS_DEFAULT_REGION / AWS_ENDPOINT_URL come from this task's
+# `env` above; only the secret lives in fnox — inject it so the task also works
+# under a bare `mise run` and not just inside `mise x -- fnox exec --`.
 export AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY:-$(fnox get AWS_SECRET_ACCESS_KEY 2>/dev/null || true)}"
 if [ -z "$AWS_SECRET_ACCESS_KEY" ]; then
   echo "AWS_SECRET_ACCESS_KEY unavailable - is fnox configured? (mise run bootstrap)" >&2
@@ -695,20 +737,21 @@ echo "=== DONE: '$bucket' retired (every object deleted, bucket removed) ==="
 '''
 
 # ── General Hetzner Object Storage task ─────────────────────────────────────
-# The operation-specific tasks above (s3-abort-multipart-uploads,
-# s3-retire-bucket) each hard-code what they do. This one is the general case: a
-# one-off against a specific bucket in a specific location. Set `bucket` and
-# `url` at the top, set the command in the marked line, then run — nothing is
-# passed as a positional argument, so the target is visible in the file on every
-# run.
+# The most common one-off: a command against a specific bucket in a specific
+# location. Set `bucket` and `url` at the top, set the command in the marked
+# line, then run — nothing is passed as a positional argument, so the target is
+# visible in the file on every run.
 #
-# `url` is explicit rather than inherited from AWS_ENDPOINT_URL because that
-# variable is a SINGLE location (fsn1) while buckets live where they were
-# created (fsn1 / hel1 / nbg1 ...) — see the aws-cli note in [tools] above. The
+# `url` is explicit rather than inherited from HETZNER_S3_ENDPOINT because the
+# default is a SINGLE location (fsn1) while buckets live where they were created
+# (fsn1 / hel1 / nbg1 ...) — see the aws-cli note in [tools] above. The
 # --endpoint-url "$url" below targets the bucket's real location regardless of
-# the shared [env].
+# the default.
 [tasks.s3-hetzner]
 description = "One-off Hetzner Object Storage command — edit bucket/url/command at the top of the task, then run"
+# ! The AWS_* names are set HERE, not in [env], so they exist only for this task
+# ! and cannot shadow real AWS credentials elsewhere in the repo.
+env = { AWS_ACCESS_KEY_ID = "{{env.HETZNER_S3_ACCESS_KEY_ID}}", AWS_ENDPOINT_URL = "{{env.HETZNER_S3_ENDPOINT}}", AWS_DEFAULT_REGION = "{{env.HETZNER_S3_REGION}}" }
 run = '''
 #!/usr/bin/env bash
 set -euo pipefail
@@ -718,8 +761,8 @@ bucket="CHANGE-ME"
 url="https://fsn1.your-objectstorage.com"
 # ────────────────────────────────────────────────────────────────────────────
 
-# aws-cli picks up AWS_ACCESS_KEY_ID / AWS_DEFAULT_REGION from [env], but the
-# secret lives only in fnox — inject it so the task also works under a bare
+# AWS_ACCESS_KEY_ID / AWS_DEFAULT_REGION come from this task's `env` above; only
+# the secret lives in fnox — inject it so the task also works under a bare
 # `mise run` and not just inside `mise x -- fnox exec --`.
 export AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY:-$(fnox get AWS_SECRET_ACCESS_KEY 2>/dev/null || true)}"
 if [ -z "$AWS_SECRET_ACCESS_KEY" ]; then
