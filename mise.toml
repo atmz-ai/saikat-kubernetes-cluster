@@ -719,6 +719,53 @@ fi
 echo "=== DONE: '$bucket' retired (every object deleted, bucket removed) ==="
 '''
 
+# ── General Hetzner Object Storage task ─────────────────────────────────────
+# The operation-specific tasks above (s3-abort-multipart-uploads,
+# s3-retire-bucket) each hard-code what they do. This one is the general case: a
+# one-off against a specific bucket in a specific location. Set `bucket` and
+# `url` at the top, set the command in the marked line, then run — nothing is
+# passed as a positional argument, so the target is visible in the file on every
+# run.
+#
+# `url` is explicit rather than inherited from AWS_ENDPOINT_URL because that
+# variable is a SINGLE location (fsn1) while buckets live where they were
+# created (fsn1 / hel1 / nbg1 ...) — see the aws-cli note in [tools] above. The
+# --endpoint-url "$url" below targets the bucket's real location regardless of
+# the shared [env].
+[tasks.s3-hetzner]
+description = "One-off Hetzner Object Storage command — edit bucket/url/command at the top of the task, then run"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ── edit these two ──────────────────────────────────────────────────────────
+bucket="CHANGE-ME"
+url="https://fsn1.your-objectstorage.com"
+# ────────────────────────────────────────────────────────────────────────────
+
+# aws-cli picks up AWS_ACCESS_KEY_ID / AWS_DEFAULT_REGION from [env], but the
+# secret lives only in fnox — inject it so the task also works under a bare
+# `mise run` and not just inside `mise x -- fnox exec --`.
+export AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY:-$(fnox get AWS_SECRET_ACCESS_KEY 2>/dev/null || true)}"
+if [ -z "$AWS_SECRET_ACCESS_KEY" ]; then
+  echo "AWS_SECRET_ACCESS_KEY unavailable - is fnox configured? (mise run bootstrap)" >&2
+  exit 2
+fi
+
+# aws-cli's interactive pager hijacks output into the alternate buffer.
+export AWS_PAGER=""
+
+if [ "$bucket" = "CHANGE-ME" ]; then
+  echo "edit 'bucket' (and 'url' if the bucket is not in fsn1) at the top of this task, then re-run" >&2
+  exit 2
+fi
+
+echo "bucket=$bucket url=$url"
+
+# ── edit this command for the operation you want ────────────────────────────
+aws --no-cli-pager s3 ls "s3://$bucket" --endpoint-url "$url"
+'''
+
 # ── API version hygiene ─────────────────────────────────────────────────────
 # Report manifests whose apiVersion+kind the cluster no longer SERVES.
 #
