@@ -1,45 +1,24 @@
-ansible/.vault_pass
-.saikat-machine-access-ed25519
-apps/yral-ios/iosApp/GoogleService-Info.plist
-apps/yral-ios/private_keys/
-
-# Rust workspace target
-target/
-
-# Python virtualenvs (mise `bootstrap` / fleet-bootstrap) and the editable
-# install artefacts that `pip install -e .` drops into each one
-.venv/
-apps/hetzner-bare-metal-fleet/.venv/
-apps/yral-rishi-agent/.venv/
-apps/hetzner-bare-metal-fleet/*.egg-info/
-apps/yral-rishi-agent/*.egg-info/
-
-# Python caches
+*.egg-info/
+.DS_Store
 .ruff_cache/
-apps/yral-rishi-agent/.ruff_cache/
-apps/yral-rishi-agent/.pytest_cache/
-
-# Ansible collections installed into the workspace path by `mise run bootstrap`
+.saikat-machine-access-ed25519
+.venv/
+ansible/.vault_pass
 ansible/collections/
-
-# Swift / SwiftPM — 111k files (~7 GB) of regenerable dependency + artefact
-# cache for yral-ios. `swift package resolve`/Xcode restores it.
-apps/yral-ios/packages/YralApp/.build/
+apps/hetzner-bare-metal-fleet/*.egg-info/
+apps/hetzner-bare-metal-fleet/.venv/
 apps/yral-ios/.build/
-
-# Xcode build output and per-user IDE state
 apps/yral-ios/build/
 apps/yral-ios/DerivedData/
-apps/yral-ios/iosApp.xcodeproj/xcuserdata/
+apps/yral-ios/iosApp/GoogleService-Info.plist
 apps/yral-ios/iosApp.xcodeproj/project.xcworkspace/xcuserdata/
-
-# cargo-leptos regenerates this at the repo root on every build (a repo-root
-# relative copy of the per-app configs). Deliberately removed in 404720d6; the
-# build recreates it, so ignore it rather than re-commit it on every Leptos build.
-/tailwind.config.js
-
-# SpacetimeDB local override
+apps/yral-ios/iosApp.xcodeproj/xcuserdata/
+apps/yral-ios/packages/YralApp/.build/
+apps/yral-ios/private_keys/
+apps/yral-rishi-agent/*.egg-info/
+apps/yral-rishi-agent/.pytest_cache/
+apps/yral-rishi-agent/.ruff_cache/
+apps/yral-rishi-agent/.venv/
 spacetime.local.json
-
-# macOS
-.DS_Store
+target/
+tailwind.config.js

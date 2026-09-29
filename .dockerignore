@@ -1,29 +1,9 @@
-# Explicit paths only — never `**`-prefixed globs. Verified 2026-09-24 (Apple
-# CLI 1.4.1, one build at a time): a glob set (`**/target/`, `**/.build/`, …)
-# transferred 1.07 GB, while the same tree with explicit paths transferred
-# 66 MB. After editing, confirm the build logs `transferring context:` in the
-# tens of MB.
-#
-# Apple's CLI reads `<dockerfile>.dockerignore`, so each app carries
-# apps/<app>/Dockerfile.buildkit.dockerignore symlinked here for one source of
-# truth. podman/Linux reads this root file directly.
-
-# Version control
+*.egg-info/
 .git/
-
-# Rust workspace build output (all apps share the root target/)
-target/
-
-# Swift / SwiftPM dependency + artefact cache (~7 GB, 111k files)
-apps/yral-ios/packages/YralApp/.build/
-
-# Python virtualenvs (Ansible/Python tooling, not used for image builds)
 .venv/
-apps/hetzner-bare-metal-fleet/.venv/
-apps/yral-rishi-agent/.venv/
-
-# Ansible collections installed into the workspace path by `mise run bootstrap`
 ansible/collections/
-
-# Xcode build output
+apps/hetzner-bare-metal-fleet/.venv/
 apps/yral-ios/build/
+apps/yral-ios/packages/YralApp/.build/
+apps/yral-rishi-agent/.venv/
+target/
