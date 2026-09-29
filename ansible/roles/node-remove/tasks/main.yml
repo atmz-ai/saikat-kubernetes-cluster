@@ -293,11 +293,16 @@
   run_once: true
 
 - name: Find a v1.36.x control plane node for etcd operations
+  # ! `etcd_delegate` MUST be set on EVERY path, worker included, even though every task
+  # ! that consumes it is gated `when: is_control_plane`. Ansible resolves `delegate_to`
+  # ! BEFORE the `when` short-circuits, so an undefined value there is not skipped — it
+  # ! fails with `'etcd_delegate' is undefined` and `[localhost -> {{ etcd_delegate }}]`,
+  # ! breaking WORKER removal. The `not is_control_plane` branch therefore sets it too;
+  # ! it is simply never used on that path.
   ansible.builtin.set_fact:
     etcd_delegate: >-
       {{ ((groups['control_plane'] | reject('equalto', target_host) | select('match', '^(node-|worker-12)') | list) | first)
          | default((groups['control_plane'] | reject('equalto', target_host) | list)[0]) }}
-  when: is_control_plane
 
 - name: Get etcd member ID
   ansible.builtin.shell: |
@@ -314,7 +319,7 @@
       --cert=/etc/kubernetes/pki/etcd/server.crt \
       --key=/etc/kubernetes/pki/etcd/server.key 2>/dev/null \
       | grep "{{ node_remove_k8s_name }}" | cut -d, -f1
-  delegate_to: "{{ etcd_delegate }}"
+  delegate_to: "{{ etcd_delegate | default(groups['control_plane'][0]) }}"
   register: etcd_member_id
   when: is_control_plane
   failed_when: false
@@ -335,7 +340,7 @@
       --cacert=/etc/kubernetes/pki/etcd/ca.crt \
       --cert=/etc/kubernetes/pki/etcd/server.crt \
       --key=/etc/kubernetes/pki/etcd/server.key
-  delegate_to: "{{ etcd_delegate }}"
+  delegate_to: "{{ etcd_delegate | default(groups['control_plane'][0]) }}"
   when:
     - is_control_plane
     - etcd_member_id.stdout | trim != ""
@@ -575,7 +580,7 @@
       --cert=/etc/kubernetes/pki/etcd/server.crt \
       --key=/etc/kubernetes/pki/etcd/server.key \
       --cluster
-  delegate_to: "{{ etcd_delegate }}"
+  delegate_to: "{{ etcd_delegate | default(groups['control_plane'][0]) }}"
   register: etcd_health
   when: is_control_plane
   changed_when: false

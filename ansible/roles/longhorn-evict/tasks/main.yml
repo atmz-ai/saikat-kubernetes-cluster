@@ -139,23 +139,49 @@
   run_once: true
 
 - name: Check data safety after eviction timeout
+  # ! The floor is PER VOLUME, not a flat 2. A flat "remaining >= 2" is UNSATISFIABLE
+  # ! on a cluster that uses the 1-replica StorageClass: a 1-replica volume can never
+  # ! have 2 replicas anywhere, so it is reported unsafe even when the target node
+  # ! holds no replica of it at all — blocking node removal for EVERY node while any
+  # ! 1-replica volume exists. Measured: removing worker-14 (which holds exactly one
+  # ! volume, a 3-replica one) failed with 10 unrelated 1-replica volumes listed.
+  # !
+  # ! The two floors are different hazards:
+  # !   want >= 2  → losing redundancy below the SC's design. Require 2 remaining.
+  # !   want == 1  → the SC promises NO redundancy (used only for app-layer-replicated
+  # !                stores), so the only loss to prevent is the LAST replica. Require 1.
+  # ! So: floor = min(want, 2).
+  #
+  # Reads the VOLUME object for the desired count rather than inferring it from the
+  # replica list — a volume reduced by a previous failure would otherwise look
+  # permanently 1-replica and keep raising its own bar.
   ansible.builtin.shell: |
+    kubectl get volumes.longhorn.io -n longhorn-system -o json > /tmp/lh-vols.json
     kubectl get replicas.longhorn.io -n longhorn-system -o json |
     python3 -c "
     import sys, json
+    target = '{{ target_host }}'
+    with open('/tmp/lh-vols.json') as fh:
+        vols = json.load(fh)
+    want = {
+        v['metadata']['name']: v['spec'].get('numberOfReplicas', 1)
+        for v in vols.get('items', [])
+    }
     d = json.load(sys.stdin)
-    # Count remaining replicas per volume (excluding the target node)
-    volumes = {}
+    # Count each volume's replicas that are NOT on the node being removed.
+    remaining = {}
     for r in d.get('items', []):
         vol = r['metadata']['labels'].get('longhornvolume', '')
         node = r['spec']['nodeID']
-        if vol and node != '{{ target_host }}':
-            volumes[vol] = volumes.get(vol, 0) + 1
-    unsafe = [vol for vol, count in volumes.items() if count < 2]
-    if unsafe:
-        print('UNSAFE:' + ','.join(unsafe))
-    else:
-        print('SAFE')
+        if vol and node != target:
+            remaining[vol] = remaining.get(vol, 0) + 1
+    unsafe = []
+    for vol, desired in want.items():
+        have = remaining.get(vol, 0)
+        floor = 1 if desired < 2 else 2
+        if have < floor:
+            unsafe.append(f'{vol}(have={have},want={desired})')
+    print('UNSAFE:' + ','.join(unsafe) if unsafe else 'SAFE')
     "
   register: data_safety_check
   changed_when: false
@@ -164,11 +190,12 @@
     - eviction_timed_out | default(false) | bool
   run_once: true
 
-- name: Fail if data safety cannot be guaranteed after eviction timeout
+- name: Fail if removing this node would drop a volume below its replica floor
   ansible.builtin.fail:
     msg: >-
       Longhorn replica eviction timed out for {{ target_host }} and data safety
-      cannot be guaranteed. Volumes with fewer than 2 remaining replicas:
+      cannot be guaranteed. Volumes below their floor (have < want, where the floor
+      is 1 for a 1-replica volume and 2 for anything larger):
       {{ data_safety_check.stdout }}.
       Do NOT proceed — fix Longhorn storage issues first (add disks, enable
       scheduling on other nodes, etc.) and re-run the playbook.
