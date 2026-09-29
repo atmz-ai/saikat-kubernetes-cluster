@@ -116,6 +116,79 @@
 #
 # Expect Cilium to adopt kilo0 — `msg="Devices changed" devices="[enp0s31f6 kilo0]"` —
 # which is normal, not a fault sign.
+#
+# ══════════════════════════════════════════════════════════════════════════════
+# OPEN DEFECT (2026-09-29) — HOST->REMOTE-POD TRAFFIC TO THE PEER REGION IS DROPPED.
+# Kilo is LEFT RUNNING with this defect; it is NOT the cluster-wide outage above.
+# Pod->pod, pod->ClusterIP and both-region node->node all work. What does not work
+# is a HOST on a LEADER reaching a pod in the peer region — which is not cosmetic:
+# the kube-apiserver is hostNetwork, and ADMISSION WEBHOOKS ARE CALLED BY THE
+# APISERVER, so 1 of the 7 control planes cannot reach cert-manager/longhorn/tekton
+# webhooks. Flux dry-runs that land on it fail and 20 Kustomizations are stuck
+# (their dependents cascade), and the metrics APIService fails ~1 call in 7.
+#
+# SYMPTOM SET, all one cause: TargetDown 1/7, KubeAggregatedAPIDown/Errors,
+# KubeAPIInstanceUnreachable, KubeletInstanceUnreachable, the *InstanceUnreachable
+# family for node-2, ClusterIssuer/Certificate/BackupTarget/ConfigMap dry-run
+# failures in Flux, and NodeNetworkTransmitErrs on cilium_wg0 (0.0/s -> ~70/s at the
+# moment Kilo started; 0.0/s for the entire preceding 24h).
+#
+# ROOT CAUSE — A MISSING RETURN ROUTE FOR THE PEER REGION'S PRIVATE SUBNET.
+# Kilo installs a route for the peer region's POD CIDRs pointing at the leader's
+# WireGuard IP, and prefers that route's source address, so a host on node-1 sends
+# to a falkenstein pod with `src 172.20.20.10` (node-1's own private/VLAN address).
+#
+#   node-1:  10.244.104.207 via 10.4.0.1 dev kilo0 src 172.20.20.10   (forward: ok)
+#
+# The reply must come back to 172.20.20.10 — and NO NON-LEADER HAS A ROUTE FOR IT.
+# Measured on all 40 nodes: 39 of 40 lack any route to the other region's private
+# subnet, so the packet goes to Hetzner's PUBLIC gateway and is dropped:
+#
+#   worker-3: 172.20.20.10 via 94.130.128.65 dev enp0s31f6   <-- public gateway, not the tunnel
+#
+#   own subnet     peer-subnet route via   nodes
+#   172.20.10.x    enp0s31f6 (public)       21      <- no route to helsinki's private subnet
+#   172.20.10.x    kilo0                     1      <- node-2, the falkenstein leader
+#   172.20.20.x    enp0s31f6 (public)       17      <- no route to falkenstein's private subnet
+#   172.20.20.x    kilo0                     1      <- node-1, the helsinki leader
+#
+# The leaders need no such route because the peer subnet is on-link for them
+# (kilo0 carries 10.4.0.0/16), which is why leader->leader works and hid the problem
+# during the initial verification — the only paths tested were leader-to-leader and
+# pod-to-pod. Both leaders are affected symmetrically (node-1 cannot reach
+# falkenstein pods, node-2 cannot reach helsinki pods), giving exactly the 1-of-7
+# failure rate seen in the alerts.
+#
+# WHY THE OBVIOUS EXPLANATIONS DO NOT HOLD, so they are not re-derived:
+#   * NOT the WireGuard tunnel. node-1 <-> node-2 is 0% loss, 36ms, both directions,
+#     and node-1 <-> node-2 private addresses work from the HOST.
+#   * NOT pod-level routing. Pod->pod across regions is 0% loss in both directions,
+#     and pods on the affected nodes reach every ClusterIP (200/404/404/415). Cilium
+#     handles pod traffic in eBPF; only HOST-originated traffic takes the kilo0 route.
+#   * NOT the /32 on force-internal-ip. Kilo records 172.20.20.10/32, so
+#     Kilo's own `destination == internalIP` guard does NOT fire (it compares the
+#     destination to the node's OWN internal IP, and this is a peer node's address).
+#     But because the prefix is /32 Kilo installs no route for the subnet — while the
+#     VLAN interfaces are /24, so each region is on-link locally and only cross-region
+#     needs a route. That asymmetry is what makes 39/40 nodes route to the gateway.
+#   * NOT the MTU. The encapsulation cliff is at ~1350 and behaves identically in both
+#     regions; the failures here are at packet sizes far below it.
+#   * NOT a route flap. An earlier reading showed these routes as `cilium_host`; on
+#     re-measurement they are stably `kilo0`. Only the `kilo0` value is real for every
+#     measurement that used `ip route get`; treat that earlier observation as a
+#     misread and do not build on it.
+#
+# WHAT A FIX MUST ACHIEVE. Either (a) the non-leaders get a route for the peer
+# region's private subnet through the tunnel, or (b) the leader stops sourcing
+# host->remote-pod traffic from its private address. Which of the two Kilo supports
+# is NOT yet established — this needs reading Kilo's source for how it derives the
+# source address and whether it is expected to install peer-subnet routes, rather
+# than guessing. Do not change flags speculatively: every flag here was already
+# validated once at the cost of a cluster-wide outage.
+#
+# UNTIL FIXED: Flux cannot converge (20/42 Kustomizations), so a git push will NOT
+# deploy. Do not mistake "pods are Running" for a working GitOps cluster.
+# ══════════════════════════════════════════════════════════════════════════════
 # ══════════════════════════════════════════════════════════════════════════════
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
