@@ -49,7 +49,13 @@ spec:
   # given its own single-node location, which is the original cluster-wide outage
   # condition. Re-add `suspend: true` immediately and investigate — do not leave it
   # running to "see what happens".
-  suspend: true
+  #
+  # ── ENABLED 2026-09-29 ─────────────────────────────────────────────────────
+  # Removed 2026-09-29 after the preconditions above were verified on all 40 nodes
+  # (force-internal-ip != force-endpoint, and equal to the address actually on each
+  # node's enp0s31f6.4000 interface). Prior to this the flag was set since 2026-09-26.
+  # The kill switch below is the rollback: re-add `suspend: true`, push, and the
+  # webhook reverts within seconds.
   interval: 1h
   path: ./kubernetes/infrastructure/kilo
   prune: true
