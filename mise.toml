@@ -47,6 +47,9 @@ eza = "latest"
 flux2 = "2.9.5"
 fnox = "latest"
 gh = "latest"
+# gcloud — Google Cloud CLI (Cloud Run GPU / GKE GPU probes). Declarative via
+# mise so a fresh checkout can query GCP without a system install.
+gcloud = "latest"
 helm = "latest"
 # SpacetimeDB CLI. The release tarball names its binary `spacetimedb-cli`,
 # but the canonical, documented invocation is `spacetime` (see
