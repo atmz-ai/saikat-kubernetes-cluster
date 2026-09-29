@@ -246,3 +246,37 @@ spec:
             cpu: 200m
             memory: 256Mi
 
+    # node-exporter `instance` relabeling — labels the node-exporter targets by NODE
+    # NAME instead of the scrape address, so every Node Exporter dashboard shows a
+    # node as `node-7` rather than `65.21.137.111:9100`.
+    #
+    # ! The key is `prometheus-node-exporter.prometheus.monitor.relabelings`, NOT
+    # ! `nodeExporter.*`. `nodeExporter:` is only a FEATURE TOGGLE in
+    # ! kube-prometheus-stack — it enables the node-exporter subchart and its default
+    # ! dashboards. The subchart's ServiceMonitor is configured through the
+    # ! `prometheus-node-exporter` values sub-tree, which the parent chart passes
+    # ! through untouched, so a `nodeExporter.serviceMonitor` key here is silently
+    # ! dropped (the same shape of bug as the etcd tlsConfig above).
+    #
+    # * `instance` is the scrape target address, and the upstream node-exporter
+    # * ServiceMonitor relabels it to the hostname:
+    # *
+    # *     sourceLabels: [__meta_kubernetes_pod_node_name]
+    # *     targetLabel: instance
+    # *
+    # * A relabel with no `targetLabel` defaults to `instance`, and a sourceLabels
+    # * default of [__address__] is overridden here, so this one entry is the whole
+    # * change. ServiceMonitor (not PodMonitor) is what this chart enables.
+    #
+    # ! Applied at SCRAPE time, so samples already stored keep the old `instance`.
+    # ! Only new samples carry the node name, and the old series goes stale after ~5m —
+    # ! so a query spanning the change shows both, and any alert or dashboard query
+    # ! filtering `instance=<IP>` must switch to the node name. The dashboard itself
+    # ! needs no edit: its `instance` variable picks up whatever values the label has.
+    prometheus-node-exporter:
+      prometheus:
+        monitor:
+          relabelings:
+            - sourceLabels: [__meta_kubernetes_pod_node_name]
+              action: replace
+

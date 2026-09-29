@@ -12,6 +12,20 @@
 #     Visualizes Trivy Operator CRs (ClusterComplianceReport, VulnerabilityReport,
 #     ConfigAuditReport, ExposedSecretReport, InfraAssessmentReport, etc.)
 #     Requires the trivy-operator HelmRelease in kubernetes/infrastructure/trivy-operator/
+#   - Longhorn: gsoci.azurecr.io/giantswarm/headlamp-longhorn:0.1.12
+#     Source: https://github.com/giantswarm/headlamp-longhorn
+#     Releases: https://github.com/giantswarm/headlamp-longhorn/releases
+#     Views Longhorn Volumes, Nodes, Settings, Backups and Engine Images.
+#     Requires Longhorn in the cluster (kubernetes/infrastructure/longhorn/).
+#
+# ! The Longhorn plugin is COMMUNITY-maintained, not an official headlamp-k8s one:
+# ! there is no Longhorn entry in the headlamp-k8s/plugins catalog and no published
+# ! Headlamp Longhorn package on Artifact Hub, so giantswarm's is the only option.
+# * Verified pullable with no credentials before adopting it: the registry's token
+# * endpoint (https://gsoci.azurecr.io/oauth2/token) grants repository:pull anonymously
+# * and 0.1.12 returns HTTP 200. This matters because the pod has no imagePullSecrets
+# * and a private registry would leave the initContainer in ImagePullBackOff, which
+# * blocks the whole pod from starting (initContainers run before the main container).
 #
 # Chart: https://kubernetes-sigs.github.io/headlamp/
 # Version: check latest at https://github.com/kubernetes-sigs/headlamp/releases
@@ -106,6 +120,26 @@ spec:
             mountPath: /build/plugins
       - name: headlamp-trivy-plugin
         image: ghcr.io/kubebeam/trivy-headlamp-plugin:v0.3.2
+        command:
+          - /bin/sh
+          - -c
+          - cp -r /plugins/* /build/plugins/ && chown -R 100:101 /build
+        securityContext:
+          runAsNonRoot: false
+          privileged: false
+          runAsUser: 0
+          runAsGroup: 0
+        volumeMounts:
+          - name: headlamp-plugins
+            mountPath: /build/plugins
+      # * The image carries /plugins/headlamp-longhorn/{main.js,package.json}, and
+      # * Headlamp expects exactly that on-disk layout ($pluginsDir/<folder>/main.js),
+      # * so the same `cp -r /plugins/*` as the other two plugins is sufficient.
+      # ? Whether this plugin's bundled @kinvolk/headlamp-plugin API version matches
+      # ? chart 0.45.0's Headlamp is unverified — check the logs and the sidebar after
+      # ? the first reconcile rather than assuming it loads.
+      - name: headlamp-longhorn-plugin
+        image: gsoci.azurecr.io/giantswarm/headlamp-longhorn:0.1.12
         command:
           - /bin/sh
           - -c
