@@ -90,11 +90,11 @@
 #
 # ENABLE PROCEDURE
 #   1. Confirm every node's force-internal-ip differs from its force-endpoint AND is an
-#      address the node actually holds. The node-labels role asserts this per node and
-#      vswitch-vlan asserts the configured address matches the shared
-#      vswitch_node_addresses map, so a wrong node fails the playbook rather than the
-#      cluster. Do not skip this because the annotations "look set" — presence proves
-#      nothing about whether they differ.
+#      address the node actually holds. The node-labels role asserts this per node,
+#      and vswitch-vlan asserts the interface address matches the node's declared
+#      `private_address`, so a wrong node fails the playbook rather than the cluster.
+#      Do not skip this because the annotations "look set" — presence proves nothing
+#      about whether they differ.
 #   2. Remove `suspend: true` from
 #      kubernetes/clusters/yral-k8s/infrastructure-kilo.yaml. There is no nodeSelector
 #      to add: all 40 nodes are in scope and all 40 are ready.

@@ -35,9 +35,9 @@ spec:
   # both annotations until the annotation source was fixed.
   #
   # This is enforced at the source: the node-labels role asserts it per node and fails
-  # the run, and vswitch-vlan asserts the configured address matches the shared
-  # vswitch_node_addresses map. So a node that would break the mesh fails the playbook
-  # rather than the cluster.
+  # the run, and vswitch-vlan asserts the interface address matches the node's declared
+  # `private_address`. So a node that would break the mesh fails the playbook rather
+  # than the cluster.
   #
   # ── DECISIVE CHECK AFTER UNSUSPENDING ──────────────────────────────────────
   # kilo.squat.ai/leader must be "true" on EXACTLY ONE node per location — two, for

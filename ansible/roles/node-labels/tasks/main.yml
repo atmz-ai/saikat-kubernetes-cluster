@@ -86,20 +86,19 @@
 # case the allocated public IP should be specified").
 #
 # The peer address is resolved in two steps, and the ORDER matters:
-#   1. `kilo_peer_address`, set per host in the inventory — the escape hatch, and the
-#      only correct source for a cloud node, whose private address is not derivable
-#      from anything else in the inventory.
-#   2. `vswitch_node_addresses` (group_vars/all/vars.yml), keyed by region + hostname —
-#      the VLAN address the vswitch-vlan role configured. This is what makes the fix
-#      reach the node: without it the peer address falls through to the public IP,
-#      equals the endpoint, and the assert below stops the run.
+#   1. `kilo_peer_address`, set per host in the inventory — the escape hatch, for a node
+#      whose mesh identity is not its `private_address` (in practice: no node today).
+#   2. `private_address` (inventory/hosts.yml), the VLAN address the vswitch-vlan role
+#      configured on the node. This is what makes the fix reach the node: without it the
+#      peer address falls through to the public IP, equals the endpoint, and the assert
+#      below stops the run.
 #   3. `ansible_host`, only as a last resort so a failure names the node rather than
 #      raising `undefined` far from the cause.
 #
-# Read from group_vars rather than a fact set by the vswitch-vlan role: that role runs
-# in its own play, so its facts never reach this one, and the earlier attempt to use
-# them left every annotation pointing at the public IP. A cluster-wide variable cannot
-# be missed that way.
+# Read from `hostvars`, not a fact set by the vswitch-vlan role: that role runs in its
+# own play, so its facts never reach this one, and an earlier attempt to use them left
+# every annotation pointing at the public IP. An inventory host var cannot be missed
+# that way.
 #
 # The endpoint needs no such lookup: it is the address peers DIAL, which for every
 # provider is the public one already in `ansible_host`.
@@ -119,22 +118,13 @@
 # and the etcd peer/advertise addresses have to move to the private address, which is
 # the same change `node_provider_address` makes for cloud nodes.
 - name: Resolve the addresses the Kilo mesh uses for this node
-  # The region lookup is inlined into the peer-address expression rather than read from
-  # `kilo_node_region` below: facts defined in ONE set_fact are not visible to their
-  # siblings during evaluation, so referencing it here fails with
-  # "'kilo_node_region' is undefined" — a confusing error, since the key is right there.
   ansible.builtin.set_fact:
     kilo_node_endpoint_address: >-
       {{ kilo_endpoint_address | default(hostvars[inventory_hostname]['ansible_host']) }}
     kilo_node_peer_address: >-
       {{ kilo_peer_address
-         | default(vswitch_node_addresses.get(
-             hostvars[inventory_hostname]['region']
-               | default(hostvars[inventory_hostname]['location'] | default('')),
-             {}).get(inventory_hostname, hostvars[inventory_hostname]['ansible_host']), true) }}
-    kilo_node_region: >-
-      {{ hostvars[inventory_hostname]['region']
-         | default(hostvars[inventory_hostname]['location'] | default('')) }}
+         | default(hostvars[inventory_hostname]['private_address']
+                   | default(hostvars[inventory_hostname]['ansible_host'])) }}
 
 - name: Fail if the mesh identity and the endpoint are the same address
   # This is the second outage, turned into a precondition. Kilo skips any node whose
@@ -163,8 +153,8 @@
       '{{ kilo_node_peer_address }}' and endpoint '{{ kilo_node_endpoint_address }}'.
       Kilo requires them to DIFFER — an internal address equal to the endpoint makes
       Kilo skip the node entirely ("we cannot encapsulate traffic to an IP through the
-      IP"), leaving it NotReady. Check `kilo_peer_address` / `kilo_endpoint_address`
-      in the inventory and `vswitch_node_addresses` in group_vars/all/vars.yml.
+      IP"), leaving it NotReady. Check `kilo_peer_address` in the inventory and
+      `private_address` for this node in inventory/hosts.yml.
 
 - name: Apply Kilo mesh annotations to node
   ansible.builtin.command: >

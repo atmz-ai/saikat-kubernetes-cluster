@@ -28,92 +28,87 @@
       not in vswitch_subnets ({{ vswitch_subnets.keys() | list }}). Refusing to guess
       a subnet — the wrong one breaks peer reachability silently.
 
-# The address comes from `vswitch_node_addresses` (group_vars/all/vars.yml), which is
-# the source of truth and is also what the node-labels role puts in the Kilo
-# annotation. Both roles read the same map, so the address the mesh routes to and the
-# address configured on the interface cannot drift apart — which is exactly how the
-# first attempt at this work ended up with 40 VLAN interfaces that nothing used.
-#
-# The map is keyed by region then hostname. Missing means an unlisted node, and the
-# assert below names it rather than silently deriving a different address here.
-- name: Fail if this node has no address in vswitch_node_addresses
+# The address comes from `private_address` in inventory/hosts.yml — declared next to
+# the node's `ansible_host`, and also what the node-labels role puts in the Kilo
+# annotation. Both roles read the same host var, so the address the mesh routes to and
+# the address configured on the interface cannot drift apart — which is exactly how an
+# earlier attempt at this work ended up with 40 VLAN interfaces that nothing used.
+- name: Fail if this node has no private address declared
   ansible.builtin.assert:
     that:
-      - vswitch_node_addresses[vswitch_node_region] is defined
-      - inventory_hostname in vswitch_node_addresses[vswitch_node_region]
+      - private_address is defined
+      - private_address | length > 0
     fail_msg: >-
-      Node {{ inventory_hostname }} (region {{ vswitch_node_region }}) has no entry in
-      vswitch_node_addresses ({{ vswitch_node_addresses.keys() | list }}). Add it
-      there — deriving one instead would hand out an address the mesh does not know.
+      Node {{ inventory_hostname }} has no `private_address` in
+      inventory/hosts.yml. Every node needs one — it is both the address configured on
+      this VLAN interface and the address the mesh routes to. Refusing to derive one:
+      a position-derived octet renumbers nodes when the fleet list changes.
 
-# ── Verify the derived position still agrees with the explicit map ───────────
-# The map is authoritative and this role does NOT use the derivation. It is computed
-# only to be CHECKED, because the derivation is what the live fleet was originally
-# addressed with, and a silent disagreement between the two would mean one of them is
-# stale. A position-derived octet is not safe to keep using: removing a node RENUMBERS
-# every node sorted after it, so an address computed this way can move under a running
-# node — and two nodes sharing an address fails as an intermittent outage, not an error.
-#
-# Kept as a cross-check specifically while the fleet transitions: if this ever fires,
-# the map is wrong for this node and the VLAN would come up carrying an address the
-# mesh does not route to.
-- name: Start the region node list empty
-  # Reset explicitly: a set_fact persists for the rest of the play, so without this a
-  # second run of the role would append to the previous list and hand out doubled
-  # octets.
-  ansible.builtin.set_fact:
-    vswitch_region_nodes: []
-
-- name: Collect the nodes in this region
-  # An accumulating loop, deliberately not a selectattr chain. The list is hostname
-  # STRINGS and selectattr tests attributes on the items themselves, so
-  # selectattr('region', 'equalto', X) silently matches nothing — `region` lives in
-  # hostvars[hostname], not on the string. That produced an empty list which then
-  # failed much later, at list.index(), pointing nowhere near the cause.
-  #
-  # `groups['k8s_cluster'] | sort` so the accumulated order is sorted, making the
-  # cross-check below reproducible rather than inventory-order-dependent.
-  #
-  # Built from groups['k8s_cluster'] rather than the `vswitch` role's vswitch_hosts:
-  # role defaults are not shared between roles, and region is all that matters here.
-  ansible.builtin.set_fact:
-    vswitch_region_nodes: "{{ vswitch_region_nodes + [item] }}"
-  loop: "{{ groups['k8s_cluster'] | sort }}"
-  when:
-    - item in hostvars
-    - (hostvars[item]['region'] | default(hostvars[item]['location'] | default(''))) == vswitch_node_region
-
-- name: Fail if the position-derived address disagrees with the explicit map
+# ── Sanity-check the declared address ────────────────────────────────────────
+# Two checks, both of which catch a failure that is otherwise silent. An interface with
+# an address from the wrong subnet, or shared with another node, comes UP and carries
+# nothing — it does not error, because a VLAN subinterface with any address is a valid
+# interface. The symptom would be an unreachable peer, attributed to the mesh rather
+# than to the address.
+- name: Fail if the private address is outside this node's region subnet
   ansible.builtin.assert:
     that:
       - >-
-        vswitch_node_addresses[vswitch_node_region][inventory_hostname]
-        == (vswitch_subnets[vswitch_node_region].split('/')[0].split('.')[0:3] | join('.'))
-           ~ '.' ~ (vswitch_host_octet_base + vswitch_region_nodes.index(inventory_hostname))
+        private_address.split('.')[0:3] | join('.')
+        == vswitch_subnets[vswitch_node_region].split('/')[0].split('.')[0:3] | join('.')
     fail_msg: >-
-      Node {{ inventory_hostname }} is listed as
-      {{ vswitch_node_addresses[vswitch_node_region][inventory_hostname] }} in
-      vswitch_node_addresses, but its position in the sorted
-      {{ vswitch_node_region }} node list (index
-      {{ vswitch_region_nodes.index(inventory_hostname) }} of
-      {{ vswitch_region_nodes | length }}) derives
-      {{ vswitch_subnets[vswitch_node_region].split('/')[0].split('.')[0:3] | join('.') }}.{{
-         vswitch_host_octet_base + vswitch_region_nodes.index(inventory_hostname) }}.
-      The map is authoritative and is applied; this means the fleet list changed and
-      the two have diverged. Update the map deliberately rather than relying on the
-      derivation, which renumbers nodes when the list changes.
+      Node {{ inventory_hostname }} declares private_address {{ private_address }},
+      which is outside its region subnet {{ vswitch_subnets[vswitch_node_region] }}
+      (region {{ vswitch_node_region }}). A node on the wrong subnet is on-link with
+      the wrong peers and reaches none of its own — and nothing reports an error,
+      because any address is valid on a VLAN subinterface.
 
-- name: Set this node's address from the map
+- name: Start the declared-address list empty
+  # A separate task from the loop below, and not a `vars:` entry on it: a value cannot
+  # be both reset and accumulated within one task, and doing it in `vars:` would shadow
+  # the accumulator so the loop appends to a private copy and the assert sees nothing.
+  #
+  # Reset explicitly because a set_fact persists for the rest of the play, so on a
+  # second run the list would already hold the first run's addresses and report false
+  # duplicates.
   ansible.builtin.set_fact:
-    vswitch_node_address: "{{ vswitch_node_addresses[vswitch_node_region][inventory_hostname] }}"
+    vswitch_declared_addresses: []
+
+- name: Collect every declared private address in the cluster
+  # Uniqueness was implicit while these lived in a dict (duplicate keys are impossible
+  # in YAML — one silently wins). Per-host declarations lose that, and a duplicate
+  # address is the worst class of failure here: two nodes answering for one IP, which
+  # presents as an intermittent, hard-to-attribute outage rather than a clean error.
+  # So the invariant is now stated rather than inherited from the data structure.
+  ansible.builtin.set_fact:
+    vswitch_declared_addresses: >-
+      {{ vswitch_declared_addresses + [hostvars[item]['private_address']] }}
+  loop: "{{ groups['k8s_cluster'] | sort }}"
+  when:
+    - item in hostvars
+    - hostvars[item]['private_address'] is defined
+
+- name: Fail if any two nodes share a private address
+  ansible.builtin.assert:
+    that:
+      - vswitch_declared_addresses | length == vswitch_declared_addresses | unique | length
+    fail_msg: >-
+      Two or more nodes declare the same private_address. Declared addresses:
+      {{ vswitch_declared_addresses | sort }}. Every node needs a unique address on its
+      region subnet — a duplicate means two nodes claim one IP, which fails
+      intermittently and is very hard to attribute. Give one of them a free address in
+      its region subnet (see vswitch_subnets).
+
+- name: Set this node's address
+  ansible.builtin.set_fact:
+    vswitch_node_address: "{{ private_address }}"
     vswitch_node_cidr: >-
-      {{ vswitch_node_addresses[vswitch_node_region][inventory_hostname] }}/{{
-         vswitch_subnets[vswitch_node_region].split('/')[1] }}
+      {{ private_address }}/{{ vswitch_subnets[vswitch_node_region].split('/')[1] }}
 
 - name: Show the resolved addressing
   ansible.builtin.debug:
     msg:
-      - "region:  {{ vswitch_node_region }} ({{ vswitch_region_nodes | length }} nodes)"
+      - "region:  {{ vswitch_node_region }}"
       - "subnet:  {{ vswitch_subnets[vswitch_node_region] }}"
       - "address: {{ vswitch_node_cidr }}"
 

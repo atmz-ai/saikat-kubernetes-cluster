@@ -139,12 +139,6 @@ vswitch_subnets:
   falkenstein: "172.20.10.0/24"
   helsinki: "172.20.20.0/24"
 
-# First host octet handed out inside a region subnet; a node's octet is this plus its
-# position in the region's sorted node list (see the vswitch-vlan role). Starting at
-# 10 rather than 1 leaves the low addresses free for a future gateway or router on
-# the VLAN, which is where one conventionally goes.
-vswitch_host_octet_base: 10
-
 # Parent interface — every Hetzner bare-metal node in this cluster reports this
 # (the provisioning role's installimage layout). NOT auto-detected: guessing the
 # wrong parent would take the node's primary interface down.
@@ -156,69 +150,29 @@ vswitch_vlan_parent: "enp0s31f6"
 vswitch_vlan_mtu: 1400
 
 # ── Per-node private addresses (the mesh's internal identity) ────────────────
-# EXPLICIT, not derived. The vswitch-vlan role can compute an address from a node's
-# position in its region's sorted node list, and that is how the live 40-node fleet
-# was addressed. But a position-derived octet is only stable while the node set is
-# stable: removing a node RENUMBERS every node sorted after it, and adding one can
-# collide with an address a node already holds. It happens to be collision-free at 40
-# nodes — that is a coincidence of the current list, not a property of the scheme, and
-# two nodes sharing an address fails as an intermittent, hard-to-attribute outage
-# rather than a clean error.
+# Declared per host in inventory/hosts.yml as `private_address`, next to the node's
+# `ansible_host`. Deliberately NOT a cluster-wide map keyed by region: a node has
+# exactly one private address, so the inventory host entry is its natural home, and
+# keeping it there means adding a node is one edit in one file rather than two edits
+# that can disagree.
 #
-# This map is therefore the source of truth, and the vswitch-vlan role ASSERTS that
-# what it would have derived matches what is listed here. A mismatch is a loud
-# failure instead of a silent renumbering of a working peer.
+# (An earlier version of this file held a `vswitch_node_addresses` map keyed by region
+# then hostname. It worked, but it split one fact across two files and duplicated the
+# host list that the inventory already carries.)
 #
-# Keys are topology.kubernetes.io/region values; each node gets a /24 in its region's
-# subnet. This map must be kept in step with the fleet — a node missing from it fails
-# the assert by name, which is the intended behaviour.
+# This is NOT derived, and the vswitch-vlan role asserts the configured interface
+# matches it. The role CAN compute an address from a node's position in its region's
+# sorted node list — that is how the current 40-node fleet was originally addressed —
+# but a position-derived octet is only stable while the node set is stable: removing a
+# node RENUMBERS every node sorted after it, and adding one can collide with an address
+# another node already holds. Collision-free at 40 nodes is a coincidence of the current
+# list, not a property of the scheme, and two nodes sharing an address fails as an
+# intermittent, hard-to-attribute outage rather than a clean error. Declaring it makes
+# the address stable and reviews it as a change.
 #
-# The values below are the addresses ACTUALLY CONFIGURED on the nodes (read back from
-# `ip -4 addr show dev enp0s31f6.4000` on all 40), so this describes the live fleet
+# The values in hosts.yml are the addresses ACTUALLY CONFIGURED on the nodes (read back
+# from `ip -4 addr show dev enp0s31f6.4000` on all 40), so they describe the live fleet
 # rather than re-deriving it and hoping.
-vswitch_node_addresses:
-  falkenstein:
-    node-2: 172.20.10.10
-    node-7: 172.20.10.11
-    worker-1: 172.20.10.12
-    worker-11: 172.20.10.13
-    worker-14: 172.20.10.14
-    worker-15: 172.20.10.15
-    worker-19: 172.20.10.16
-    worker-2: 172.20.10.17
-    worker-20: 172.20.10.18
-    worker-22: 172.20.10.19
-    worker-27: 172.20.10.20
-    worker-28: 172.20.10.21
-    worker-29: 172.20.10.22
-    worker-3: 172.20.10.23
-    worker-30: 172.20.10.24
-    worker-31: 172.20.10.25
-    worker-4: 172.20.10.26
-    worker-5: 172.20.10.27
-    worker-6: 172.20.10.28
-    worker-7: 172.20.10.29
-    worker-8: 172.20.10.30
-    worker-9: 172.20.10.31
-  helsinki:
-    node-1: 172.20.20.10
-    node-3: 172.20.20.11
-    node-4: 172.20.20.12
-    node-5: 172.20.20.13
-    node-6: 172.20.20.14
-    worker-10: 172.20.20.15
-    worker-16: 172.20.20.16
-    worker-17: 172.20.20.17
-    worker-18: 172.20.20.18
-    worker-21: 172.20.20.19
-    worker-23: 172.20.20.20
-    worker-24: 172.20.20.21
-    worker-25: 172.20.20.22
-    worker-26: 172.20.20.23
-    worker-32: 172.20.20.24
-    worker-33: 172.20.20.25
-    worker-34: 172.20.20.26
-    worker-35: 172.20.20.27
 
 # ── Mesh identity: what the CNI routes to vs where peers dial ────────────────
 # Kilo needs TWO addresses per node, and they are not the same address in general.
