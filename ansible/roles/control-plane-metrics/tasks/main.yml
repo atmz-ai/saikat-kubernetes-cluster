@@ -32,6 +32,36 @@
   changed_when: false
   failed_when: false
 
+- name: Check current etcd heartbeat-interval in static manifest
+  # The etcd manifest is checked for its OWN extraArgs now, rather than assumed
+  # unchanged. The original version of this role asserted etcd needed nothing, which
+  # was true when the only extraArgs were bind addresses; the heartbeat/election
+  # timeouts are extraArgs too, so etcd joins the staleness check.
+  ansible.builtin.command: >-
+    grep -q -- '--heartbeat-interval={{ etcd_heartbeat_interval_milliseconds }}'
+    /etc/kubernetes/manifests/etcd.yaml
+  register: etcd_heartbeat_check
+  changed_when: false
+  failed_when: false
+
+- name: Check current etcd election-timeout in static manifest
+  ansible.builtin.command: >-
+    grep -q -- '--election-timeout={{ etcd_election_timeout_milliseconds }}'
+    /etc/kubernetes/manifests/etcd.yaml
+  register: etcd_election_check
+  changed_when: false
+  failed_when: false
+
+- name: Determine whether the etcd static pod manifest needs regeneration
+  # Checked SEPARATELY from the controller-manager/scheduler pair because the two
+  # carry very different risk and must not be coupled. Restarting an etcd member is
+  # a quorum-affecting operation; restarting controller-manager is not. Keeping the
+  # flags apart means an etcd rollout can be staged and verified on its own, and a
+  # controller-manager-only change does not silently drag etcd with it.
+  ansible.builtin.set_fact:
+    control_plane_metrics_etcd_manifest_stale: >-
+      {{ (etcd_heartbeat_check.rc != 0) or (etcd_election_check.rc != 0) }}
+
 - name: Determine whether static pod manifests need regeneration
   ansible.builtin.set_fact:
     control_plane_metrics_manifests_stale: "{{ (controller_manager_bind_check.rc != 0) or (scheduler_bind_check.rc != 0) }}"
@@ -41,6 +71,7 @@
     msg:
       - "Node: {{ ansible_facts['hostname'] }}"
       - "Static pod manifests stale: {{ control_plane_metrics_manifests_stale }}"
+      - "etcd manifest stale: {{ control_plane_metrics_etcd_manifest_stale }}"
 
 - name: Regenerate static pod manifests with kubeadm phases
   when: control_plane_metrics_manifests_stale
@@ -86,6 +117,155 @@
       retries: 6
       delay: 10
       changed_when: false
+
+# ── etcd static pod: the quorum-affecting half of this role ──────────────────
+# Kept in its own block (and its own staleness flag) because restarting an etcd
+# member is a fundamentally more dangerous operation than restarting
+# controller-manager, and must be stageable and verifiable on its own.
+#
+# WHAT MAKES IT SAFE: the manifest is regenerated for ONE node at a time (this
+# playbook is serial: 1), so at most one member is restarting at any moment. With
+# 7 members and quorum 4, one member down leaves 6 — and etcd's own rule is that a
+# rolling restart of a single member is a safe operation as long as the cluster is
+# healthy before each step. That precondition is asserted below rather than assumed,
+# because restoring quorum after the fact is not possible.
+- name: Reconcile etcd timeouts on this node
+  when: control_plane_metrics_etcd_manifest_stale
+  block:
+    - name: Assert the etcd cluster is healthy before touching this member
+      # Health is checked from THIS node's local etcdctl against the whole cluster,
+      # immediately before its manifest is rewritten. A member is never restarted
+      # while the cluster is already degraded — in that state a restart turns a
+      # partial outage into a full one, which is the single worst outcome available
+      # here.
+      ansible.builtin.command: >
+        kubectl --kubeconfig /etc/kubernetes/admin.conf exec -n kube-system etcd-{{ ansible_facts['hostname'] }} --
+        etcdctl
+        --endpoints=https://127.0.0.1:2379
+        --cacert=/etc/kubernetes/pki/etcd/ca.crt
+        --cert=/etc/kubernetes/pki/etcd/server.crt
+        --key=/etc/kubernetes/pki/etcd/server.key
+        endpoint health --cluster
+      register: etcd_health_before
+      changed_when: false
+      retries: 3
+      delay: 5
+      until: etcd_health_before.rc == 0
+      failed_when: false
+
+    - name: Fail if the etcd cluster is not fully healthy
+      ansible.builtin.assert:
+        that:
+          - etcd_health_before.rc == 0
+          - "'is unhealthy' not in etcd_health_before.stdout"
+        fail_msg: >-
+          Refusing to restart etcd on {{ ansible_facts['hostname'] }}: the cluster is
+          not fully healthy right now, so a member restart could lose quorum rather
+          than roll safely. Cluster health output:
+          {{ etcd_health_before.stdout }} {{ etcd_health_before.stderr }}
+        success_msg: "All etcd members healthy — safe to roll this one."
+
+    - name: Record this node's etcd member id before the restart
+      # Captured so the member can be identified in `etcdctl member list` after the
+      # restart. The static pod restart is the risky part; this makes it possible to
+      # confirm the SAME member came back rather than a new one appearing.
+      ansible.builtin.shell: |
+        set -o pipefail
+        kubectl --kubeconfig /etc/kubernetes/admin.conf exec -n kube-system etcd-{{ ansible_facts['hostname'] }} -- \
+          etcdctl --endpoints=https://127.0.0.1:2379 \
+            --cacert=/etc/kubernetes/pki/etcd/ca.crt \
+            --cert=/etc/kubernetes/pki/etcd/server.crt \
+            --key=/etc/kubernetes/pki/etcd/server.key \
+            endpoint status --write-out=json \
+          | grep -o '"ID":[0-9]*' | cut -d: -f2
+      register: etcd_member_id_before
+      changed_when: false
+      failed_when: false
+
+    - name: Regenerate the etcd static pod manifest
+      # Same supported mechanism as the other two components: a kubeadm phase, not a
+      # manifest edit. `init phase etcd local` rewrites /etc/kubernetes/manifests/
+      # etcd.yaml from the ClusterConfiguration, and the kubelet notices the change
+      # and restarts the pod.
+      #
+      # A restarted etcd member re-reads its data directory and rejoins the existing
+      # cluster with the new timeouts; it does NOT re-render any TLS material, so
+      # this needs no certificate work.
+      ansible.builtin.command: >
+        kubeadm init phase etcd local --config /etc/kubernetes/kubeadm-control-plane-metrics.yaml
+      register: kubeadm_phase_etcd
+      changed_when: true
+
+    - name: Display kubeadm etcd phase output
+      ansible.builtin.debug:
+        msg: "{{ kubeadm_phase_etcd.stdout_lines + kubeadm_phase_etcd.stderr_lines }}"
+
+    - name: Wait for this node's etcd static pod to return
+      # The pod name is stable (it is the mirror-pod name), and the kubelet
+      # recreates it after the manifest change. `wait --for=condition=ready` on a
+      # mirror pod returns as soon as the new container passes its probes.
+      ansible.builtin.command: >
+        kubectl --kubeconfig /etc/kubernetes/admin.conf wait --for=condition=ready
+        pod -n kube-system etcd-{{ ansible_facts['hostname'] }} --timeout=300s
+      register: etcd_pod_ready
+      retries: 6
+      delay: 10
+      changed_when: false
+
+    - name: Assert the whole etcd cluster is healthy after the restart
+      # The rollout's real gate. A single member being Ready does not mean the
+      # cluster has quorum — the member could have come back unable to reach its
+      # peers. Checking the cluster, from this node, is what proves the member
+      # rejoined rather than merely started.
+      ansible.builtin.command: >
+        kubectl --kubeconfig /etc/kubernetes/admin.conf exec -n kube-system etcd-{{ ansible_facts['hostname'] }} --
+        etcdctl
+        --endpoints=https://127.0.0.1:2379
+        --cacert=/etc/kubernetes/pki/etcd/ca.crt
+        --cert=/etc/kubernetes/pki/etcd/server.crt
+        --key=/etc/kubernetes/pki/etcd/server.key
+        endpoint health --cluster
+      register: etcd_health_after
+      changed_when: false
+      retries: 10
+      delay: 6
+      until: etcd_health_after.rc == 0 and 'is unhealthy' not in etcd_health_after.stdout
+      failed_when: false
+
+    - name: Fail if the etcd cluster did not recover
+      ansible.builtin.assert:
+        that:
+          - etcd_health_after.rc == 0
+          - "'is unhealthy' not in etcd_health_after.stdout"
+        fail_msg: >-
+          etcd cluster is NOT healthy after restarting
+          {{ ansible_facts['hostname'] }}. STOP — do not continue to the next node.
+          Cluster health: {{ etcd_health_after.stdout }} {{ etcd_health_after.stderr }}
+        success_msg: "etcd cluster healthy after restarting {{ ansible_facts['hostname'] }}."
+
+    - name: Confirm the member rejoined with the intended timeouts
+      ansible.builtin.shell: |
+        set -o pipefail
+        kubectl --kubeconfig /etc/kubernetes/admin.conf exec -n kube-system etcd-{{ ansible_facts['hostname'] }} -- \
+          etcdctl --endpoints=https://127.0.0.1:2379 \
+            --cacert=/etc/kubernetes/pki/etcd/ca.crt \
+            --cert=/etc/kubernetes/pki/etcd/server.crt \
+            --key=/etc/kubernetes/pki/etcd/server.key \
+            endpoint status --write-out=json \
+          | grep -o '"ID":[0-9]*' | cut -d: -f2
+      register: etcd_member_id_after
+      changed_when: false
+      failed_when: false
+
+    - name: Report the etcd reconciliation for this node
+      ansible.builtin.debug:
+        msg:
+          - "etcd reconciled on {{ ansible_facts['hostname'] }}"
+          - "  heartbeat-interval: {{ etcd_heartbeat_interval_milliseconds }}ms"
+          - "  election-timeout:   {{ etcd_election_timeout_milliseconds }}ms"
+          - "  member id before:   {{ etcd_member_id_before.stdout | default('unknown') }}"
+          - "  member id after:    {{ etcd_member_id_after.stdout | default('unknown') }}"
+          - "  (ids matching confirms the SAME member rejoined, not a new one)"
 
 - name: Verify metrics endpoints are reachable on this node
   block:

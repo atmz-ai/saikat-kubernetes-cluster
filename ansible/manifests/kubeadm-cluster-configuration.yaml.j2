@@ -144,3 +144,48 @@ etcd:
         value: https://0.0.0.0:2380
       - name: listen-client-urls
         value: https://0.0.0.0:2379
+
+    # ── etcd timeouts, sized for the SLOWEST member ──────────────────────────
+    # Cluster-wide settings that etcd requires to be IDENTICAL on every member:
+    #
+    #   "The heartbeat interval and election timeout value should be the same for
+    #    all members in one cluster. Setting different values for etcd members may
+    #    disrupt cluster stability."  — etcd.io/docs/v3.6/tuning
+    #
+    # So they live here, in the shared config, rather than on the slow nodes alone.
+    # A per-node value is exactly the destabilising configuration that warning
+    # describes.
+    #
+    # WHY THEY NEED RAISING. etcd ships defaults sized for a local network:
+    # heartbeat 100ms, election 1000ms. This cluster is not local — since the Azure
+    # control planes joined it spans Central India to Europe, where measured
+    # member-to-member RTT is 127-148ms (against 36ms between the two Hetzner DCs).
+    # etcd's rules are heartbeat ≧ 0.5-1.5x RTT and election ≧ 10x RTT, so at 148ms
+    # they require ≧ ~150ms and ≧ ~1480ms — both above the defaults. Keeping the
+    # defaults means a slow heartbeat or a transient delay on the India-Europe path
+    # can be read as leader failure, triggering elections on a healthy cluster.
+    # That false-election risk is why the election timeout has a 10x floor rather
+    # than a 3x one.
+    #
+    # THE VALUES: 250ms / 2500ms — ~1.7x and ~17x the worst RTT. 250ms sits at the
+    # upper end of the 0.5-1.5x heartbeat band, which is the right end when one
+    # member is a WAN hop because it absorbs jitter as well as mean RTT. Both are
+    # far inside the 50000ms ceiling etcd allows for globally-distributed clusters,
+    # and 2500ms is nowhere near a value that would mask a genuinely dead leader.
+    #
+    # THE COST, stated plainly: leader failure now takes up to 2.5s to detect rather
+    # than 1s. That is the trade etcd's guidance prescribes, and it is the safe
+    # direction — a late election degrades availability for a couple of seconds,
+    # whereas a spurious election degrades a healthy cluster.
+    #
+    # CHANGES HERE DO NOT REACH RUNNING PODS. kubeadm writes static pod manifests
+    # only at init/join/upgrade time, like the args above, so existing members need
+    # `reconcile-control-plane-metrics.yml` (serial, canary first) to converge. A
+    # JOINING member reads them from the kubeadm-config ConfigMap, which that same
+    # playbook uploads — so the upload must happen BEFORE any node joins, because
+    # etcd refuses to run when member values disagree.
+    extraArgs:
+      - name: heartbeat-interval
+        value: "{{ etcd_heartbeat_interval_milliseconds }}"
+      - name: election-timeout
+        value: "{{ etcd_election_timeout_milliseconds }}"

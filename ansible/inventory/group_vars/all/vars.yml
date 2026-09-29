@@ -9,6 +9,30 @@
 kubernetes_version: "1.36.4"
 service_node_port_range: "80-32767"
 
+# etcd heartbeat / election timeouts, in milliseconds.
+#
+# CLUSTER-WIDE BY REQUIREMENT, not by preference: etcd requires these to be the same
+# on every member ("Setting different values for etcd members may disrupt cluster
+# stability" — etcd.io/docs/v3.6/tuning), so a per-node value is not an option even
+# though only the WAN members need the raised numbers.
+#
+# Sized from the SLOWEST member-to-member RTT in the cluster, which is the Azure
+# Central India control planes talking to the Hetzner ones: measured 127-148ms,
+# against 36ms between the two Hetzner DCs and 3-4ms between the Azure nodes. etcd's
+# rules are heartbeat ≧ 0.5-1.5x RTT and election ≧ 10x RTT, which at 148ms means
+# ≧ ~150ms and ≧ ~1480ms — both above etcd's 100ms/1000ms defaults, so the defaults
+# cannot be kept once a WAN member is in the quorum.
+#
+# 250ms / 2500ms: ~1.7x and ~17x the worst RTT. The cost is that leader failure takes
+# up to 2.5s to detect instead of 1s; the benefit is that jitter on the India-Europe
+# path is not mistaken for a dead leader, which would cause spurious elections on a
+# healthy cluster. See the full reasoning on the template that consumes these.
+#
+# Re-measure these if the node set changes — they are derived from the fleet's worst
+# RTT, not from a constant.
+etcd_heartbeat_interval_milliseconds: 250
+etcd_election_timeout_milliseconds: 2500
+
 # Hetzner Robot API credentials
 hetzner_robot_api_user: "#ws+hEJX77Pr"
 hetzner_robot_api_password: "{{ vault_hetzner_robot_api_password }}" # Indirection to vault
