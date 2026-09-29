@@ -59,6 +59,34 @@ a moment to appear. Two false negatives in a row, from code that looked like it 
 checking. A collection module returns a structured result and handles the empty-body
 201 itself; this is exactly the class of bug the Hard Rule above exists to prevent.
 
+## Duplicate YAML keys are silent — and untested in `.j2` templates
+
+A YAML mapping with a key repeated within it keeps only the **last** occurrence. A second
+`extraArgs:` block under kubeadm's `etcd` does not merge — it *replaces* the first, so the
+dropped args vanish with no error anywhere. This happened: the etcd listen URLs never
+reached a node, which is invisible on Hetzner (the public IP is on the interface) and
+fatal on a NAT'd cloud VM.
+
+`ansible-lint` already has `yaml[key-duplicates]` and it catches this in `.yml`/`.yaml`.
+**It does not check `.j2` templates** (verified: the same duplicate key is a failure in a
+`.yaml` and passes silently in a `.j2`). `ansible/manifests/kubeadm-cluster-configuration.yaml.j2`
+is the file that matters here, so check it by hand when editing it — render it and parse
+the result, or read the rendered output:
+
+```sh
+./.venv/bin/python3 -c "
+import yaml,sys; from jinja2 import Environment,FileSystemLoader
+e=Environment(loader=FileSystemLoader('ansible/manifests'),trim_blocks=True,lstrip_blocks=True)
+yaml.safe_load(e.get_template('kubeadm-cluster-configuration.yaml.j2').render(
+    kubernetes_version='1.36.4', control_plane_endpoint='x:6443', pod_network_cidr='10.244.0.0/16',
+    service_node_port_range='30000-32767', etcd_heartbeat_interval_milliseconds=250,
+    etcd_election_timeout_milliseconds=2500, api_server_cert_sans=['x']))
+print('renders as valid YAML')"
+```
+
+Note `yaml.safe_load` cannot detect the duplicate itself — it drops the key while parsing.
+Only `yaml.compose_all` (which walks the node graph) or ansible-lint's own check sees it.
+
 ## Secrets and vault
 
 - Ansible vault is the source for cluster-ops secrets; roles consume `vault_*` vars.

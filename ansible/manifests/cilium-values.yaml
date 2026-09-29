@@ -177,10 +177,17 @@ prometheus:
 # Enable health checking
 healthChecking: true
 
-# VXLAN tunnel mode: encapsulates pod traffic, fully compatible with Hetzner's L3
-# routing. Native/direct routing caused packet reflection (VIP responses routed
-# back to gateway because VIPs are not bound to any local interface).
-# Note: 'tunnel' key was removed in Cilium 1.15; use routingMode + tunnelProtocol instead.
+# * Cross-provider routing (VXLAN tunnel). Kept in sync with the day-2 HelmRelease.
+#
+# ! do NOT add an overlay, mesh, or route-claiming agent on top of Cilium.
+# ! squat/kilo was added for this and removed — two implementations of one layer fight
+# ! over the same pod-CIDR routes, and a broken host route stalls Flux because the
+# ! apiserver calls admission webhooks. Cilium's "the topology of the underlying network
+# ! is irrelevant" property is what makes one CNI sufficient across Hetzner + Azure.
+#
+# * Native/direct routing was tried and causes packet reflection (VIP responses routed
+# * back to the gateway because VIPs are not bound to any local interface).
+# * Note: the 'tunnel' key was removed in Cilium 1.15; use routingMode + tunnelProtocol.
 tunnelProtocol: vxlan
 routingMode: tunnel
 

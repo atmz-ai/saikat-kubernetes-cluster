@@ -1,42 +1,15 @@
 apiVersion: kubeadm.k8s.io/v1beta4
 kind: ClusterConfiguration
-# Shared kubeadm ClusterConfiguration template — the single declarative source
-# of truth for the cluster. Consumed by:
-#   - ansible/roles/cluster-init (renders at bootstrap, passes to kubeadm init --config)
-#   - ansible/roles/control-plane-join (renders on an existing CP node and uploads
-#     the ConfigMap before a join, since a joining node downloads its config from
-#     that ConfigMap rather than reading a file)
-#   - ansible/roles/control-plane-metrics (renders on existing CP nodes, reconciles
-#     static pod manifests + the kubeadm-config ConfigMap)
-#   - ansible/roles/control-plane-certificates (renders on existing CP nodes,
-#     regenerates the apiserver serving certificate when its SANs have changed)
-# Never patch the kubeadm-config ConfigMap directly — kubeadm generates static
-# pod manifests from this config only at init/join/upgrade time, and ConfigMap
-# edits do NOT propagate to existing manifests.
+# Single declarative source of truth for the cluster, rendered by:
+#   - cluster-init (bootstrap, passed to kubeadm init --config)
+#   - control-plane-join (uploaded to the kubeadm-config ConfigMap before a join,
+#     which is where a joining node reads it from)
+#   - control-plane-metrics / control-plane-certificates (reconcile existing nodes)
 #
-# WHAT CHANGING A VALUE HERE DOES AND DOES NOT AFFECT — the answer differs by
-# whether the node already exists, which is the single most misleading thing about
-# this file:
-#   - NEW nodes (init/join) build their components from this config at the moment
-#     they join, so a change here reaches them automatically.
-#   - EXISTING nodes do NOT converge. A ConfigMap edit reaches no running pod, and
-#     for apiServer.certSANs specifically it cannot: a SAN lives in the certificate,
-#     which kubeadm only writes at init/join time. Every existing node therefore
-#     needs a reconcile playbook — reconcile-control-plane-metrics.yml for component
-#     args, reconcile-control-plane-certificates.yml for SANs.
-#
-# The extraArgs below fix control-plane metrics scrape failures (TargetDown /
-# etcdMembersDown / etcdInsufficientMembers alerts):
-#   - kube-controller-manager and kube-scheduler bind their metrics endpoints
-#     to loopback by default; nodes only have public IPs (no private LAN),
-#     so Prometheus (on a worker) must scrape via the public interface.
-#     bind-address=0.0.0.0 matches the kubelet :10250 posture: delegated
-#     authentication + authorization — the Prometheus service account is
-#     authorized (RBAC verified), anonymous callers are rejected.
-#   - etcd is NOT opened further: Prometheus scrapes the existing
-#     mTLS-protected client port :2379 (see kubernetes/infrastructure/monitoring/
-#     helmrelease.yaml kubeEtcd section). The loopback-only :2381 metrics port
-#     is intentionally left at kubeadm defaults (unused).
+# WARNING: kubeadm writes static pod manifests from this config only at
+# init/join/upgrade time, so a change here does NOT reach an existing node — a
+# ConfigMap edit reaches no running pod. Existing nodes converge only via the
+# reconcile playbooks (see AGENTS.md). Never edit the ConfigMap directly.
 kubernetesVersion: v{{ kubernetes_version }}
 controlPlaneEndpoint: "{{ control_plane_endpoint }}:6443"
 networking:
@@ -51,16 +24,14 @@ encryptionAlgorithm: RSA-2048
 proxy:
   disabled: true
 apiServer:
-  # Additional Subject Alternative Names for the kube-apiserver serving certificate,
-  # beyond what kubeadm derives from controlPlaneEndpoint and the node name/IP.
-  # Sourced from `api_server_cert_sans` in ansible/inventory/hosts.yml.
+  # Additional SANs for the apiserver serving certificate, beyond what kubeadm
+  # derives from controlPlaneEndpoint. Sourced from `api_server_cert_sans`.
   #
-  # ADDING A NAME HERE DOES NOT ADD IT TO A CERTIFICATE THAT ALREADY EXISTS. The
-  # certificate is the gate — a name absent from it fails TLS verification, which
-  # loses all control-plane access even though the API itself is healthy — and
-  # kubeadm will not converge it from this file. Regeneration is a separate
-  # per-node PKI operation; see the control-plane-certificates role, which performs
-  # it and documents the two ways kubeadm silently declines to.
+  # WARNING: the certificate is written only at init/join time, so adding a name
+  # here does not add it to an existing certificate — and a name absent from the
+  # certificate fails TLS verification, losing control-plane access while the API
+  # stays healthy. Existing nodes need reconcile-control-plane-certificates.yml.
+  # Adding a SAN must be ADDITIVE: carry old and new names together.
   #
   # Emitted as an empty list rather than omitted when the variable is unset, so this
   # file stays valid YAML for `kubeadm config` parsing. kubeadm treats an empty
@@ -84,107 +55,28 @@ scheduler:
 etcd:
   local:
     dataDir: /var/lib/etcd
-    # Bind etcd's listeners to 0.0.0.0 while it CONTINUES TO ADVERTISE this node's
-    # concrete address (advertise-client-urls / initial-advertise-peer-urls are
-    # still derived from AdvertiseAddress and are unchanged).
+    # WARNING: exactly ONE `extraArgs:` mapping. A second REPLACES the first (YAML
+    # keeps the last duplicate key) rather than merging — that happened here, so the
+    # listen URLs were silently dropped and nodes bound the generated
+    # `https://<public>:2380`. Harmless on Hetzner, `bind: cannot assign requested
+    # address` on a NAT'd cloud VM, whose advertised address is on no interface.
     #
-    # WHY: kubeadm derives etcd's BIND and ADVERTISE addresses from the SAME value
-    # — `getEtcdCommand` sets both `listen-*-urls` and `*-advertise-*-urls` from
-    # `endpoint.AdvertiseAddress` — and there is no kubeadm field for a separate
-    # bind address (LocalEtcd exposes only dataDir/extraArgs/extraEnvs/certSANs).
-    # So a node that must advertise an address that is NOT on one of its interfaces
-    # gets a manifest etcd cannot start:
+    # listen-client-urls is 0.0.0.0 ALONE — adding 127.0.0.1 makes etcd bind the same
+    # socket twice and refuse to start.
     #
-    #     --listen-peer-urls=https://<public>:2380
-    #     {"level":"error","msg":"creating peer listener failed",
-    #      "error":"listen tcp <public>:2380: bind: cannot assign requested address"}
+    # Timeouts must be IDENTICAL on every member (etcd.io/docs/v3.6/tuning), so they
+    # are cluster-wide. Sized for the slowest member: measured RTT is 127-148ms to
+    # Central India against 36ms between the Hetzner DCs, above the 100ms/1000ms
+    # defaults. Cost: up to 2.5s to detect a dead leader.
     #
-    # That is the case on a NAT'd cloud VM, where the public IP is attached to the
-    # NIC by the provider and appears on no interface (Azure DNATs inbound traffic
-    # to the private address before the VM sees it, so the public address can never
-    # be bound — Microsoft's docs prohibit adding it to the OS). The etcd container
-    # never starts, yet kubeadm has already registered the member, so the join fails
-    # at `etcd-join` with "the etcd member <id> is not started" and leaves a phantom
-    # unstarted learner behind.
-    #
-    # 0.0.0.0 is correct for EVERY provider, which is why this belongs here in the
-    # cluster-wide config rather than in a per-node patch: it covers the public IP on
-    # a bare-metal node (where the public IP is on the interface) and the private
-    # address on a NAT'd VM (the interface address), so no node needs a different
-    # value and there is nothing to keep in per-node sync.
-    #
-    # This does NOT widen exposure. etcd already advertises and serves on the node's
-    # public address over mTLS with client-cert-auth on both the peer and client
-    # ports; 0.0.0.0 only adds coverage of the second interface on a multi-homed host.
-    #
-    # It also does not need a certificate change: TLS validates the address a client
-    # DIALS (the advertised public address, already in the certs), not the address the
-    # server BINDS.
-    #
-    # Setting an extraArg REPLACES kubeadm's generated argument of the same name
-    # (see ArgumentsToCommand: an override with no merge method drops the base arg and
-    # is appended as `--name=value`), so these do not end up duplicated. That makes
-    # this the supported mechanism for this change — unlike editing the generated
-    # manifest, which would depend on the argument's position in an alphabetically
-    # sorted list.
-    #
-    # listen-client-urls is 0.0.0.0 ALONE, deliberately NOT prepended with
-    # 127.0.0.1. kubeadm's generated value is "127.0.0.1,<advertise>" precisely
-    # because it names each address separately, but 0.0.0.0 already covers every
-    # local address INCLUDING loopback — so listing 127.0.0.1 alongside it makes
-    # etcd bind the same socket twice and refuse to start:
-    #
-    #     msg="closing peer listener","address":"0.0.0.0:2379",
-    #     error="listen tcp 127.0.0.1:2379: bind: address already in use"
-    #
-    # The local apiserver reaches etcd at 127.0.0.1:2379 either way: it connects to
-    # a loopback destination and 0.0.0.0 accepts it.
+    # WARNING: existing members do NOT pick this up (manifests are written only at
+    # init/join time) — they need reconcile-control-plane-metrics.yml. The upload to
+    # the kubeadm-config ConfigMap must happen BEFORE a join.
     extraArgs:
       - name: listen-peer-urls
         value: https://0.0.0.0:2380
       - name: listen-client-urls
         value: https://0.0.0.0:2379
-
-    # ── etcd timeouts, sized for the SLOWEST member ──────────────────────────
-    # Cluster-wide settings that etcd requires to be IDENTICAL on every member:
-    #
-    #   "The heartbeat interval and election timeout value should be the same for
-    #    all members in one cluster. Setting different values for etcd members may
-    #    disrupt cluster stability."  — etcd.io/docs/v3.6/tuning
-    #
-    # So they live here, in the shared config, rather than on the slow nodes alone.
-    # A per-node value is exactly the destabilising configuration that warning
-    # describes.
-    #
-    # WHY THEY NEED RAISING. etcd ships defaults sized for a local network:
-    # heartbeat 100ms, election 1000ms. This cluster is not local — since the Azure
-    # control planes joined it spans Central India to Europe, where measured
-    # member-to-member RTT is 127-148ms (against 36ms between the two Hetzner DCs).
-    # etcd's rules are heartbeat ≧ 0.5-1.5x RTT and election ≧ 10x RTT, so at 148ms
-    # they require ≧ ~150ms and ≧ ~1480ms — both above the defaults. Keeping the
-    # defaults means a slow heartbeat or a transient delay on the India-Europe path
-    # can be read as leader failure, triggering elections on a healthy cluster.
-    # That false-election risk is why the election timeout has a 10x floor rather
-    # than a 3x one.
-    #
-    # THE VALUES: 250ms / 2500ms — ~1.7x and ~17x the worst RTT. 250ms sits at the
-    # upper end of the 0.5-1.5x heartbeat band, which is the right end when one
-    # member is a WAN hop because it absorbs jitter as well as mean RTT. Both are
-    # far inside the 50000ms ceiling etcd allows for globally-distributed clusters,
-    # and 2500ms is nowhere near a value that would mask a genuinely dead leader.
-    #
-    # THE COST, stated plainly: leader failure now takes up to 2.5s to detect rather
-    # than 1s. That is the trade etcd's guidance prescribes, and it is the safe
-    # direction — a late election degrades availability for a couple of seconds,
-    # whereas a spurious election degrades a healthy cluster.
-    #
-    # CHANGES HERE DO NOT REACH RUNNING PODS. kubeadm writes static pod manifests
-    # only at init/join/upgrade time, like the args above, so existing members need
-    # `reconcile-control-plane-metrics.yml` (serial, canary first) to converge. A
-    # JOINING member reads them from the kubeadm-config ConfigMap, which that same
-    # playbook uploads — so the upload must happen BEFORE any node joins, because
-    # etcd refuses to run when member values disagree.
-    extraArgs:
       - name: heartbeat-interval
         value: "{{ etcd_heartbeat_interval_milliseconds }}"
       - name: election-timeout

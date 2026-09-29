@@ -157,15 +157,40 @@ Always use well-named, descriptive variable and type names. Never use shortened 
 Modern IDEs and language tooling make long names ergonomic regardless of language. Descriptive names serve as inline documentation and make grep/code-search effective. Abbreviations create cognitive overhead and inconsistency.
 
 **No legacy domain jargon (Hard Rule):** Do not carry over naming from previous platforms. Call things what they actually are in the current system (e.g. `oauth_subject` / `user_id` for user identifiers, `service_id` for service identifiers, SpacetimeDB `Identity` for database identity). When touching code that uses legacy jargon from a prior platform, rename to the accurate current term in the same change. This prevents conflation and makes the code self-documenting.
-### Self-Documenting Code over Comment Narration (Hard Rule)
-**Names and types carry the documentation burden; comments are the fallback, not the default.** Never write narration comments that restate what the code already says ("// loop over the rows", "// return the result", "// create the client") — a reviewer reading two parallel texts loses readability, not gains it. Express intent in identifiers and types first (Descriptive Naming above); comment ONLY what names + types cannot carry: cross-system rationale, invariants, wire-format gotchas, incident/issue references.
+### Comments Are the Exception, Not the Default (Hard Rule)
+**Default to writing no comment. Names and types carry the documentation burden.** We write far too many comments, and a comment is a maintenance liability: it duplicates a decision that already lives in the code, so it drifts, contradicts, and misleads the next reader. Before writing one, ask whether a better name or type would say the same thing — if it would, rename instead of commenting.
 
-When a comment IS warranted, prefer the API-exportable, tool-consumable forms:
-- **Doc comments by default** — Rust `///` items and `//!` module docs, Swift `///`: rendered by rustdoc/DocC/editor Quick Help, exported to generated API docs, and force contract-level framing (semantics, args, returns, errors) over line-local narration.
-- **Annotated TODO forms for tracked work** — `TODO:` / `FIXME:` prefixes are the operator-requested follow-up mechanism (why the `todo` lint rule stays disabled); Better Comments + Todo Tree index them. Established pattern: the `TODO(drop-*)` markers in the SpacetimeDB module.
-- **Inline `//` only for line-local notes** that cannot be a doc comment — a constant's derivation at its use site, a non-obvious ordering constraint mid-function.
+**Every comment that IS written carries exactly one of four tags, as the first character after the comment marker.** Better Comments colours them and Todo Tree indexes the `TODO` ones, so the tag tells a reader *why* the line is annotated before they read it — and a comment without a tag is a violation, not a stylistic choice:
 
-When touching code whose comments violate this (narration, or multi-paragraph essays where a rename or type would do), tighten them in the same change — gradual migration, same policy as the macro-free rules. This targets REDUNDANCY, not documentation: contract doc comments (wire-pin shapes, incident references, ownership semantics) remain and are load-bearing.
+| Tag | Category | Use for |
+|---|---|---|
+| `*` | Highlight | important info, general notes — the counter-intuitive discovery that cost real time to find |
+| `!` | Alert | warnings / critical notes — the correct action is the opposite of the obvious (an ordering constraint, an operation that looks safe but destroys state, a silent failure mode) |
+| `?` | Query | an open question, something to investigate or confirm before relying on it |
+| `TODO` | Todo | tracked work, something to revisit (the operator-requested follow-up mechanism — why the `todo` lint rule stays disabled) |
+
+Syntax — the tag sits immediately after the comment marker:
+
+```yaml
+# ! kubelet rejects a --node-ip that is not present on an interface
+# * Cilium re-derives InternalIP from the K8s Node object on every agent start
+# ? whether WireGuard endpoint roaming also covers the VXLAN endpoint is unverified
+# TODO replace with the Cilium-native path once upstream ships it
+```
+
+Rust and Swift use `//` (or `///` for doc comments); Ansible, Python and YAML use `#`. For `///` doc comments the tag goes after the slashes: `/// ! ...`.
+
+**Everything else is narration — do not write it.** In particular:
+- Restating what the code does ("// loop over the rows", "// create the client", "// the join playbook role order is:").
+- Explaining a design that a reader can derive from the code itself.
+- Re-argument of a decision the reader was not present for, where the code already reflects the answer.
+- Multi-paragraph essays on a file's background. This is documentation, not commentary, and belongs in `AGENTS.md`, a role `README.md`, or the component's own docs — where it is discoverable and maintained as prose rather than buried in a file header.
+
+**Prefer the machine-readable form when a comment is warranted** — Rust `///` items and `//!` module docs, Swift `///`: rendered by rustdoc/DocC/editor Quick Help, and they force contract-level framing (semantics, args, returns, errors) over line-local narration.
+
+**Length is the tell.** A justified comment is usually one to three lines saying the counter-intuitive thing and stopping. A comment block longer than the code it annotates is almost always an essay that should move to `AGENTS.md`/`README`.
+
+When touching code whose comments violate this, tighten them in the same change — gradual migration, same policy as the macro-free rules. This targets REDUNDANCY, not contract documentation: wire-pin shapes, incident references, and ownership/invariant statements that names genuinely cannot carry remain and are load-bearing.
 ### Commit Scope — Include the Operator's Parallel Changes (Preference)
 When the operator makes manual changes in parallel with agent work (dependency bumps, edits done in another editor, etc.), **include them in the same commit set rather than excluding them** — review the diff, describe it accurately in the commit message, and commit everything together. Deliberately excluding the operator's own changes strands their work uncommitted while the agent's work ships. Only exception: changes the operator explicitly asks to keep separate.
 

@@ -115,8 +115,8 @@ spec:
         capabilities:
           keepCapNetBindService: true
           envoy:
-            - NET_ADMIN       # Required for IP_TRANSPARENT socket option (proxy)
-            - SYS_ADMIN       # Required for BPF datapath integration (< kernel 5.8)
+            - NET_ADMIN # Required for IP_TRANSPARENT socket option (proxy)
+            - SYS_ADMIN # Required for BPF datapath integration (< kernel 5.8)
             - NET_BIND_SERVICE # Required to bind privileged ports 80/443 on host network
       resources:
         limits:
@@ -205,8 +205,23 @@ spec:
 
     healthChecking: true
 
-    # VXLAN tunnel mode: encapsulates pod traffic, compatible with Hetzner L3 routing.
-    # Native routing caused packet reflection (VIP responses re-routed to gateway).
+    # * Cross-provider routing — this is the ONE cluster-wide network component, and the
+    # * topology below is what makes it work across Hetzner + Azure. Read before changing.
+    # !
+    # ! do NOT add an overlay, mesh, or route-claiming agent on top of Cilium.
+    # ! squat/kilo was added for this (2026-09-26) and removed three days later: two
+    # ! implementations of one layer fight over the same pod-CIDR routes, and a broken
+    # ! host route stalls Flux because the apiserver calls admission webhooks.
+    # *
+    # * It was also unnecessary. Per Cilium's docs, "the topology of the underlying
+    # * network is irrelevant as long as cluster nodes can reach each other using
+    # * IP/UDP" — every node here reaches every other over its public address. Proof:
+    # * cross-region pod traffic worked before any overlay existed (etcd 5 HEL / 2 FSN,
+    # * Kafka 4/1, CoreDNS 4/4, cert-manager 2/1).
+    # *
+    # * If cross-provider routing ever genuinely needs more than this, use Cilium's own
+    # * features (Cluster Mesh for separate clusters, BGP for route distribution) — not
+    # * a second product.
     tunnelProtocol: vxlan
     routingMode: tunnel
 

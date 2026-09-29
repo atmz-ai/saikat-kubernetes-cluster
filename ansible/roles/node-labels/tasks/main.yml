@@ -13,23 +13,10 @@
   changed_when: false
 
 - name: Collect the topology labels this node can supply
-  # Builds the label set from whatever the node actually reports, rather than
-  # requiring provider-specific inventory keys.
-  #
-  # This used to unconditionally read `datacenter`, `region` and `country`, which
-  # are Hetzner concepts. A host that does not define them (any cloud VM) failed
-  # outright with "'datacenter' is undefined" — so the role could only ever run
-  # against Hetzner nodes.
-  #
-  # The values are still the SAME values on Hetzner, just sourced by falling back:
-  #   zone    <- datacenter (Hetzner DC, e.g. HEL1-DC3) | Azure zone (e.g. 1)
-  #   region  <- region (Hetzner, e.g. helsinki)        | Azure location
-  #   country <- country (Hetzner, e.g. fi)             | omitted when unknown
-  #
-  # A label is included only when a value is known. Labels are set by default (the
-  # repo relies on topology.kubernetes.io/zone for volume scheduling), but omitting
-  # one is better than labelling every Azure node with an empty string, which would
-  # look like a valid topology and could steer scheduling to the wrong place.
+  # Each label is emitted only when its value is known. An empty-string label would
+  # look like a valid topology and could steer volume scheduling to the wrong place,
+  # so omitting is the safer failure. `datacenter`/`region`/`country` are Hetzner
+  # concepts; a cloud VM supplies `provider_zone`/`location` instead.
   ansible.builtin.set_fact:
     node_topology_labels: >-
       {{
@@ -59,31 +46,10 @@
   changed_when: "'labeled' in label_result.stdout"
   when: node_topology_labels | length > 0
 
-# ── NO Kilo mesh annotations ─────────────────────────────────────────────────
-# This role used to write kilo.squat.ai/force-internal-ip and force-endpoint on
-# every node. Both are gone, along with Kilo itself, because CILIUM ALREADY DOES
-# WHAT KILO WAS ADDED FOR — and does it natively, as the CNI we already run.
-#
-# Cilium's config on this cluster: routing-mode=tunnel (VXLAN across all nodes),
-# tunnel-protocol=vxlan, enable-wireguard=true, and cilium_wg0 holds a peer for
-# every other node. Its own documentation states the property that mattered:
-#
-#   "Encapsulation relies on normal node to node connectivity. This means that if
-#    Cilium nodes can already reach each other, all routing requirements are already
-#    met. ... THE TOPOLOGY OF THE UNDERLYING NETWORK IS IRRELEVANT as long as
-#    cluster nodes can reach each other using IP/UDP."
-#
-# That is the multi-cloud mesh the Kilo commit claimed only Kilo could provide, and
-# it was already in place — cross-region traffic was working before Kilo existed
-# (etcd ran 5 replicas in HEL against 2 in FSN, Kafka 4/1, CoreDNS 4/4).
-#
-# Kilo was therefore a SECOND implementation of a layer Cilium already owned, which
-# is precisely why the two fought over the same pod-CIDR routes. Its removal is
-# recorded in full at kubernetes/infrastructure/cilium/ so the reasoning is not lost.
-#
-# Do NOT reintroduce these annotations when touching this role. A cloud VM needs none
-# of them: it advertises whatever address its kubelet advertises (pinned to the public
-# address by node_provider_address), and Cilium encapsulates to that.
+# ! do NOT reintroduce kilo.squat.ai/* annotations here. Cilium is the only
+# ! cross-provider network component; Kilo was a second implementation of that layer and
+# ! fought Cilium over the same pod-CIDR routes. See the warning on the routing config in
+# ! kubernetes/infrastructure/cilium/helmrelease.yaml.
 
 - name: Apply disk type label to node
   ansible.builtin.command: >
@@ -246,9 +212,8 @@
   when: lh_stale_disk.stdout | trim == 'pending'
 
 - name: Reset stale Longhorn disk with UUID mismatch
-  # 'pending' and '' are excluded explicitly. Only a real disk NAME can be stale,
-  # so anything else must not reach the patch below — that was the bug this
-  # replaces.
+  # Only a real disk NAME can be stale. 'pending'/''/'healthy' must never reach the
+  # patch below — that was the bug this replaces.
   when: lh_stale_disk.stdout | trim not in ['', 'pending', 'healthy']
   block:
     - name: Disable scheduling on stale disk

@@ -394,16 +394,24 @@
 # from the previous installation, causing a "DiskFilesystemChanged" mismatch
 # when the node rejoins with a freshly formatted disk.
 #
-# The Longhorn controller adds a finalizer (longhorn.io) that prevents deletion
-# until all replicas are cleaned up. Since we already evicted replicas, the
-# finalizer should be removed by the controller. But if the controller is slow
-# or the node is already gone, we force-remove the finalizer to ensure the CR
-# is actually deleted before the node is reprovisioned.
-#
-# The Longhorn validating webhook may block deletion when the K8s node is
-# already gone (KubernetesNodeGone condition). Workaround: temporarily point
-# the webhook to a non-existent service so failurePolicy: Ignore kicks in,
-# delete the CR, then restore the webhook.
+# ! The CR cannot be deleted while its K8s node is gone. Longhorn's admission
+# ! webhook is REACHABLE and actively denies the DELETE:
+# !
+# !   admission webhook "validator.longhorn.io" denied the request: could not delete
+# !   node <name> with node ready condition is False, reason is KubernetesNodeGone,
+# !   node schedulable true, and 0 replica, 0 engine running on it
+# !
+# ! Setting allowScheduling=false satisfies that precondition (it clears the
+# ! "node schedulable true" part), after which Longhorn's own controller cleans the
+# ! node up and the CR disappears. This is the fix: satisfy the webhook, don't try to
+# ! bypass it.
+# !
+# ! Toggling the webhook does NOT work, and the difference matters: failurePolicy only
+# ! decides what happens when a webhook is UNREACHABLE or errors. A webhook that is up
+# ! and returning "denied" is honoured whatever failurePolicy says. Two bypasses were
+# ! tried and both silently no-op'd (verified 2026-09-29) — repointing
+# ! clientConfig.service.name at a non-existent service, and setting
+# ! failurePolicy: Ignore. The CR survived both while every task reported success.
 # See: https://github.com/longhorn/longhorn/issues/13494
 - name: Delete Longhorn Node CR
   ansible.builtin.command: >
@@ -414,42 +422,55 @@
   failed_when: false
   changed_when: longhorn_node_delete.rc == 0
 
-- name: Bypass Longhorn webhook to delete stuck Node CR
+- name: Clear a Longhorn Node CR the webhook refused to delete
   when: longhorn_node_delete.rc != 0
   block:
-    - name: Temporarily disable Longhorn webhook validation
-      ansible.builtin.shell: |
-        kubectl patch validatingwebhookconfiguration longhorn-webhook-validator \
-          --type=json -p='[{"op":"replace","path":"/webhooks/0/clientConfig/service/name","value":"longhorn-admission-webhook-disabled"}]'
-      delegate_to: "{{ kubectl_delegate }}"
-      changed_when: true
-
-    - name: Delete Longhorn Node CR with webhook bypassed
+    - name: Disable scheduling on the departed node so the webhook allows deletion
       ansible.builtin.command: >
-        kubectl delete node.longhorn.io {{ node_remove_k8s_name }}
-        -n longhorn-system --ignore-not-found --timeout=30s
+        kubectl -n longhorn-system patch node.longhorn.io {{ node_remove_k8s_name }}
+        --type=merge -p '{"spec":{"allowScheduling":false}}'
       delegate_to: "{{ kubectl_delegate }}"
-      register: longhorn_node_bypass_delete
+      register: longhorn_node_unschedule
       failed_when: false
-      changed_when: longhorn_node_bypass_delete.rc == 0
+      changed_when: longhorn_node_unschedule.rc | default(1) == 0
+      # ! failed_when: false + retries — the apiserver is under load right after an etcd
+      # ! member removal, so even a small patch can time out. Observed 2026-09-29.
+      retries: 3
+      delay: 5
+      until: longhorn_node_unschedule.rc == 0
 
-    - name: Restore Longhorn webhook validation
-      ansible.builtin.shell: |
-        kubectl patch validatingwebhookconfiguration longhorn-webhook-validator \
-          --type=json -p='[{"op":"replace","path":"/webhooks/0/clientConfig/service/name","value":"longhorn-admission-webhook"}]'
+    - name: Wait for the Longhorn controller to clean the node up
+      # * The denial reports "0 replica, 0 engine running", so once scheduling is off
+      # * the controller deletes the CR on its own — usually within one reconcile.
+      ansible.builtin.command: >
+        kubectl -n longhorn-system get node.longhorn.io {{ node_remove_k8s_name }}
+        --ignore-not-found -o name
       delegate_to: "{{ kubectl_delegate }}"
-      changed_when: true
-
-    - name: Force-remove finalizer if still stuck
-      ansible.builtin.shell: |
-        kubectl -n longhorn-system patch node.longhorn.io {{ node_remove_k8s_name }} \
-          --type=merge -p '{"metadata":{"finalizers":null}}' 2>/dev/null
-        kubectl -n longhorn-system delete node.longhorn.io {{ node_remove_k8s_name }} \
-          --ignore-not-found 2>/dev/null
-      delegate_to: "{{ kubectl_delegate }}"
-      register: longhorn_node_force_delete
+      register: longhorn_node_gone
+      changed_when: false
       failed_when: false
-      changed_when: true
+      retries: 12
+      delay: 5
+      until: longhorn_node_gone.stdout | trim == ""
+
+- name: Verify the Longhorn Node CR is gone
+  # ! Do not trust the delete's exit code, and do not trust an empty stdout as proof
+  # ! the CR existed. Longhorn's webhook rejects the delete, and the task above runs
+  # ! with failed_when: false, so a surviving CR is invisible until the node rejoins
+  # ! with a stale disk UUID. Verified 2026-09-29: this check is the only thing that
+  # ! caught a bypass that reported success while the CR survived.
+  ansible.builtin.command: >
+    kubectl -n longhorn-system get node.longhorn.io {{ node_remove_k8s_name }}
+    --ignore-not-found -o name
+  delegate_to: "{{ kubectl_delegate }}"
+  register: longhorn_node_verify
+  changed_when: false
+  failed_when: longhorn_node_verify.stdout | trim != ""
+
+- name: Display Longhorn Node CR deletion result
+  ansible.builtin.debug:
+    msg: "{{ longhorn_node_delete.stdout }}"
+  when: longhorn_node_delete.rc == 0
 
 - name: Display Longhorn Node CR deletion result
   ansible.builtin.debug:
