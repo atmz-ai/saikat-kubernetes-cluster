@@ -1,6 +1,10 @@
 ---
-# Renders ONE zone's DNSEndpoint file: apex + wildcard + ns glue, plus the API server
+# Renders ONE zone's DNSEndpoint file: wildcard + ns glue, plus the API server
 # endpoint records for names in this zone the certificate covers.
+#
+# The bare APEX is not here — external-dns cannot own an apex record, so it is
+# rendered into pdns-apex-records.yaml and applied with pdnsutil instead. See the
+# task block in tasks/main.yml.
 #
 # Included once per entry in `pdns_zones`, so regenerating covers EVERY zone in one run
 # and there is no "which zone did I forget" step. That is the whole reason this is a loop

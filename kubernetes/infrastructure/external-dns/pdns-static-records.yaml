@@ -36,6 +36,13 @@
 # recreates them unowned — proved, since it created them that way originally — so a
 # recreate reproduces the same state and adds an outage to a working domain.
 #
+# * The apex A + NS rrsets are NOT this file's job. They are GENERATED into
+# * pdns-apex-records.yaml by the pdns-zones role, because they change with node churn
+# * whereas every record here changes only when a person decides to. The split is the
+# * same one used for DNSEndpoints: this file is what a human asked for (mail,
+# * third-party services); that one is the cluster's own apex, regenerated from
+# * hosts.yml on every add/remove playbook.
+#
 # RE-RUNNING: a Completed Job never re-runs itself. After changing the records below,
 # delete the Job so Flux recreates it:
 #   kubectl -n external-dns delete job pdns-static-records

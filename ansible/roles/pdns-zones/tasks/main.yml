@@ -9,9 +9,12 @@
 #        pdns-zones-config.yaml        the seed Job's zone list (create + TSIG metadata)
 #        external-dns-zones-patch.yaml a JSON6902 append patch adding
 #                                      --rfc2136-zone / --domain-filter per zone
-#   2. One DNSEndpoint file per zone — the actual records:
-#        dnsendpoint-<zone>.yaml       apex + wildcard + ns glue, plus the API server
-#                                      endpoint records for names the CERTIFICATE covers
+#   2. One DNSEndpoint file per zone — the records external-dns CAN manage:
+#        dnsendpoint-<zone>.yaml       wildcard + ns glue, plus the API server endpoint
+#                                      records for names the CERTIFICATE covers
+#        pdns-apex-records.yaml        the BARE APEX A + NS rrsets, applied with
+#                                      pdnsutil — external-dns structurally cannot own
+#                                      an apex record (see the task block below)
 #      plus pdns-service-dns.yaml, the :53 Service whose externalIPs are the ns set.
 #
 # Everything is driven from `pdns_zones`, so a node add regenerates the apex and wildcard
@@ -137,6 +140,51 @@
   loop_control:
     loop_var: zone
     label: "{{ zone.name }}"
+
+# ── Apex records — the one path external-dns structurally cannot take ─────────
+# The BARE APEX is written with pdnsutil, not through a DNSEndpoint.
+#
+# ! external-dns never emits an ownership marker for an apex record, so plan.go drops
+# ! the apex from BOTH creates and updates — no record type can be converged at the
+# ! apex from a DNSEndpoint. Evidence: pdns-static-records.yaml (upstream #6125).
+#
+# Two rrsets per zone, unowned for the same reason:
+#   apex A   every node IP — the same set the wildcard carries, so a new node that
+#            reaches the wildcard must reach the apex too
+#   apex NS  the custom nameservers, and a removed node can be one
+#
+# Driven from the same pdns_all_node_ips / pdns_nameservers as the DNSEndpoint, so the
+# apex and the wildcard cannot disagree about which nodes exist.
+#
+# ! Each rrset's contents are SPACE-separated on ONE line because rrset replace is
+# ! called once per line with every value: `rrset replace ZONE NAME TYPE TTL CONTENT
+# ! [CONTENT...]`. A call per value would leave only the last one set.
+- name: Build the apex rrset lines every zone declares
+  ansible.builtin.set_fact:
+    pdns_apex_record_lines: >-
+      {{ pdns_apex_record_lines | default([])
+         + [zone.name ~ '|' ~ zone.name ~ '|A|300|' ~ (pdns_all_node_ips | join(' ')),
+            zone.name ~ '|' ~ zone.name ~ '|NS|300|' ~ (pdns_nameservers | map(attribute='prefix') | map('regex_replace', '$', '.' ~ zone.name) | join(' '))] }}
+  loop: "{{ pdns_zones }}"
+  loop_control:
+    loop_var: zone
+    label: "{{ zone.name }}"
+
+- name: Compute the content checksum that names the apex ConfigMap and Job
+  # ! The checksum belongs in the NAME, not an annotation. A Job's pod template is
+  # ! immutable and a ConfigMap change does not alter the Job's spec, so a fixed name
+  # ! would never re-run and a changed node set would be silently ignored — the trap
+  # ! pdns-static-records documents, solved here instead of by a manual delete.
+  # ! A changed checksum is a NEW Job object: Flux creates it (it runs) and prunes the
+  # ! previous one. No hand step, no --force on the Kustomization.
+  ansible.builtin.set_fact:
+    pdns_apex_checksum: "{{ (pdns_apex_record_lines | join(';') | hash('sha256'))[:12] }}"
+
+- name: Generate the apex records ConfigMap and its apply Job
+  ansible.builtin.template:
+    src: pdns-apex-records.yaml.j2
+    dest: "{{ pdns_zones_output_dir }}/pdns-apex-records.yaml"
+    mode: '0644'
 
 # The DNS Service's externalIPs are the SAME node set as the glue records — the IPs that
 # bind :53 on the nodes the NS records point at. Generating it here is what makes the

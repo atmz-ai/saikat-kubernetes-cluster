@@ -1,0 +1,132 @@
+{{ ansible_managed | comment }}
+# ! external-dns never writes an ownership marker for an apex record, so plan.go
+# ! filters the apex out of BOTH creates and updates — no record type can be managed
+# ! at the apex through a DNSEndpoint. Full evidence: pdns-static-records.yaml;
+# ! upstream kubernetes-sigs/external-dns#6125.
+# * GENERATED from ansible/inventory/hosts.yml by ansible/roles/pdns-zones — never
+#   hand-edit. Regenerate with: mise run dns-generate. The role runs as the second
+#   play of add-worker/add-control-plane/remove-node, so node churn converges here.
+# ! The Job name carries a content checksum deliberately. A Job's pod template is
+# ! immutable and a ConfigMap change does not alter its spec, so a fixed Job name
+# ! would never re-run and the apex would silently keep the previous node set. A
+# ! changed checksum is a NEW Job object: Flux creates it (it runs fresh) and prunes
+# ! the previous one — no manual `kubectl delete job`, no --force on the Kustomization.
+# * FORMAT: one rrset per line, pipe-separated, contents SPACE-separated:
+#     <zone>|<name>|<TYPE>|<ttl>|<content> <content> ...
+#   Each line is applied in a single `rrset replace`; a call per value would leave
+#   only the last one set. This is why the format differs from pdns-static-records,
+#   where an MX is one value that itself contains a space.
+# * Apex NS is here alongside apex A. Both are unowned for the same reason, and a
+#   removed node can be a nameserver — so both must converge on node churn.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pdns-apex-records-{{ pdns_apex_checksum }}
+  namespace: external-dns
+  labels:
+    app.kubernetes.io/name: pdns-apex-records
+data:
+  apex-records: |
+{% for line in pdns_apex_record_lines %}
+    {{ line }}
+{% endfor %}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: pdns-apex-records-{{ pdns_apex_checksum }}
+  namespace: external-dns
+  labels:
+    app.kubernetes.io/name: pdns-apex-records
+spec:
+  backoffLimit: 6
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: apply
+          image: docker.io/powerdns/pdns-auth-52:latest
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -eu
+
+              # ! pdnsutil ignores PDNS_* env vars and cannot take backend settings on
+              # ! the command line, so it needs a real config file — the same constraint
+              # ! documented on pdns-db-seed. The file holds the DB password, so it lives
+              # ! under /tmp and is removed on exit, including on failure.
+              trap 'rm -rf /tmp/pdns-apex' EXIT
+              mkdir -p /tmp/pdns-apex
+              printf '%s\n' \
+                "launch=gpgsql" \
+                "gpgsql-host=$PDNS_DB_HOST" \
+                "gpgsql-port=$PDNS_DB_PORT" \
+                "gpgsql-dbname=$PDNS_DB_NAME" \
+                "gpgsql-user=$PDNS_DB_USER" \
+                "gpgsql-password=$PDNS_DB_PASSWORD" \
+                > /tmp/pdns-apex/pdns.conf
+
+              echo "Waiting for the PowerDNS tables to be reachable..."
+              until pdnsutil --config-dir=/tmp/pdns-apex zone list-all > /dev/null 2>&1; do
+                echo "  backend not ready yet, retrying..."
+                sleep 5
+              done
+              echo "Backend reachable."
+
+              # <zone>|<name>|<TYPE>|<ttl>|<content> <content> ...
+              applied=0
+              while IFS='|' read -r zone name rtype ttl content; do
+                case "$zone" in ''|'#'*) continue ;; esac
+                content="$(printf '%s' "$content" | sed 's/[[:space:]]*$//')"
+
+                # ! Fail loudly on a malformed line. A skipped rrset is exactly the
+                # ! failure this Job exists to prevent, so it must not be silent.
+                if [ -z "$zone" ] || [ -z "$name" ] || [ -z "$rtype" ] || [ -z "$ttl" ] || [ -z "$content" ]; then
+                  echo "ERROR: malformed rrset line: '$zone|$name|$rtype|$ttl|$content'" >&2
+                  exit 1
+                fi
+
+                # * Split into positional parameters so each value is one argument and
+                # * the whole rrset is replaced in a single call. `rrset replace` takes
+                # * CONTENT [CONTENT...]; a call per value would leave only the last.
+                # ! Deliberately `set --` and `$#`, NOT a bash array: the array's length
+                # ! form is `${` followed by `#name[@]}`, and that embedded pair is a
+                # ! Jinja2 comment opener — it fails the render here, not at run time.
+                set -- $content
+
+                echo "Replacing $name IN $rtype (zone $zone, ttl $ttl) with $# value(s)"
+                pdnsutil --config-dir=/tmp/pdns-apex rrset replace "$zone" "$name" "$rtype" "$ttl" "$@"
+                applied=$((applied + 1))
+              done < /apex/apex-records
+
+              echo "Replaced $applied rrset(s)."
+          env:
+            - name: PDNS_DB_HOST
+              value: pdns-db-rw.external-dns.svc.cluster.local
+            - name: PDNS_DB_PORT
+              value: "5432"
+            - name: PDNS_DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: pdns-db-app
+                  key: dbname
+            - name: PDNS_DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: pdns-db-app
+                  key: username
+            - name: PDNS_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: pdns-db-app
+                  key: password
+          volumeMounts:
+            - name: apex-records
+              mountPath: /apex
+              readOnly: true
+      volumes:
+        - name: apex-records
+          configMap:
+            name: pdns-apex-records-{{ pdns_apex_checksum }}
