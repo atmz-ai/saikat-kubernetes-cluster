@@ -59,114 +59,31 @@
   changed_when: "'labeled' in label_result.stdout"
   when: node_topology_labels | length > 0
 
-# ── Kilo mesh annotations ────────────────────────────────────────────────────
-# Kilo groups nodes into "locations" by their topology.kubernetes.io/region label
-# and links one leader per location. A node with NO private address is instead
-# given its own single-node location (pkg/mesh/topology.go):
+# ── NO Kilo mesh annotations ─────────────────────────────────────────────────
+# This role used to write kilo.squat.ai/force-internal-ip and force-endpoint on
+# every node. Both are gone, along with Kilo itself, because CILIUM ALREADY DOES
+# WHAT KILO WAS ADDED FOR — and does it natively, as the CNI we already run.
 #
-#     if node.InternalIP == nil { location = nodeLocationPrefix + node.Name }
+# Cilium's config on this cluster: routing-mode=tunnel (VXLAN across all nodes),
+# tunnel-protocol=vxlan, enable-wireguard=true, and cilium_wg0 holds a peer for
+# every other node. Its own documentation states the property that mattered:
 #
-# which is the behaviour that took this cluster down: with every node in its own
-# location, every packet is "cross-location", so Kilo installed routing for all of
-# it while --local=false (which asserts "the CNI owns in-location routing") skipped
-# the return paths, and pod->ClusterIP broke cluster-wide.
+#   "Encapsulation relies on normal node to node connectivity. This means that if
+#    Cilium nodes can already reach each other, all routing requirements are already
+#    met. ... THE TOPOLOGY OF THE UNDERLYING NETWORK IS IRRELEVANT as long as
+#    cluster nodes can reach each other using IP/UDP."
 #
-# Kilo decides "private" with isPublic() in pkg/mesh/discoverips.go — an RFC1918
-# test. A Hetzner node's only address is its public /32, so it is classified public,
-# InternalIP stays nil, and the node lands in its own location. `force-internal-ip`
-# is the documented way out: it sets InternalIP directly (pkg/k8s/backend.go reads
-# the annotation BEFORE falling back to the agent-written internal-ip), so the node
-# groups into its real region instead. The address does not have to be RFC1918 to be
-# the node's internal identity — that is the point of the word "force".
+# That is the multi-cloud mesh the Kilo commit claimed only Kilo could provide, and
+# it was already in place — cross-region traffic was working before Kilo existed
+# (etcd ran 5 replicas in HEL against 2 in FSN, Kafka 4/1, CoreDNS 4/4).
 #
-# `force-endpoint` is the other half: a cloud VM's public IP is provider-side NAT and
-# is absent from the interface, so Kilo's endpoint heuristic cannot find it. This is
-# the case Kilo's own docs describe verbatim ("nodes are allocated a public IP but
-# the Ethernet devices are only configured with the private network address; in this
-# case the allocated public IP should be specified").
+# Kilo was therefore a SECOND implementation of a layer Cilium already owned, which
+# is precisely why the two fought over the same pod-CIDR routes. Its removal is
+# recorded in full at kubernetes/infrastructure/cilium/ so the reasoning is not lost.
 #
-# The peer address is resolved in two steps, and the ORDER matters:
-#   1. `kilo_peer_address`, set per host in the inventory — the escape hatch, for a node
-#      whose mesh identity is not its `private_address` (in practice: no node today).
-#   2. `private_address` (inventory/hosts.yml), the VLAN address the vswitch-vlan role
-#      configured on the node. This is what makes the fix reach the node: without it the
-#      peer address falls through to the public IP, equals the endpoint, and the assert
-#      below stops the run.
-#   3. `ansible_host`, only as a last resort so a failure names the node rather than
-#      raising `undefined` far from the cause.
-#
-# Read from `hostvars`, not a fact set by the vswitch-vlan role: that role runs in its
-# own play, so its facts never reach this one, and an earlier attempt to use them left
-# every annotation pointing at the public IP. An inventory host var cannot be missed
-# that way.
-#
-# The endpoint needs no such lookup: it is the address peers DIAL, which for every
-# provider is the public one already in `ansible_host`.
-#
-# Applied BEFORE Kilo ever runs, because Kilo reads these at topology-build time. With
-# Kilo suspended these annotations are INERT — nothing consumes them — which is what
-# makes this step safe to apply to every node and verify before enabling.
-#
-# `force-internal-ip` OVERRIDES THE AGENT-WRITTEN VALUE (pkg/k8s/backend.go reads the
-# annotation BEFORE falling back to the agent-written internal-ip), so this annotation
-# is what decides the node's mesh identity.
-#
-# TODO(advertise-private-address): etcd and kubelet still advertise the PUBLIC address,
-# so the private address this annotation points at is not yet what the control plane
-# binds. Nothing needs it to be while Kilo is the only thing routing on it, but it must
-# be done before the mesh is relied on for control-plane traffic — kubelet's --node-ip
-# and the etcd peer/advertise addresses have to move to the private address, which is
-# the same change `node_provider_address` makes for cloud nodes.
-- name: Resolve the addresses the Kilo mesh uses for this node
-  ansible.builtin.set_fact:
-    kilo_node_endpoint_address: >-
-      {{ kilo_endpoint_address | default(hostvars[inventory_hostname]['ansible_host']) }}
-    kilo_node_peer_address: >-
-      {{ kilo_peer_address
-         | default(hostvars[inventory_hostname]['private_address']
-                   | default(hostvars[inventory_hostname]['ansible_host'])) }}
-
-- name: Fail if the mesh identity and the endpoint are the same address
-  # This is the second outage, turned into a precondition. Kilo skips any node whose
-  # internal address equals its endpoint:
-  #
-  #   // Topology.Routes, pkg/mesh/topology.go
-  #   if segment.privateIPs[i].Equal(t.updateEndpoint(...).IP()) {
-  #       continue   // "we cannot encapsulate traffic to an IP through the IP"
-  #   }
-  #
-  # so the node gets no route at all and goes NotReady — exactly the five-node failure.
-  # The cluster-wide outage was the same guard reached differently: with no internal
-  # address the node was given its own single-node location, making every packet
-  # cross-location while --local=false skipped the return paths.
-  #
-  # Neither is detectable from the annotation being present, so the annotations cannot
-  # be validated by their own presence. Catching it here turns a silent datapath failure
-  # into a named error at the node that would cause it.
-  ansible.builtin.assert:
-    that:
-      - kilo_node_peer_address | length > 0
-      - kilo_node_endpoint_address | length > 0
-      - kilo_node_peer_address != kilo_node_endpoint_address
-    fail_msg: >-
-      Node {{ inventory_hostname }} would get peer address
-      '{{ kilo_node_peer_address }}' and endpoint '{{ kilo_node_endpoint_address }}'.
-      Kilo requires them to DIFFER — an internal address equal to the endpoint makes
-      Kilo skip the node entirely ("we cannot encapsulate traffic to an IP through the
-      IP"), leaving it NotReady. Check `kilo_peer_address` in the inventory and
-      `private_address` for this node in inventory/hosts.yml.
-
-- name: Apply Kilo mesh annotations to node
-  ansible.builtin.command: >
-    kubectl annotate node {{ ansible_facts['hostname'] }}
-    kilo.squat.ai/force-internal-ip={{ kilo_node_peer_address }}/32
-    kilo.squat.ai/force-endpoint={{ kilo_node_endpoint_address }}:51820
-    --overwrite
-  environment:
-    KUBECONFIG: /etc/kubernetes/admin.conf
-  delegate_to: "{{ groups['control_plane'][0] }}"
-  register: kilo_annotation_result
-  changed_when: "'not annotated' not in kilo_annotation_result.stdout"
+# Do NOT reintroduce these annotations when touching this role. A cloud VM needs none
+# of them: it advertises whatever address its kubelet advertises (pinned to the public
+# address by node_provider_address), and Cilium encapsulates to that.
 
 - name: Apply disk type label to node
   ansible.builtin.command: >

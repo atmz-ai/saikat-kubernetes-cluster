@@ -134,99 +134,29 @@ pdns_zones:
   - name: oleole.ai
     snapshot: false
 
-# ── Hetzner vSwitch (the cluster's private L2 network) ──────────────────────
-# Shared data for TWO roles — `vswitch` (Robot API membership) and `vswitch-vlan`
-# (the per-node VLAN interface). It lives here rather than in either role's
-# defaults because role defaults are not shared between roles, and duplicating the
-# VLAN id or the subnets would let the two drift: a mismatch produces an interface
-# that comes up cleanly and carries nothing.
+# ── NO vSwitch / VLAN / Kilo mesh configuration ──────────────────────────────
+# All of this was removed on 2026-09-29, together with Kilo itself, because CILIUM
+# ALREADY PROVIDES THE CROSS-PROVIDER POD NETWORK IT WAS ADDED FOR.
 #
-# WHY A VSWITCH AT ALL. Every node's only address is its public /32, so Kilo finds
-# no "private" address (it classifies with an RFC1918 test), gives each node its own
-# location, and that is what broke pod->ClusterIP cluster-wide. Pointing
-# kilo.squat.ai/force-internal-ip at the public IP does not help either: the internal
-# address then EQUALS the endpoint, and Kilo skips the node entirely —
-#   "we cannot encapsulate traffic to an IP through the IP".
-# The address has to genuinely exist AND differ from the endpoint.
+# What was here: `vswitch_name`/`vswitch_vlan_id`/`vswitch_subnets`/
+# `vswitch_vlan_parent`/`vswitch_vlan_mtu` (the Hetzner vSwitch and the per-node VLAN
+# subinterface), plus the per-node private addresses and the Kilo peer/endpoint
+# variables those annotations were built from.
 #
-# PER-REGION SUBNETS, one VLAN. Kilo groups by region and links only BETWEEN
-# locations, so a single shared subnet would put each region's peers behind another
-# location — a black hole. Splitting by region makes same-subnet traffic on-link and
-# cross-region traffic exactly what Kilo encapsulates (--encapsulate=crosssubnet).
+# Why it was all unnecessary: this cluster's Cilium runs `routing-mode: tunnel` with
+# `tunnel-protocol: vxlan` and `enable-wireguard: true`, and its own documentation
+# states the property that matters —
 #
-# 172.20 is clear of 10.244/16 (pods), 10.96/12 (services), 10.4/16 (Kilo WireGuard),
-# 172.16/16 (Azure), 172.31/16 (AWS) and 10.128/20 (GCP), and was verified absent
-# from the node routing tables. Keys are topology.kubernetes.io/region values.
-vswitch_name: "k8s-mesh"
-vswitch_vlan_id: 4000
-vswitch_subnets:
-  falkenstein: "172.20.10.0/24"
-  helsinki: "172.20.20.0/24"
-
-# Parent interface — every Hetzner bare-metal node in this cluster reports this
-# (the provisioning role's installimage layout). NOT auto-detected: guessing the
-# wrong parent would take the node's primary interface down.
-vswitch_vlan_parent: "enp0s31f6"
-
-# A VLAN tag costs 4 bytes, so the device must stay under the parent's 1500.
-# Hetzner's docs specify 1400 and note netplan does not always apply it, so the role
-# verifies and corrects it after apply.
-vswitch_vlan_mtu: 1400
-
-# ── Per-node private addresses (the mesh's internal identity) ────────────────
-# Declared per host in inventory/hosts.yml as `private_address`, next to the node's
-# `ansible_host`. Deliberately NOT a cluster-wide map keyed by region: a node has
-# exactly one private address, so the inventory host entry is its natural home, and
-# keeping it there means adding a node is one edit in one file rather than two edits
-# that can disagree.
+#   "Encapsulation relies on normal node to node connectivity. This means that if
+#    Cilium nodes can already reach each other, all routing requirements are already
+#    met. ... THE TOPOLOGY OF THE UNDERLYING NETWORK IS IRRELEVANT as long as cluster
+#    nodes can reach each other using IP/UDP."
 #
-# (An earlier version of this file held a `vswitch_node_addresses` map keyed by region
-# then hostname. It worked, but it split one fact across two files and duplicated the
-# host list that the inventory already carries.)
+# Every node here already reaches every other node over its public address, so no
+# private L2 network is needed and no cross-region route needs inventing: Cilium
+# encapsulates pod traffic to whatever address a node advertises. That was true before
+# Kilo was added (etcd ran 5 replicas in HEL against 2 in FSN, Kafka 4/1, CoreDNS 4/4),
+# which is the proof that nothing about it depended on a mesh overlay.
 #
-# This is NOT derived, and the vswitch-vlan role asserts the configured interface
-# matches it. The role CAN compute an address from a node's position in its region's
-# sorted node list — that is how the current 40-node fleet was originally addressed —
-# but a position-derived octet is only stable while the node set is stable: removing a
-# node RENUMBERS every node sorted after it, and adding one can collide with an address
-# another node already holds. Collision-free at 40 nodes is a coincidence of the current
-# list, not a property of the scheme, and two nodes sharing an address fails as an
-# intermittent, hard-to-attribute outage rather than a clean error. Declaring it makes
-# the address stable and reviews it as a change.
-#
-# The values in hosts.yml are the addresses ACTUALLY CONFIGURED on the nodes (read back
-# from `ip -4 addr show dev enp0s31f6.4000` on all 40), so they describe the live fleet
-# rather than re-deriving it and hoping.
-
-# ── Mesh identity: what the CNI routes to vs where peers dial ────────────────
-# Kilo needs TWO addresses per node, and they are not the same address in general.
-# Conflating them is what produced both outages, so they are named separately here.
-#
-# kilo_peer_address      <- kilo.squat.ai/force-internal-ip: the node's identity INSIDE
-#                           the mesh. This is also the address the node's own components
-#                           (etcd, kubelet, kube-apiserver) bind to and advertise, so it
-#                           must be reachable by every other node in the cluster.
-# kilo_endpoint_address  <- kilo.squat.ai/force-endpoint: where peers OPEN the WireGuard
-#                           tunnel. Must be reachable from every other node too, since a
-#                           peer dials it directly.
-#
-# On a Hetzner node one public address serves both roles, and the VLAN address supplies
-# the private identity. (That the VLAN address is not what etcd advertises today is a
-# separate gap — see the TODO on the node-labels role's annotation task; it does not
-# block the mesh, because the mesh routes to this address regardless.)
-#
-# A CLOUD VM INVERTS THE TWO. Its interface carries only a provider-NAT'd private
-# address, so the public address exists only from outside:
-#   * kilo_peer_address MUST be the private address (172.16.0.x): it is what the node's
-#     etcd/kubelet actually bind to, and it is reachable by peers over the tunnel.
-#   * kilo_endpoint_address MUST stay the public address: the private address is not
-#     routable between cloud networks, so peers can only reach the node through its NAT
-#     public IP.
-# Setting both to the public IP there — which is what using `ansible_host` for both
-# would do — reproduces the second outage exactly: Kilo skips any node whose internal
-# address equals its endpoint ("we cannot encapsulate traffic to an IP through the IP").
-#
-# Set per host in the inventory, not derived from `provider`, so the address a node
-# actually uses is visible next to that node rather than inferred from a provider name.
-# Hetzner nodes leave both unset and the node-labels role resolves them (see there);
-# a cloud VM sets them explicitly because there they genuinely differ.
+# The full reasoning, the measurements, and what was ruled out are recorded at
+# kubernetes/infrastructure/cilium/kustomization.yaml so this is not re-derived.

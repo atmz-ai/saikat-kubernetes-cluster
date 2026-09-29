@@ -45,7 +45,8 @@ at the task, naming what you checked, so the next reader does not have to re-der
 ## Hand-rolled HTTP error handling is a smell
 
 A raw `curl`/`uri` call needs its own status handling and body parsing, and getting
-that wrong fails silently. Observed while adding a server to a vSwitch by hand:
+that wrong fails silently. Observed while adding a server to a Hetzner vSwitch by
+hand (that role has since been removed, but the lesson is general):
 
 ```sh
 curl -s -X POST .../vswitch/86224/server --data-urlencode "server=2863794"

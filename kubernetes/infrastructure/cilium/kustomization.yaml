@@ -12,6 +12,83 @@ kind: Kustomization
 #   kubectl apply -k kubernetes/infrastructure/cilium
 #
 # Flux: depends on the cluster being ready; Flux reconciles this continuously.
+#
+# ══════════════════════════════════════════════════════════════════════════════
+# CILIUM IS THE ONLY CROSS-PROVIDER NETWORK COMPONENT. Do not add an overlay.
+# ══════════════════════════════════════════════════════════════════════════════
+# A Kilo multi-cloud WireGuard mesh (squat/kilo 0.7.0) was added on 2026-09-26 to
+# provide cross-provider routing for the planned Azure/GCP/AWS nodes, and REMOVED on
+# 2026-09-29 after it proved both unnecessary and harmful. This note exists so it is
+# not reintroduced: the reasoning is not obvious from the manifests, because the
+# configuration that made Kilo look necessary is the same configuration that already
+# made it redundant.
+#
+# IT WAS UNNECESSARY — Cilium already does it. This cluster runs:
+#
+#     routing-mode      = tunnel        # VXLAN, across every node regardless of provider
+#     tunnel-protocol   = vxlan
+#     enable-wireguard  = true          # node-to-node traffic encrypted
+#     cilium_wg0 peers  = 39            # every other node, HEL and FSN alike
+#
+# and Cilium's own documentation states the property that matters:
+#
+#   "Encapsulation relies on normal node to node connectivity. This means that if
+#    Cilium nodes can already reach each other, all routing requirements are already
+#    met. The network which connects the cluster nodes does not need to be made aware
+#    of the PodCIDRs. ... THE TOPOLOGY OF THE UNDERLYING NETWORK IS IRRELEVANT as long
+#    as cluster nodes can reach each other using IP/UDP."
+#
+# Every node here reaches every other over its public address, so the "dissimilar L3
+# domains" problem Kilo was added for does not exist. The proof is that cross-region
+# pod traffic was already working BEFORE Kilo existed and continued working after it
+# was removed: etcd runs 5 replicas in helsinki against 2 in falkenstein (cross-region
+# consensus), Kafka 4/1, CoreDNS 4/4, cert-manager 2/1, plus PowerDNS and Harbor. None
+# of those required an overlay, and all of them are still healthy now that Kilo is gone.
+#
+# A cloud VM adds no new requirement: it advertises whatever address its kubelet
+# advertises (pinned to the public address by the node_provider_address role) and
+# Cilium encapsulates to that. The provider-NAT'd address on eth0 is deliberately NOT
+# used as the node's identity, because peers cannot route to it.
+#
+# IT WAS ALSO HARMFUL — two implementations of one layer conflict. Kilo claimed the
+# same pod-CIDR routes Cilium owns and lost that race intermittently, and because the
+# kube-apiserver is hostNetwork and ADMISSION WEBHOOKS ARE CALLED BY THE APISERVER, a
+# broken host route stalls Flux:
+#
+#   * First install broke pod->ClusterIP cluster-wide (78 pods across 18 namespaces in
+#     crash loops, 5 of 6 Flux controllers among them) — each public-only node got its
+#     own single-node "location", so every packet was cross-location while
+#     --local=false skipped the return paths.
+#   * With force-internal-ip added, five nodes went NotReady instead: Kilo skips any
+#     node whose internal address equals its endpoint ("we cannot encapsulate traffic
+#     to an IP through the IP").
+#   * After enabling it properly, host->remote-pod traffic to the peer region was
+#     dropped: Kilo routes the peer region's pod CIDRs and sources that traffic from
+#     its own private address, but no non-leader had a route back to the peer region's
+#     private subnet, so replies went to the public gateway and were discarded. 39 of
+#     40 nodes were affected. The visible symptoms were TargetDown 1/7, the
+#     KubeAggregatedAPI* / *InstanceUnreachable alerts, and 20 of 42 Flux
+#     Kustomizations stuck on webhook dry-run failures.
+#   * The underlying defect was structural: Kilo's Cilium integration requires an IPIP
+#     device that Cilium creates only when `enable-ipip-termination` is enabled — an
+#     option that NO LONGER EXISTS in Cilium (zero mentions across the 1.13-1.20 helm
+#     values). Kilo falls back to creating its own tunl0 and then fails every
+#     encapsulating route with `dev: 0 ... invalid argument`. Non-fatal, so nothing
+#     reported it.
+#
+# Upstream's own position supports removing it rather than fighting it: squat/kilo#489
+# documents this failure class, and the maintainer's endorsed fix (PR #328,
+# `--mesh-granularity=cross`, "it eliminates the leader-as-relay path entirely") has
+# been open since 2022-08-05 and is unmerged, with no released version carrying it.
+#
+# WHAT WAS REMOVED WITH IT: kubernetes/infrastructure/kilo/, the infrastructure-kilo
+# Flux Kustomization, the Kilo annotations in the node-labels role, the Hetzner
+# vSwitch + per-node VLAN (roles vswitch/vswitch-vlan and their playbooks — they existed
+# only to give Kilo a private identity), the per-node `private_address` fields and
+# mesh variables, and the kgctl tool. If cross-provider routing ever genuinely needs
+# more than Cilium provides, the answer is Cilium's own features (Cluster Mesh for
+# separate clusters, or BGP for route distribution) — read
+# https://docs.cilium.io/en/v1.20/network/concepts/routing/ first.
 resources:
   - helmrepository.yaml
   - helmrelease.yaml
