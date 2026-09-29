@@ -28,14 +28,15 @@
 
       Steps:
       1. Drain node (evict all pods)
-      2. Delete node from cluster
-      3. Cleanup kubelet config on node
-      4. Remove from inventory (manual step)
+      2. Evacuate Longhorn replicas off the node
+      3. Delete node from cluster
+      4. Cleanup kubelet config on node
+      5. Remove from inventory (automated by the node-inventory-remove role)
 
       ⚠️  WARNING: This is DESTRUCTIVE!
       - All pods will be evicted
       - Node will be permanently removed
-      - You must manually remove from inventory afterward
+      - The host is removed from the inventory and DNS is regenerated automatically
       ============================================================
   when: not is_control_plane
   run_once: true
@@ -53,13 +54,13 @@
       2. Remove from etcd cluster
       3. Delete node from cluster
       4. Cleanup kubelet config on node
-      5. Remove from inventory (manual step)
+      5. Remove from inventory (automated by the node-inventory-remove role)
 
       ⚠️  CRITICAL WARNING: This is EXTREMELY DESTRUCTIVE!
       - Reduces HA quorum (3 → 2 control planes)
       - Loss of quorum requires cluster rebuild
       - etcd member will be removed permanently
-      - You must manually remove from inventory afterward
+      - The host is removed from the inventory and DNS is regenerated automatically
 
       DO NOT remove more than 1 control plane at a time!
       ============================================================
@@ -659,9 +660,14 @@
       Node: {{ target_host }}
 
       Next steps:
-      1. Remove {{ target_host }} from the `nodes:` list in ansible/inventory/00-hosts.yml
-      2. Verify cluster health: kubectl get nodes
-      3. Return server to Hetzner if no longer needed
+      1. Verify cluster health: kubectl get nodes
+      2. Return server to Hetzner if no longer needed
+
+      Automated by this playbook:
+      - {{ target_host }} was removed from the `nodes:` list in ansible/inventory/00-hosts.yml
+      - The apex, wildcard, NS glue and DNS Service were regenerated from the updated
+        inventory — commit and push them so Flux applies the change (external-dns then
+        drops the departed node from the records it owns)
       ============================================================
   when: not is_control_plane
 
@@ -677,10 +683,14 @@
       Remaining control planes: {{ groups['control_plane'] | length - 1 }}
 
       Next steps:
-      1. Remove {{ target_host }} from the `nodes:` list in ansible/inventory/00-hosts.yml
-      2. Verify etcd cluster: kubectl get pods -n kube-system | grep etcd
-      3. Verify API server: kubectl get cs
-      4. Consider adding replacement control plane for HA
-      5. Return server to Hetzner if no longer needed
+      1. Verify etcd cluster: kubectl get pods -n kube-system | grep etcd
+      2. Verify API server: kubectl get cs
+      3. Consider adding replacement control plane for HA
+      4. Return server to Hetzner if no longer needed
+
+      Automated by this playbook:
+      - {{ target_host }} was removed from the `nodes:` list in ansible/inventory/00-hosts.yml
+      - The apex, wildcard, NS glue and DNS Service were regenerated from the updated
+        inventory — commit and push them so Flux applies the change
       ============================================================
   when: is_control_plane

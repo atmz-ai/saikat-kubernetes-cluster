@@ -1,0 +1,142 @@
+---
+# node-inventory-remove — delete a removed host's entry from the `nodes:` list and
+# re-read the inventory so the rest of the play sees the post-removal node set.
+#
+# ! WHY THIS EXISTS. Nothing else removes the host from ansible/inventory/00-hosts.yml,
+# ! and every generated artifact derives its node set from that file — the apex A rrsets,
+# ! the wildcard DNSEndpoint, the PowerDNS :53 Service, and the API server endpoint
+# ! records. Leaving the host in place means the SECOND play of remove-node.yml
+# ! (pdns-zones) regenerates every one of them WITH the departed node still listed, and
+# ! the result looks correct while pointing clients at a machine that no longer exists.
+# ! It is the same silent failure the apex comment in pdns-zones describes, reached from
+# ! the other direction: a DNS answer that resolves but has no server behind it.
+#
+# ! The host is removed from the NODE LIST only. Its secrets are not revoked, its
+# ! nameserver (if it had one) is not migrated, and nothing here returns the machine to
+# ! the provider — those remain operator steps, and the playbook's final message says so.
+#
+# ! ruamel.yaml, NOT PyYAML, and NOT the edit tools. PyYAML discards every comment (the
+# ! "ORDER IS LOAD-BEARING" header is a footgun warning, so losing it is a real cost),
+# ! and the edit tools cannot run mid-play, which is required for the file to be changed
+# ! before the DNS regeneration reads it. ruamel preserves comments and blank lines and
+# ! round-trips the file byte-for-byte when nothing is changed — verified on the live
+# ! inventory. The indent() call is not cosmetic: without sequence=4, offset=2 the
+# ! block-sequence bodies are re-indented to a different width and the whole file shows
+# ! as changed, burying the one-line removal in noise.
+#
+# ! `meta: refresh_inventory` is what makes the second play honour the edit. It re-reads
+# ! the inventory SOURCES from disk and rebuilds the groups; without it the in-memory
+# ! groups (and the `nodes` group the second play's `hosts:` resolves through) still
+# ! contain the departed host. Verified with a synthetic run: the removed group is gone
+# ! after the refresh and a later play's `hosts:` no longer selects it.
+#
+# Runs on localhost — the file is on the controller, and the refresh is a controller-side
+# operation. A subsequent `include_role` still inherits this role's `run_once`-relevant
+# context because both run against the single-`localhost` play in remove-node.yml.
+
+- name: Check that target_host is defined for the inventory edit
+  ansible.builtin.fail:
+    msg: "target_host must be specified: -e target_host=worker-X"
+  when: target_host is not defined or target_host == ""
+
+- name: Locate the node-list inventory file
+  # ! This ASSERTS the file exists rather than globbing with a default. A path fallback
+  # ! that quietly resolved to nothing would make the removal a no-op while the play
+  # ! reported success, and the stale DNS regeneration that follows would look normal —
+  # ! the exact class of silent failure this role is here to close.
+  ansible.builtin.stat:
+    path: "{{ node_inventory_file }}"
+  register: node_inventory_stat
+
+- name: Fail if the node-list inventory file cannot be found
+  ansible.builtin.fail:
+    msg: >-
+      {{ node_inventory_file }} does not exist. Refusing to continue: without this edit
+      the host stays in the inventory, and the DNS regeneration play that follows would
+      silently keep the departed node in every generated record.
+  when: not node_inventory_stat.stat.exists
+
+- name: Report the file the host will be removed from
+  ansible.builtin.debug:
+    msg: "Removing '{{ target_host }}' from {{ node_inventory_file }}"
+
+- name: Remove the host entry from the node list and re-read the inventory
+  # ! One shell block, not two tasks, because the edit and the refresh are one atomic
+  # ! step: the file must be written BEFORE refresh_inventory runs and there must be no
+  # ! task boundary in between for a failure to strand the file edited-but-not-reloaded.
+  #
+  # The Python writes to a SIBLING temp file and os.replace()s it over the original, so
+  # a crash mid-write cannot leave a truncated inventory behind. os.replace is atomic on
+  # the same filesystem.
+  #
+  # Exit 3 is "the host was already absent" — a legitimate re-run after a partial
+  # failure, not an error. The role reports it as unchanged and proceeds to the refresh,
+  # so re-running is idempotent.
+  ansible.builtin.shell: |
+    {{ ansible_playbook_python }} - "{{ node_inventory_file }}" "{{ target_host }}" <<'PY'
+    import os
+    import sys
+
+    from ruamel.yaml import YAML
+
+    path, host = sys.argv[1], sys.argv[2]
+
+    yaml = YAML()
+    yaml.preserve_quotes = True
+    # ! Lossless round-trip depends on this exact indent. Do not "simplify" it away.
+    yaml.indent(mapping=2, sequence=4, offset=2)
+
+    with open(path) as handle:
+        document = yaml.load(handle)
+
+    hosts = document["all"]["children"]["nodes"]["hosts"]
+    if host not in hosts:
+        print(f"{host} is not present in {path}; nothing to remove")
+        sys.exit(3)
+
+    del hosts[host]
+
+    temporary_path = f"{path}.tmp"
+    with open(temporary_path, "w") as handle:
+        yaml.dump(document, handle)
+    os.replace(temporary_path, path)
+
+    print(f"Removed {host} from {path} ({len(hosts)} nodes remain)")
+    PY
+  register: node_inventory_edit
+  changed_when: node_inventory_edit.rc == 0
+  failed_when: node_inventory_edit.rc not in [0, 3]
+
+- name: Report whether the host was present
+  ansible.builtin.debug:
+    msg: >-
+      {{ target_host }} was not present in the inventory (already removed) —
+      refreshing anyway so the rest of the play uses the on-disk node set.
+  when: node_inventory_edit.rc == 3
+
+- name: Re-read the inventory so the removal takes effect for the rest of the play
+  # ! Without this the in-memory groups keep the departed host, the second play's
+  # ! `hosts: nodes` still selects it, and pdns-zones regenerates the apex, wildcard,
+  # ! NS glue and DNS Service WITH it — a stale record that looks correct.
+  ansible.builtin.meta: refresh_inventory
+
+- name: Confirm the host is gone from the in-memory inventory
+  # * Assert on the reloaded state, not the edit's exit code. The refresh is the thing
+  # * that can silently fail to pick the change up, and the DNS regeneration downstream
+  # * has no way to tell a correct node set from a stale one.
+  ansible.builtin.assert:
+    that:
+      - target_host not in groups['all']
+    fail_msg: >-
+      {{ target_host }} is still in groups['all'] after refresh_inventory. The file was
+      edited but the inventory was not reloaded, so the DNS regeneration play would
+      regenerate every record WITH {{ target_host }} still listed. Stop and investigate
+      before proceeding.
+    success_msg: "{{ target_host }} is gone from the in-memory inventory; the node set the DNS play will use is correct."
+
+- name: Report the node set that will be used for DNS generation
+  ansible.builtin.debug:
+    msg:
+      - "control planes: {{ groups['control_plane'] | length }}"
+      - "workers: {{ groups['worker_nodes'] | length }}"
+      - "total nodes: {{ groups['all'] | length }}"

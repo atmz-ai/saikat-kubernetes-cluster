@@ -1,0 +1,3 @@
+---
+# This role edits the inventory on the controller and re-reads the sources. No sudo needed.
+become: false

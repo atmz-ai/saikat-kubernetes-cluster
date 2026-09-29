@@ -1,14 +1,30 @@
 ---
-# TODO: validate that this works for both worker nodes and stacked control-plane nodes
 # Remove Node from Kubernetes Cluster
-# Usage: ansible-playbook operations/remove-node.yml -e target_host=worker-X
+# Usage: mise run ansible-playbook -- ansible/playbooks/operations/remove-node.yml -e target_host=worker-X
+#
+# Handles BOTH workers and stacked control planes — the host's `node_role` chooses the
+# branch in node-remove. A control plane additionally prompts for confirmation and is
+# removed from etcd; a worker additionally has its Longhorn replicas evacuated.
+#
+# ! ROLE ORDER IS LOAD-BEARING. `node-remove` then `node-inventory-remove`, because the
+# ! DNS regeneration play below reads the node set from the inventory — so the inventory
+# ! edit must land (and be reloaded) BEFORE that play renders anything. Reversing the two
+# ! writes the same records the manual step used to leave stale: the departed node stays
+# ! listed and every generated apex/wildcard/NS record keeps pointing at it.
 
 - name: Remove node from cluster
   hosts: localhost
   gather_facts: false
+  vars:
+    # The single flat `nodes:` list. Passed in rather than resolved inside the role so the
+    # location is visible at the call site, next to the role that depends on it.
+    node_inventory_file: "{{ playbook_dir }}/../../inventory/00-hosts.yml"
 
   roles:
     - role: node-remove
+    # Removes the host from the node list and reloads the inventory, so the DNS
+    # regeneration below derives its records from the post-removal node set.
+    - role: node-inventory-remove
 
 # Regenerate the DNS records from the updated inventory, for the same reason as on add:
 # the apex, wildcard and API endpoint records each list node IPs, so a removed node left

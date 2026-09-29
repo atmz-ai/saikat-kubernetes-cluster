@@ -5,6 +5,18 @@
 # waits until scheduledReplica is empty for all disks before returning.
 # Longhorn migrates each replica to another node during this wait.
 #
+# * "Migrates" means REBUILDS, never moves: Longhorn builds a new replica on another node
+# * and deletes the old one only once the new one is healthy. A 1-replica volume
+# * (longhorn-1replica SC) goes through exactly the same path as a 2-replica one — it is
+# * not reused or relocated because some second copy exists. The node's own
+# * instance-manager performs that delete, which `kubectl drain --ignore-daemonsets`
+# * preserves: it SKIPS DaemonSet pods rather than deleting them.
+# *
+# * The drain also cordons the node, and `node-drain-policy: block-if-contains-last-replica`
+# * auto-evicts on CORDON — so a 1-replica volume normally starts migrating before this role
+# * runs. This role then covers what auto-eviction does not: a volume where the node held a
+# * replica that was not the last healthy one (no auto-eviction under that policy).
+#
 # Called from:
 #   remove-node.yml  (hosts: localhost, target_host=<node>)
 #
@@ -190,6 +202,86 @@
     - eviction_timed_out | default(false) | bool
   run_once: true
 
+- name: Gather the live rebuild state for replicas that could not evacuate
+  # ! WHY THIS EXISTS. The old message blamed "storage issues (add disks, enable
+  # ! scheduling)" for every timeout. That is ONE cause, not the only one, and it is
+  # ! the wrong one when the eviction is merely SLOW: eviction of an attached volume
+  # ! rebuilds a REPLACEMENT replica first and only then deletes the old one, so a
+  # ! rebuild that needs longer than the 30-minute wait leaves the eviction pending
+  # ! with plenty of free disk. The operator was sent to look at capacity while the
+  # ! cluster was healthily copying 100+ GB across regions.
+  # ! Measured on worker-15 / pvc-6e1d6c64: the replacement replica on
+  # ! saikat-azure-central-india-3 was transferring ~15 MB/s (a 107 GB encrypted,
+  # ! 205 GB-actual volume over a ~146 ms cross-region link), which is on the order
+  # ! of a full working day to finish.
+  #
+  # Reads the ENGINE's rebuildStatus, which is the only place the controller publishes
+  # per-replica transfer state (replica status has no progress field):
+  #   state=in_progress|complete|failed, progress=N (percent), appliedRebuildingMBps,
+  #   isRebuilding, error.
+  #
+  # ! Do NOT read `appliedRebuildingMBps` as evidence either way. It reports 0 for the
+  # ! whole slow phase (verified against the destination disk, which was visibly draining
+  # ! at ~15 MB/s while this field stayed 0), and `progress` advances in bursts. Both
+  # ! fields are informational; the only trustworthy measure of "is it moving" is whether
+  # ! the destination node's free space is falling. The debug task below therefore prints
+  # ! the numbers without asserting on them.
+  ansible.builtin.shell: |
+    kubectl get volumes.longhorn.io -n longhorn-system -o json > /tmp/lh-vols.json
+    kubectl get replicas.longhorn.io -n longhorn-system -o json > /tmp/lh-reps.json
+    kubectl get engines.longhorn.io -n longhorn-system -o json > /tmp/lh-engines.json
+    python3 -c "
+    import json
+    target = '{{ target_host }}'
+    vols = json.load(open('/tmp/lh-vols.json')).get('items', [])
+    reps = json.load(open('/tmp/lh-reps.json')).get('items', [])
+    engines = json.load(open('/tmp/lh-engines.json')).get('items', [])
+
+    robustness = {v['metadata']['name']: v['status'].get('robustness') for v in vols}
+    want = {v['metadata']['name']: v['spec'].get('numberOfReplicas', 1) for v in vols}
+
+    stuck = {}
+    for r in reps:
+        vol = r['metadata']['labels'].get('longhornvolume', '')
+        if vol and r['spec']['nodeID'] == target:
+            stuck[vol] = r['metadata']['name']
+
+    rebuild = {}
+    for e in engines:
+        vol = e['metadata']['labels'].get('longhornvolume', '')
+        status = e['status'].get('rebuildStatus') or {}
+        if vol and status:
+            rebuild[vol] = status
+
+    lines = []
+    for vol in sorted(stuck):
+        lines.append(f'  {vol} robustness={robustness.get(vol)} want={want.get(vol)}')
+        details = rebuild.get(vol) or {}
+        if not details:
+            lines.append('    rebuild: NONE in progress — no healthy source or no schedulable disk')
+        for endpoint, info in details.items():
+            lines.append(
+                f\"    rebuild -> {endpoint}: state={info.get('state')} \"
+                f\"progress={info.get('progress')}% MBps={info.get('appliedRebuildingMBps')} \"
+                f\"isRebuilding={info.get('isRebuilding')} error={info.get('error')!r}\"
+            )
+    print('\n'.join(lines) if lines else '  (no replicas remain on the target node)')
+    "
+  register: longhorn_eviction_diagnostics
+  changed_when: false
+  when:
+    - longhorn_node_check.rc == 0
+    - eviction_timed_out | default(false) | bool
+  run_once: true
+
+- name: Report why the eviction did not complete
+  ansible.builtin.debug:
+    msg: "{{ longhorn_eviction_diagnostics.stdout_lines | default([]) }}"
+  when:
+    - longhorn_node_check.rc == 0
+    - eviction_timed_out | default(false) | bool
+  run_once: true
+
 - name: Fail if removing this node would drop a volume below its replica floor
   ansible.builtin.fail:
     msg: >-
@@ -197,8 +289,17 @@
       cannot be guaranteed. Volumes below their floor (have < want, where the floor
       is 1 for a 1-replica volume and 2 for anything larger):
       {{ data_safety_check.stdout }}.
-      Do NOT proceed — fix Longhorn storage issues first (add disks, enable
-      scheduling on other nodes, etc.) and re-run the playbook.
+
+      WHY it did not complete (the replica could not be rebuilt elsewhere in time —
+      check the rebuild line for each volume: no rebuild line means no healthy source
+      or no schedulable disk, which IS a capacity/placement problem, whereas an
+      in_progress line means the transfer is simply still running):
+
+      {{ longhorn_eviction_diagnostics.stdout | default('') }}
+
+      Do NOT proceed. A pending in_progress transfer at or near 100% usually just needs
+      a longer wait; re-running the playbook resumes it. A missing rebuild line, or a
+      state of failed, is what needs a storage fix first.
   when:
     - longhorn_node_check.rc == 0
     - eviction_timed_out | default(false) | bool
@@ -209,9 +310,13 @@
   ansible.builtin.debug:
     msg: >-
       Longhorn replica eviction timed out for {{ target_host }} but data is safe
-      (all volumes have ≥2 replicas on other nodes).
+      (every volume keeps at least its floor of replicas elsewhere).
       Proceeding with forced eviction — the replica on {{ target_host }} will
       be lost, but data integrity is maintained.
+
+      State of the replicas that could not evacuate:
+
+      {{ longhorn_eviction_diagnostics.stdout | default('') }}
   when:
     - longhorn_node_check.rc == 0
     - eviction_timed_out | default(false) | bool
