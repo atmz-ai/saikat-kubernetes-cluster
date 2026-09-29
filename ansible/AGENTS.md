@@ -113,3 +113,47 @@ The structural rules (atomic roles, thin playbooks, no `include_role` inside rol
 immutable nodes, per-component verification) are in the root `AGENTS.md` under
 "Core Architecture Principles" and "Deployment / Upgrade Workflow". They are not
 repeated here.
+
+## Inventory: one node list, derived role groups
+
+Every node is declared **once** in `ansible/inventory/00-hosts.yml` under a single
+`nodes:` group. `control_plane` and `worker_nodes` are **derived** from each host's
+`node_role` by `ansible/inventory/10-role-groups.yml` (the `constructed` inventory
+plugin), so the two views cannot drift from the list — which a hand-maintained second
+list could not guarantee.
+
+**One operation per lifecycle stage, not one per node kind.** `add-node.yml` and
+`upgrade-node.yml` each handle both control planes and workers; the host's `node_role`
+decides which roles run. This replaced `add-worker`/`add-control-plane` and
+`upgrade-worker`/`upgrade-control-plane`, which had already drifted apart (different
+`storage-longhorn` placement; only the control-plane path ran `node_provider_address`,
+so a cloud *worker* would have joined advertising an address kubelet cannot use).
+
+Attributes, and what each is actually for:
+
+| Attribute | Set on | Means |
+|---|---|---|
+| `node_role` | every host (workers inherit `worker` from group vars) | control-plane vs worker — drives the derived groups |
+| `stacked_control_plane` | every control plane | CP that **also runs workloads** (taint removed). NOT the same fact as `node_role` |
+| `provider` | every host | `hetzner` (Robot API + installimage) vs a cloud VM (image is already ready) |
+
+**Traps, each measured rather than assumed:**
+
+- **`node_role` omission is silent for a control plane.** A CP without it inherits
+  `worker`, drops out of `control_plane`, and is then left out of the API server endpoint
+  records and skipped by the control-plane path — while the node reports Ready. New
+  control planes must set both `node_role: control-plane` and `stacked_control_plane: true`.
+- **`stacked_control_plane` is not the control-plane marker.** A dedicated CP is a control
+  plane *without* it. Use `node_role` to answer "is this a control plane".
+- **The plugin's filename is load-bearing.** Ansible loads inventory sources in filename
+  order and a plugin only sees hosts from sources loaded *before* it, so the file is named
+  `10-` to sort after `00-hosts.yml`. Renamed below that, every derived group comes out
+  empty and nothing errors — 0 control planes, 0 workers, playbooks that "succeed" having
+  done nothing. `constructed` is also not enabled by default; `inventory_enabled` in
+  `ansible.cfg` lists it.
+- **A play's `hosts:` cannot be templated from `hostvars`.** It works at runtime but fails
+  `--list-hosts` (`'hostvars' is undefined`), which is why the role views exist as groups
+  rather than as a `hosts:` expression computed from host attributes. A `when:` can filter
+  tasks but cannot select hosts for a play or produce a set for a cluster-wide aggregate
+  (`groups['control_plane'][0]` as the kubectl delegate, `loop: groups['worker_nodes']`,
+  the etcd quorum count).

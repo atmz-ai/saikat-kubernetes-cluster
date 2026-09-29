@@ -82,14 +82,14 @@
   delegate_to: "{{ groups['control_plane'][0] }}"
   register: taint_check
   changed_when: false
-  when: node_type == "control-plane"
+  when: node_role == "control-plane"
 
 - name: Display taint status for control plane
   ansible.builtin.debug:
     msg:
       - "Control plane node {{ ansible_facts['hostname'] }} taints:"
       - "{{ taint_check.stdout }}"
-  when: node_type == "control-plane"
+  when: node_role == "control-plane"
 
 - name: Verify node labels
   ansible.builtin.command: kubectl get node {{ ansible_facts['hostname'] }} --show-labels

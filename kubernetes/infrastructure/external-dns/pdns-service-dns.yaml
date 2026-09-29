@@ -3,7 +3,7 @@
 #
 # PowerDNS DNS Service — LoadBalancer with externalIPs.
 #
-# GENERATED from the nameserver list in ansible/inventory/hosts.yml (workers with a
+# GENERATED from the nameserver list in ansible/inventory/00-hosts.yml (workers with a
 # `namecheap_nameserver` annotation) — do not hand-edit. Regenerate with:
 #   mise run dns-generate
 #

@@ -1,4 +1,13 @@
 <!-- TODO: Remove this file and put takeaways in agents.md -->
+> **The playbook names below are historical.** `add-worker.yml` / `add-control-plane.yml`
+> are now a single `add-node.yml`, and `upgrade-worker.yml` / `upgrade-control-plane.yml`
+> are a single `upgrade-node.yml` — the node's `node_role` decides which roles run, so
+> there is one entry point per operation. The inventory is `ansible/inventory/` (a
+> directory), not a single `hosts.yml`, and every node is declared once in
+> `00-hosts.yml` with the role groups derived from it. Examples below still name the old
+> files and the old `control-plane-N` hosts; the operations they describe are otherwise
+> current.
+
 # Kubernetes Cluster Operations
 
 This directory contains immutable, role-based playbooks for managing the Kubernetes cluster lifecycle. All operations are idempotent and use roles exclusively—no logic is embedded in the playbooks.
@@ -7,8 +16,7 @@ This directory contains immutable, role-based playbooks for managing the Kuberne
 
 These operations handle all cluster node management tasks:
 - **Initialize**: Bootstrap the first control plane node and add initial infrastructure
-- **Scale Control Plane**: Add control plane nodes for HA (stacked etcd)
-- **Scale Workers**: Add worker nodes to the cluster
+- **Add**: Add a control plane or worker node (one operation — the node's role decides)
 - **Remove**: Permanently remove nodes from the cluster (with graceful drain)
 - **Upgrade**: Perform system upgrades with intelligent reboot handling and automatic rejoin
 
@@ -17,7 +25,7 @@ These operations handle all cluster node management tasks:
 - Ansible vault password configured at `ansible/.vault_pass`
 - SSH access to all nodes
 - Valid Hetzner API credentials in vault (for provisioning)
-- Inventory configured at `ansible/inventory/hosts.yml`
+- Inventory configured at `ansible/inventory/`
 
 ## Operations
 

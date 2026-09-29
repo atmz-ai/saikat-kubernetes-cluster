@@ -1,0 +1,590 @@
+---
+# ── The node list ─────────────────────────────────────────────────────────────
+# EVERY cluster node is declared ONCE, here, in the order it should be considered.
+# There is no control-plane list and no worker list to keep in step — those are
+# DERIVED from this one by 10-role-groups.yml, so they cannot drift from it.
+#
+# ORDER IS LOAD-BEARING. Several roles delegate cluster operations to the first
+# member of the derived control_plane group, and that member must already be part
+# of the running cluster — a not-yet-joined node listed before the joined ones is
+# picked as the delegate and fails with no /etc/kubernetes/admin.conf. Add a node
+# at the END of `hosts:` below, and join it before anything else depends on it.
+all:
+  vars:
+    ansible_user: root
+    ansible_python_interpreter: /usr/bin/python3
+    ansible_ssh_common_args: "-o StrictHostKeyChecking=no"
+
+    # Kubernetes cluster configuration
+    #
+    # control_plane_endpoint becomes `controlPlaneEndpoint` in the kubeadm-config
+    # ConfigMap, which is the address every NEWLY JOINING node bakes into its
+    # kubeconfig via `kubeadm token create --print-join-command`.
+    #
+    # It reaches no component on an already-joined node — those hold their own baked
+    # URL and nothing re-reads this value — so changing it affects only future joins
+    # and is safe to do while the fleet is still running.
+    #
+    # Nodes joined before 2026-09 reference the PREVIOUS endpoint and keep working
+    # because that name is still in the certificate below and still in DNS. They
+    # converge by reprovisioning, and the old name is retired once none remain.
+    control_plane_endpoint: "kubernetes-api.oleole.ai"
+    # Additional Subject Alternative Names for the kube-apiserver serving
+    # certificate, on top of `control_plane_endpoint` (which kubeadm already embeds)
+    # and the node name/IP.
+    #
+    # List EVERY name that must stay valid at the same time — including the current
+    # endpoint. The certificate is the gate: a name absent from it fails TLS
+    # verification and loses the control plane, so a name is added here and rolled out
+    # to the nodes BEFORE any client uses it, and removed only once no client remains.
+    #
+    # Keeping the previous endpoint listed is what makes the endpoint move a
+    # no-flag-day change rather than a simultaneous switch. Combined with the endpoint
+    # above, both nodes joined BEFORE the move and nodes joined AFTER it end up
+    # carrying the same two names, so the fleet stays uniform throughout and either
+    # name works on every node.
+    #
+    # Rendered into ansible/manifests/kubeadm-cluster-configuration.yaml.j2. The
+    # control-plane-certificates role asserts each entry is actually present in the
+    # live certificate, since changing this does not itself change any node.
+    api_server_cert_sans:
+      - kubernetes-api.oleole.ai
+      - kubernetes-api.yral.com # previous endpoint — retire once no node references it
+    pod_network_cidr: "10.244.0.0/16"
+
+    # Hetzner Robot API credentials
+    # (loaded from ansible/group_vars/all/vault.yml)
+    hetzner_robot_api_user: "#ws+hEJX77Pr"
+    # hetzner_robot_api_password: defined in vault.yml
+
+    # Hetzner Object Storage for backups
+    # (loaded from ansible/group_vars/all/vault.yml)
+    hetzner_s3_access_key: "XO5X9A1W8AMHY3DSTKMS"
+    # hetzner_s3_secret_key: defined in vault.yml
+    hetzner_s3_bucket: "yral-bare-metal-kubernetes-cluster-control-plane-backup"
+    hetzner_s3_endpoint: "https://hel1.your-objectstorage.com"
+    hetzner_s3_region: "hel1"
+
+  # TODO: Rename all the "worker-*" hosts to "node-*" by removing with the current name, renaming in inventory, and reprovisioning with the new name.
+  children:
+    nodes:
+      # ! `node_role` is what decides which derived group a host lands in, so a new
+      # ! CONTROL PLANE MUST SET `node_role: control-plane` (and `stacked_control_plane:
+      # ! true`). Omitting it makes the node a worker by inheritance, and the failure is
+      # ! silent: it drops out of `control_plane`, so it is left out of the API server
+      # ! endpoint records and skipped by the control-plane upgrade playbook while
+      # ! everything still reports healthy.
+      #
+      # * `worker` is the default rather than the exception so the 33 workers need no
+      # * per-host line at all — only the 10 control planes state their role. Default-first:
+      # * the common case carries no configuration, and a host's entry states only what
+      # * makes it different.
+      vars:
+        node_role: worker
+      hosts:
+        # node-1 = stacked CP (was control-plane-2)
+        node-1:
+          ansible_host: 65.21.137.111
+          provider: hetzner
+          node_role: control-plane
+          stacked_control_plane: true
+          datacenter: HEL1-DC3
+          region: helsinki
+          country: fi
+          disk_type: nvme
+          cloudflare_dns_records:
+            - hostname: kubernetes-api.yral.com
+              proxied: false
+            - hostname: "*.yral.com"
+              proxied: false
+        # node-2 = stacked CP (was worker-13)
+        node-2:
+          ansible_host: 167.235.115.50
+          provider: hetzner
+          node_role: control-plane
+          stacked_control_plane: true
+          datacenter: FSN1-DC20
+          region: falkenstein
+          country: de
+          disk_type: nvme
+          cloudflare_dns_records:
+            - hostname: kubernetes-api.yral.com
+              proxied: false
+            - hostname: "*.yral.com"
+              proxied: false
+        # node-3 = stacked CP (was control-plane-1)
+        node-3:
+          ansible_host: 95.216.228.60
+          provider: hetzner
+          node_role: control-plane
+          stacked_control_plane: true
+          datacenter: HEL1-DC2
+          region: helsinki
+          country: fi
+          disk_type: nvme
+          cloudflare_dns_records:
+            - hostname: kubernetes-api.yral.com
+              proxied: false
+            - hostname: "*.yral.com"
+              proxied: false
+        # node-4 = stacked CP (was control-plane-3)
+        node-4:
+          ansible_host: 95.217.58.83
+          provider: hetzner
+          node_role: control-plane
+          stacked_control_plane: true
+          datacenter: HEL1-DC4
+          region: helsinki
+          country: fi
+          disk_type: nvme
+          cloudflare_dns_records:
+            - hostname: kubernetes-api.yral.com
+              proxied: false
+            - hostname: "*.yral.com"
+              proxied: false
+        # node-5 = stacked CP (was control-plane-4)
+        node-5:
+          ansible_host: 65.108.76.154
+          provider: hetzner
+          node_role: control-plane
+          stacked_control_plane: true
+          datacenter: HEL1-DC6
+          region: helsinki
+          country: fi
+          disk_type: nvme
+          cloudflare_dns_records:
+            - hostname: kubernetes-api.yral.com
+              proxied: false
+            - hostname: "*.yral.com"
+              proxied: false
+        # node-6 = stacked CP (was control-plane-5)
+        node-6:
+          ansible_host: 37.27.109.138
+          provider: hetzner
+          node_role: control-plane
+          stacked_control_plane: true
+          datacenter: HEL1-DC7
+          region: helsinki
+          country: fi
+          disk_type: nvme
+          cloudflare_dns_records:
+            - hostname: kubernetes-api.yral.com
+              proxied: false
+            - hostname: "*.yral.com"
+              proxied: false
+        # node-7 = stacked CP (was worker-12)
+        node-7:
+          ansible_host: 94.130.217.94
+          provider: hetzner
+          node_role: control-plane
+          stacked_control_plane: true
+          datacenter: FSN1-DC4
+          region: falkenstein
+          country: de
+          disk_type: nvme
+          cloudflare_dns_records:
+            - hostname: kubernetes-api.yral.com
+              proxied: false
+            - hostname: "*.yral.com"
+              proxied: false
+
+        # ── Azure control plane ───────────────────────────────────────
+        #
+        # THE HOST NAME IS THE VM NAME ON PURPOSE. kubeadm registers a node under
+        # its machine hostname, and an Azure VM's hostname is the resource name the
+        # provider set at creation — it cannot be `node-N` without renaming the VM
+        # or overriding the hostname. Keeping the two the same means
+        # `ansible_facts['hostname'] == inventory_hostname` for every node, which
+        # the roles rely on: they are split between the two (control-plane-join uses
+        # inventory_hostname, node-labels uses the hostname fact), and that split is
+        # invisible on Hetzner only because installimage sets the OS hostname from
+        # the inventory name.
+        #
+        # Azure nodes are reached as `saikat-machine-access`, NOT root: Azure
+        # reserves the root account on its Ubuntu images and sshd refuses root
+        # connections outright ("Please login as the user ... rather than the user
+        # root"). The account has passwordless sudo.
+        #
+        # There is no `private_address`: the NAT'd eth0 address is not routable by
+        # peers, so `ansible_host` (public) is this node's cluster identity — the
+        # apiserver advertise address, the etcd peer URL and kubelet's --node-ip.
+        # Cilium encapsulates pod traffic to it over VXLAN.
+        #
+        # LISTED LAST, after node-1..node-7, because Ansible preserves this file's
+        # order and the first derived control plane (`groups['control_plane'][0]`) is
+        # the delegate for several roles.
+        #
+        # Enable a node here only after its join succeeded and etcd is healthy with it.
+        saikat-azure-central-india-1:
+          ansible_host: 20.219.32.205
+          ansible_user: saikat-machine-access
+          provider: azure
+          node_role: control-plane
+          stacked_control_plane: true
+          location: centralindia
+          provider_zone: "1"
+        saikat-azure-central-india-2:
+          ansible_host: 20.198.74.224
+          ansible_user: saikat-machine-access
+          provider: azure
+          node_role: control-plane
+          stacked_control_plane: true
+          location: centralindia
+          provider_zone: "2"
+        saikat-azure-central-india-3:
+          ansible_host: 20.235.109.17
+          ansible_user: saikat-machine-access
+          provider: azure
+          node_role: control-plane
+          stacked_control_plane: true
+          location: centralindia
+          provider_zone: "3"
+
+        # ── Workers ───────────────────────────────────────────────────
+        # `node_role` is inherited as `worker` from the group vars above, so these
+        # entries declare only what distinguishes each node (address, provider,
+        # datacenter, and for ns1–ns11 the nameserver glue record).
+        #
+        # Kafka DNS entries were removed — *.yral.com wildcard + SNI passthrough handles routing.
+        # All DNS records are grey cloud (proxied: false) — Cloudflare proxy removed to avoid upload limits.
+        worker-1:
+          ansible_host: 138.201.85.40
+          provider: hetzner
+          datacenter: FSN1-DC8
+          region: falkenstein
+          country: de
+          disk_type: nvme
+          namecheap_nameserver: "ns1"
+          cloudflare_dns_records:
+            - hostname: "*.yral.com"
+              proxied: false
+        worker-2:
+          ansible_host: 88.99.213.237
+          provider: hetzner
+          datacenter: FSN1-DC1
+          region: falkenstein
+          country: de
+          disk_type: nvme
+          namecheap_nameserver: "ns2"
+          cloudflare_dns_records:
+            - hostname: "*.yral.com"
+              proxied: false
+        worker-3:
+          ansible_host: 94.130.128.105
+          provider: hetzner
+          datacenter: FSN1-DC4
+          region: falkenstein
+          country: de
+          disk_type: nvme
+          namecheap_nameserver: "ns3"
+          cloudflare_dns_records:
+            - hostname: "*.yral.com"
+              proxied: false
+        worker-4:
+          ansible_host: 88.99.148.85
+          provider: hetzner
+          datacenter: FSN1-DC1
+          region: falkenstein
+          country: de
+          disk_type: nvme
+          namecheap_nameserver: "ns4"
+          cloudflare_dns_records:
+            - hostname: "*.yral.com"
+              proxied: false
+        worker-5:
+          ansible_host: 138.201.199.41
+          provider: hetzner
+          datacenter: FSN1-DC8
+          region: falkenstein
+          country: de
+          disk_type: nvme
+          namecheap_nameserver: "ns5"
+          cloudflare_dns_records:
+            - hostname: "*.yral.com"
+              proxied: false
+        worker-6:
+          ansible_host: 138.201.125.248
+          provider: hetzner
+          datacenter: FSN1-DC8
+          region: falkenstein
+          country: de
+          disk_type: nvme
+          namecheap_nameserver: "ns6"
+          cloudflare_dns_records:
+            - hostname: "*.yral.com"
+              proxied: false
+        worker-7:
+          ansible_host: 168.119.139.49
+          provider: hetzner
+          datacenter: FSN1-DC16
+          region: falkenstein
+          country: de
+          disk_type: nvme
+          namecheap_nameserver: "ns7"
+          cloudflare_dns_records:
+            - hostname: "*.yral.com"
+              proxied: false
+        worker-8:
+          ansible_host: 138.201.251.32
+          provider: hetzner
+          datacenter: FSN1-DC8
+          region: falkenstein
+          country: de
+          disk_type: nvme
+          namecheap_nameserver: "ns8"
+          cloudflare_dns_records:
+            - hostname: "*.yral.com"
+              proxied: false
+        worker-9:
+          ansible_host: 88.99.147.157
+          provider: hetzner
+          datacenter: FSN1-DC1
+          region: falkenstein
+          country: de
+          disk_type: nvme
+          namecheap_nameserver: "ns9"
+          cloudflare_dns_records:
+            - hostname: "*.yral.com"
+              proxied: false
+        worker-10:
+          ansible_host: 95.217.57.130
+          provider: hetzner
+          datacenter: HEL1-DC4
+          region: helsinki
+          country: fi
+          disk_type: nvme
+          namecheap_nameserver: "ns10"
+          cloudflare_dns_records:
+            - hostname: "*.yral.com"
+              proxied: false
+        worker-11:
+          ansible_host: 136.243.145.173
+          provider: hetzner
+          datacenter: FSN1-DC8
+          region: falkenstein
+          country: de
+          disk_type: nvme
+          namecheap_nameserver: "ns11"
+          cloudflare_dns_records:
+            - hostname: "*.yral.com"
+              proxied: false
+        worker-14:
+          ansible_host: 176.9.7.19
+          provider: hetzner
+          datacenter: FSN1-DC5
+          region: falkenstein
+          country: de
+          disk_type: nvme
+          cloudflare_dns_records:
+            - hostname: "*.yral.com"
+              proxied: false
+        worker-15:
+          ansible_host: 138.201.16.44
+          provider: hetzner
+          datacenter: FSN1-DC8
+          region: falkenstein
+          country: de
+          disk_type: nvme
+          cloudflare_dns_records:
+            - hostname: "*.yral.com"
+              proxied: false
+        worker-16:
+          ansible_host: 95.216.225.124
+          provider: hetzner
+          datacenter: HEL1-DC2
+          region: helsinki
+          country: fi
+          disk_type: nvme
+          cloudflare_dns_records:
+            - hostname: "*.yral.com"
+              proxied: false
+        worker-17:
+          ansible_host: 95.216.16.174
+          provider: hetzner
+          datacenter: HEL1-DC2
+          region: helsinki
+          country: fi
+          disk_type: nvme
+          cloudflare_dns_records:
+            - hostname: "*.yral.com"
+              proxied: false
+        worker-18:
+          ansible_host: 95.217.74.238
+          provider: hetzner
+          datacenter: HEL1-DC4
+          region: helsinki
+          country: fi
+          disk_type: nvme
+          cloudflare_dns_records:
+            - hostname: "*.yral.com"
+              proxied: false
+        worker-19:
+          ansible_host: 138.201.121.44
+          provider: hetzner
+          datacenter: FSN1-DC8
+          region: falkenstein
+          country: de
+          disk_type: nvme
+          cloudflare_dns_records:
+            - hostname: "*.yral.com"
+              proxied: false
+        worker-20:
+          ansible_host: 167.235.0.121
+          provider: hetzner
+          datacenter: FSN1-DC17
+          region: falkenstein
+          country: de
+          disk_type: nvme
+          cloudflare_dns_records:
+            - hostname: "*.yral.com"
+              proxied: false
+        worker-21:
+          ansible_host: 95.216.101.114
+          provider: hetzner
+          datacenter: HEL1-DC2
+          region: helsinki
+          country: fi
+          disk_type: nvme
+          cloudflare_dns_records:
+            - hostname: "*.yral.com"
+              proxied: false
+        worker-22:
+          ansible_host: 138.201.120.189
+          provider: hetzner
+          datacenter: FSN1-DC8
+          region: falkenstein
+          country: de
+          disk_type: nvme
+          cloudflare_dns_records:
+            - hostname: "*.yral.com"
+              proxied: false
+        worker-23:
+          ansible_host: 95.217.35.190
+          provider: hetzner
+          datacenter: HEL1-DC2
+          region: helsinki
+          country: fi
+          disk_type: nvme
+          cloudflare_dns_records:
+            - hostname: "*.yral.com"
+              proxied: false
+        worker-24:
+          ansible_host: 95.216.16.50
+          provider: hetzner
+          datacenter: HEL1-DC2
+          region: helsinki
+          country: fi
+          disk_type: nvme
+          cloudflare_dns_records:
+            - hostname: "*.yral.com"
+              proxied: false
+        worker-25:
+          ansible_host: 95.216.6.238
+          provider: hetzner
+          datacenter: HEL1-DC2
+          region: helsinki
+          country: fi
+          disk_type: nvme
+          cloudflare_dns_records:
+            - hostname: "*.yral.com"
+              proxied: false
+        worker-26:
+          ansible_host: 95.216.24.51
+          provider: hetzner
+          datacenter: HEL1-DC2
+          region: helsinki
+          country: fi
+          disk_type: nvme
+          cloudflare_dns_records:
+            - hostname: "*.yral.com"
+              proxied: false
+        worker-27:
+          ansible_host: 116.202.84.59
+          provider: hetzner
+          datacenter: FSN1-DC14
+          region: falkenstein
+          country: de
+          disk_type: nvme
+          cloudflare_dns_records:
+            - hostname: "*.yral.com"
+              proxied: false
+        worker-28:
+          ansible_host: 116.202.234.107
+          provider: hetzner
+          datacenter: FSN1-DC15
+          region: falkenstein
+          country: de
+          disk_type: nvme
+          cloudflare_dns_records:
+            - hostname: "*.yral.com"
+              proxied: false
+        worker-29:
+          ansible_host: 176.9.86.220
+          provider: hetzner
+          datacenter: FSN1-DC6
+          region: falkenstein
+          country: de
+          disk_type: nvme
+          cloudflare_dns_records:
+            - hostname: "*.yral.com"
+              proxied: false
+        worker-30:
+          ansible_host: 138.201.18.222
+          provider: hetzner
+          datacenter: FSN1-DC8
+          region: falkenstein
+          country: de
+          disk_type: nvme
+          cloudflare_dns_records:
+            - hostname: "*.yral.com"
+              proxied: false
+        worker-31:
+          ansible_host: 138.201.138.101
+          provider: hetzner
+          datacenter: FSN1-DC8
+          region: falkenstein
+          country: de
+          disk_type: nvme
+          cloudflare_dns_records:
+            - hostname: "*.yral.com"
+              proxied: false
+        worker-32:
+          ansible_host: 95.217.43.62
+          provider: hetzner
+          datacenter: HEL1-DC2
+          region: helsinki
+          country: fi
+          disk_type: nvme
+          cloudflare_dns_records:
+            - hostname: "*.yral.com"
+              proxied: false
+        worker-33:
+          ansible_host: 95.216.97.236
+          provider: hetzner
+          datacenter: HEL1-DC2
+          region: helsinki
+          country: fi
+          disk_type: nvme
+          cloudflare_dns_records:
+            - hostname: "*.yral.com"
+              proxied: false
+        worker-34:
+          ansible_host: 95.216.112.246
+          provider: hetzner
+          datacenter: HEL1-DC2
+          region: helsinki
+          country: fi
+          disk_type: nvme
+          cloudflare_dns_records:
+            - hostname: "*.yral.com"
+              proxied: false
+        worker-35:
+          ansible_host: 95.216.77.98
+          provider: hetzner
+          datacenter: HEL1-DC2
+          region: helsinki
+          country: fi
+          disk_type: nvme
+          cloudflare_dns_records:
+            - hostname: "*.yral.com"
+              proxied: false

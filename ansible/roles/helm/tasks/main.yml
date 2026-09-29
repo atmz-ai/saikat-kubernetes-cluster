@@ -4,7 +4,7 @@
     msg:
       - "Installing Helm on: {{ ansible_facts['hostname'] }}"
       - "IP: {{ ansible_host }}"
-      - "Node type: {{ node_type }}"
+      - "Node role: {{ node_role }}"
 
 - name: Check if Helm is already installed
   ansible.builtin.command: which helm

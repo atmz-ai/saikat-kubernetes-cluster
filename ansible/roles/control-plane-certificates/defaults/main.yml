@@ -2,7 +2,7 @@
 # Path to the rendered ClusterConfiguration consumed by the kubeadm phases in this
 # role. Rendered from the shared declarative template
 # (ansible/manifests/kubeadm-cluster-configuration.yaml.j2), which means the SAN
-# list comes from `api_server_cert_sans` in ansible/inventory/hosts.yml — there is
+  # list comes from `api_server_cert_sans` in ansible/inventory/00-hosts.yml — there is
 # no second place to keep in step.
 kubeadm_cluster_configuration_path: /etc/kubernetes/kubeadm-control-plane-certificates.yaml
 

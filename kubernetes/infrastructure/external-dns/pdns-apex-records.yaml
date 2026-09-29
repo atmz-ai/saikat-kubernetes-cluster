@@ -5,7 +5,7 @@
 # ! filters the apex out of BOTH creates and updates — no record type can be managed
 # ! at the apex through a DNSEndpoint. Full evidence: pdns-static-records.yaml;
 # ! upstream kubernetes-sigs/external-dns#6125.
-# * GENERATED from ansible/inventory/hosts.yml by ansible/roles/pdns-zones — never
+# * GENERATED from ansible/inventory/00-hosts.yml by ansible/roles/pdns-zones — never
 #   hand-edit. Regenerate with: mise run dns-generate. The role runs as the second
 #   play of add-worker/add-control-plane/remove-node, so node churn converges here.
 # ! The Job name carries a content checksum deliberately. A Job's pod template is

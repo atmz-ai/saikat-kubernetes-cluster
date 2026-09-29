@@ -368,11 +368,11 @@
   register: taint_removal_result
   changed_when: "'untainted' in taint_removal_result.stdout"
   failed_when: "'not found' in taint_removal_result.stderr and 'untainted' not in taint_removal_result.stdout"
-  when: stacked_mode | bool
+  when: stacked_control_plane | bool
 
 - name: Display taint removal result (stacked mode)
   ansible.builtin.debug:
     msg: >-
       Stacked mode: removed NoSchedule taint from {{ inventory_hostname }}.
       Workloads can now schedule on this control plane node.
-  when: stacked_mode | bool
+  when: stacked_control_plane | bool

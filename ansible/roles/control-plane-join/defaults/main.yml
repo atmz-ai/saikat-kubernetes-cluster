@@ -1,18 +1,13 @@
 ---
-# When true, the node joins as a stacked control plane + worker:
-# the NoSchedule taint is removed after joining so workloads can schedule.
-# When false (default), the node joins as a dedicated control plane
-# with the NoSchedule taint preserved.
+# ! `stacked_control_plane` IS REQUIRED ON EVERY CONTROL PLANE, and it is NOT the same
+# ! fact as `node_role: control-plane`. This flag means "control plane that also runs
+# ! workloads" — the taint-removal tasks below are gated on it, so a node declaring only
+# ! `node_role: control-plane` joins as a DEDICATED control plane and keeps the
+# ! NoSchedule taint. That is the correct behaviour, not a bug: a control plane that
+# ! silently scheduled workloads because the two facts were conflated would be the bug.
 #
-# Two spellings exist for the same intent, and BOTH must work:
-#   - `stacked_mode`          set per host in the inventory for the original CPs
-#   - `stacked_control_plane` the attribute name used going forward
-#
-# The default resolves the newer name so a host that declares only
-# `stacked_control_plane: true` is not silently treated as unstacked. That silence
-# is what made this worth handling explicitly: the taint-removal tasks are guarded
-# by this value, so a host setting only the new name had them SKIPPED with no
-# error, leaving a control plane that joined successfully but could never schedule
-# a workload. Inventory values still win over this default, so the hosts that
-# already set `stacked_mode` directly are unaffected.
-stacked_mode: "{{ stacked_control_plane | default(false) }}"
+# * Defaults to false, so the absent flag means dedicated control plane. Every control
+# * plane in this cluster sets it to true in the inventory (all of them are stacked).
+# * There is exactly ONE spelling — `stacked_mode` was the older name and has been
+# * removed from the inventory, so a stale `stacked_mode: true` now does nothing.
+stacked_control_plane: false

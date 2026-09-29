@@ -1,0 +1,36 @@
+---
+# Upgrade a node — control plane OR worker, decided by the node's own `node_role`.
+#
+# Usage:
+#   # every node, one at a time
+#   ansible-playbook ansible/playbooks/operations/upgrade-node.yml
+#
+#   # one node
+#   ansible-playbook ansible/playbooks/operations/upgrade-node.yml -e target_host=node-3
+#
+# ! TARGETING DEFAULTS TO THE WHOLE FLEET, AND THAT IS DELIBERATE. With no target_host
+# ! this touches all 43 nodes serially, control planes included, which is a long rolling
+# ! operation. Pass -e target_host=<name> for a single node.
+#
+# serial: 1 keeps etcd quorum intact for a control-plane pass (one member out of the
+# quorum at a time) and cluster capacity stable for a worker pass.
+#
+# ! ROLE ORDER IS LOAD-BEARING: node-labels resolves the node's role from `node_role` and
+# ! must run last, after the role that actually upgrades the node.
+#
+# * `ansible/roles/node-upgrade` is NOT used here. It is an orphan from the initial commit
+# * that no playbook ever referenced, and it does not do the etcd member work a control
+# * plane upgrade requires (upgrade-control-plane has 27 etcd references; node-upgrade has
+# * none for the member lifecycle). Referencing it would have swapped the proven path for
+# * dead code, so the roles below are the ones that actually run today.
+- name: Upgrade node(s)
+  hosts: "{{ target_host | default('nodes') }}"
+  gather_facts: true
+  serial: 1
+
+  roles:
+    - role: upgrade-control-plane
+      when: node_role == 'control-plane'
+    - role: upgrade-worker
+      when: node_role == 'worker'
+    - role: node-labels

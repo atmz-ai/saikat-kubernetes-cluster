@@ -654,7 +654,7 @@
       Node: {{ target_host }}
 
       Next steps:
-      1. Remove {{ target_host }} from ansible/inventory/hosts.yml
+      1. Remove {{ target_host }} from the `nodes:` list in ansible/inventory/00-hosts.yml
       2. Verify cluster health: kubectl get nodes
       3. Return server to Hetzner if no longer needed
       ============================================================
@@ -672,7 +672,7 @@
       Remaining control planes: {{ groups['control_plane'] | length - 1 }}
 
       Next steps:
-      1. Remove {{ target_host }} from ansible/inventory/hosts.yml
+      1. Remove {{ target_host }} from the `nodes:` list in ansible/inventory/00-hosts.yml
       2. Verify etcd cluster: kubectl get pods -n kube-system | grep etcd
       3. Verify API server: kubectl get cs
       4. Consider adding replacement control plane for HA

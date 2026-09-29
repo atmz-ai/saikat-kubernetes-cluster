@@ -15,7 +15,7 @@
 # Converge the kube-apiserver serving certificate on the declarative Subject
 # Alternative Name list (control-plane-certificates role).
 #
-# The SAN list lives in ansible/inventory/hosts.yml (`api_server_cert_sans`) and is
+  # The SAN list lives in ansible/inventory/00-hosts.yml (`api_server_cert_sans`) and is
 # rendered into the shared kubeadm ClusterConfiguration template, but a certificate
 # on a running node is not rebuilt from that configuration — kubeadm only builds
 # certificates at init and join time. A name missing from the certificate is a TLS

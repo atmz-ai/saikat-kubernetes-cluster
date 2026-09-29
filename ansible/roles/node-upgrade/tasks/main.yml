@@ -14,20 +14,20 @@
     fail_msg: "Host {{ node_target }} not found in inventory"
     success_msg: "Host {{ node_target }} found in inventory"
 
-- name: Determine node type
+- name: Determine node role
   ansible.builtin.set_fact:
     is_control_plane: "{{ node_target in groups['control_plane'] }}"
     is_worker: "{{ node_target in groups['worker_nodes'] }}"
-    node_type: "{{ 'control-plane' if node_target in groups['control_plane'] else 'worker' }}"
+    node_role: "{{ 'control-plane' if node_target in groups['control_plane'] else 'worker' }}"
 
 - name: Display upgrade plan
   ansible.builtin.debug:
     msg: |
       ============================================================
-      Upgrading {{ node_type | capitalize }} Node
+      Upgrading {{ node_role | capitalize }} Node
       ============================================================
       Target: {{ node_target }}
-      Type: {{ node_type | capitalize }}
+      Type: {{ node_role | capitalize }}
 
       Upgrade Plan:
       1. Run system package upgrades
@@ -97,7 +97,7 @@
       ansible.builtin.debug:
         msg: |
           ============================================================
-          Draining {{ node_type | capitalize }} node: {{ node_target }}
+          Draining {{ node_role | capitalize }} node: {{ node_target }}
           ============================================================
           - Cordoning node (marking unschedulable)
           - Evicting all pods (except DaemonSets)
@@ -375,7 +375,7 @@
   ansible.builtin.debug:
     msg: |
       ============================================================
-      ✅ {{ node_type | capitalize }} Upgrade Completed Successfully
+      ✅ {{ node_role | capitalize }} Upgrade Completed Successfully
       ============================================================
       Node: {{ node_target }}
       Reboot: {{ 'YES - node rebooted and rejoined' if reboot_required_stat.stat.exists else 'NO - no reboot required' }}

@@ -7,7 +7,7 @@
     msg:
       - "Installing Kubernetes v{{ kubernetes_version }} on: {{ ansible_facts['hostname'] }}"
       - "IP: {{ ansible_host }}"
-      - "Node type: {{ node_type }}"
+      - "Node role: {{ node_role }}"
 
 - name: Check current swap status
   ansible.builtin.shell: |

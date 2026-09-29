@@ -3,7 +3,7 @@
 # its Subject Alternative Names have changed.
 #
 # WHY A ROLE EXISTS FOR THIS AT ALL: the SAN list is declarative
-# (`api_server_cert_sans` in ansible/inventory/hosts.yml, rendered into the shared
+  # (`api_server_cert_sans` in ansible/inventory/00-hosts.yml, rendered into the shared
 # kubeadm ClusterConfiguration template) but the certificate on a running node is
 # NOT — kubeadm only builds certificates at `init` and `join` time. Editing the
 # declaration therefore does nothing to a live cluster, and a name missing from the
@@ -65,7 +65,7 @@
       - api_server_cert_sans | length > 0
       - control_plane_endpoint is defined
     fail_msg: >-
-      api_server_cert_sans is undefined or empty (see ansible/inventory/hosts.yml).
+      api_server_cert_sans is undefined or empty (see ansible/inventory/00-hosts.yml).
       This role regenerates the API server certificate to match that list, so an
       empty list would produce a certificate carrying neither the declared names nor
       the control plane endpoint — locking every client out of the cluster. Set the
@@ -386,7 +386,7 @@
           {{ live_apiserver_subject_alternative_names | difference(served_apiserver_subject_alternative_names) | join(', ') }}
           from the certificate. Expected if the entry is stale (a decommissioned node's
           address). If any of these is still needed, add it to `api_server_cert_sans` in
-          ansible/inventory/hosts.yml and re-run.
+            ansible/inventory/00-hosts.yml and re-run.
       when: >-
         missing_apiserver_subject_alternative_names | length > 0
         and (live_apiserver_subject_alternative_names | difference(served_apiserver_subject_alternative_names) | length > 0)

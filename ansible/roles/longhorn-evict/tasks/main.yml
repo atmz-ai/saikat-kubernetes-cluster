@@ -8,7 +8,7 @@
 # Called from:
 #   remove-node.yml  (hosts: localhost, target_host=<node>)
 #
-# Not used in upgrade-worker.yml because the upgrade cycle (delete → reboot → rejoin)
+# Not used in upgrade-node.yml because the upgrade cycle (delete → reboot → rejoin)
 # is brief (~5-10 min) and Longhorn recognises disk UUIDs on rejoin, cancelling any
 # in-progress rebuild. Proactively setting evictionRequested before an upgrade would
 # leave it permanently enabled if no reboot ended up being required.

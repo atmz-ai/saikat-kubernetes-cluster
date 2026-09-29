@@ -387,11 +387,10 @@ Run `ansible-lint ansible/playbooks/operations/` before changes. Playbooks must 
 **Full init flow (never partial):** provision → storage-longhorn → ssh-hardening → base-system (reboot if needed) → containerd → kubernetes → (init or join) → node-labels → cloudflare-dns.
 
 ### Kubernetes Cluster
-- kubeadm, stacked etcd, 7 stacked CP nodes (node-1 through node-7).
-- All CP nodes run both control plane and workloads (stacked mode, `stacked_mode: true` host var in inventory).
-- etcd quorum=4, tolerates 3 node failures.
-- 5 nodes in Helsinki (node-1, node-3, node-4, node-5, node-6), 2 in Falkenstein (node-2, node-7).
-- Control plane HA via Cloudflare DNS round-robin (`kubernetes-api.yral.com`).
+- kubeadm, stacked etcd, 10 stacked CP nodes: node-1..node-7 (Hetzner — 5 Helsinki, 2 Falkenstein) + 3 Azure Central India.
+- All CP nodes run both control plane and workloads (`stacked_control_plane: true` per host in inventory).
+- etcd quorum=6, tolerates 4 node failures. The three Azure members are full voters, not learners — their commit latency is ~900ms against 57–287ms for the Hetzner members, because the India↔Europe RTT is ~146ms. That is the cost of the cross-region placement, and it is why the timeouts are 250/2500 (see `ansible/inventory/group_vars/all/vars.yml`): etcd's 100/1000 defaults cannot be kept once a WAN member is in the quorum.
+- Control plane HA via DNS round-robin: `kubernetes-api.oleole.ai` (PowerDNS, all 10 CPs) is the current `control_plane_endpoint`; `kubernetes-api.yral.com` (Cloudflare, the 7 Hetzner CPs) is the previous endpoint, still in `api_server_cert_sans` so both names stay valid during the move.
 - Cilium + WireGuard encryption. Gateway API for exposure.
 - Serial node operations.
 - CoreDNS topology: see `kubernetes/infrastructure/coredns/coredns-*-topology.yaml` (non-Flux, kubeadm-owned). Run `kubectl apply -f` after adding workers in new zones.
@@ -455,7 +454,7 @@ DNS is self-hosted, not Cloudflare. PowerDNS Authoritative runs from `kubernetes
 
 **One generalisable rule worth knowing before you touch DNS: a wrong answer here looks exactly like success.** DNS changes fail quietly in several independent ways — an omitted directive, a flag with the wrong separator, a config change that never reaches a running pod, a record type that is accepted but discarded. In every case the config reads correctly, nothing errors, and the tool reports it is up to date. So never conclude a DNS change worked because a tool said so: verify against the authoritative source (`dig @<nameserver>`, `whois`, `dig +trace`) rather than a recursive resolver, and read the live state rather than the declared state. This burned several wrong conclusions in a single session, including one that was reported as verified when it had actually succeeded for an unrelated reason.
 
-**Apex records are owned by `pdnsutil`, never by external-dns.** external-dns structurally cannot manage a zone apex: it never writes an ownership marker for an apex name (the name would be valid — `a-saikat.dev` — it is simply never emitted), so `plan.go` drops the apex from **both** creates and updates, and no record type can ever be converged there through a DNSEndpoint. The failure is silent — external-dns logs "Reconciliation succeeded". Tracked upstream as kubernetes-sigs/external-dns#6125 (with our independent confirmation on the issue). Consequence: the bare apex A + NS rrsets for every zone live in the GENERATED `kubernetes/infrastructure/external-dns/pdns-apex-records.yaml`, applied by the `pdns-zones` role with `pdnsutil rrset replace`. That role runs as the second play of `add-worker` / `add-control-plane` / `remove-node`, so node churn converges the apex automatically — a new node reaches the apex A records, and a removed node drops out of them. Its ConfigMap and Job are named by a content checksum, so a changed node set is a NEW Job that Flux creates (and prunes the previous one): no manual `kubectl delete job`, no `--force` on the Kustomization. **Never** declare an apex record in a DNSEndpoint (a declaration nothing acts on), and **never** hand-write the apex records or their ownership marker — regenerate from `hosts.yml` instead.
+**Apex records are owned by `pdnsutil`, never by external-dns.** external-dns structurally cannot manage a zone apex: it never writes an ownership marker for an apex name (the name would be valid — `a-saikat.dev` — it is simply never emitted), so `plan.go` drops the apex from **both** creates and updates, and no record type can ever be converged there through a DNSEndpoint. The failure is silent — external-dns logs "Reconciliation succeeded". Tracked upstream as kubernetes-sigs/external-dns#6125 (with our independent confirmation on the issue). Consequence: the bare apex A + NS rrsets for every zone live in the GENERATED `kubernetes/infrastructure/external-dns/pdns-apex-records.yaml`, applied by the `pdns-zones` role with `pdnsutil rrset replace`. That role runs as the second play of `add-node` / `remove-node`, so node churn converges the apex automatically — a new node reaches the apex A records, and a removed node drops out of them. Its ConfigMap and Job are named by a content checksum, so a changed node set is a NEW Job that Flux creates (and prunes the previous one): no manual `kubectl delete job`, no `--force` on the Kustomization. **Never** declare an apex record in a DNSEndpoint (a declaration nothing acts on), and **never** hand-write the apex records or their ownership marker — regenerate from the inventory instead.
 
 ### Local Environment & Parity
 The repo uses a single monorepo-wide `mise.toml` at the repository root as the source of truth for tool versions, task orchestration, and all app-specific environment variables. There are **no per-app `mise.toml`, `fnox.toml`, or `pitchfork.toml` files** — all env vars, secrets, and daemon definitions live in the root `mise.toml`, root `fnox.toml`, and root `mise.toml` `[daemons]` respectively. App-specific env vars are grouped by `# ── <app> ──` comment headers in the root `[env]` section. Avoid adding per-project config files unless there is a strong, documented reason.
@@ -568,7 +567,20 @@ For any external service the repo calls (SpacetimeDB Maincloud, third-party APIs
 - Server fixes land in `apps/yral-rishi-agent` (upstream `dolr-ai/yral-rishi-agent`, auto-deploys on merge to main; verify with a read-only probe of `/health` and `/openapi.json` before re-testing a client against it).
 
 ### Inventory
-`control_plane` (node-1 through node-7, all stacked CP+worker) / `worker_nodes` (worker-1 through worker-35, pure workers) / `k8s_cluster` (parent group containing both). Target via `-e target_host=...`.
+
+Every node is declared **once** in `ansible/inventory/00-hosts.yml` under a single `nodes:`
+group. `control_plane` and `worker_nodes` are **derived** from each host's `node_role` by
+`ansible/inventory/10-role-groups.yml` (the `constructed` inventory plugin), so the two
+views cannot drift from the list.
+
+43 nodes today: **10 control planes** (node-1..node-7 Hetzner stacked + 3 Azure Central
+India) and **33 workers**. Target via `-e target_host=...`.
+
+**One playbook per operation, not one per node kind** — `add-node.yml` and
+`upgrade-node.yml` each handle both, and the host's `node_role` decides which roles run.
+
+The traps (silent `node_role` omission, the load-bearing `10-` filename, why the groups
+exist rather than a `hosts:` expression) are in `ansible/AGENTS.md`.
 
 ### Ansible / Playbook Execution
 - `become` is globally false; remote plays SSH as root; localhost plays as vscode user.

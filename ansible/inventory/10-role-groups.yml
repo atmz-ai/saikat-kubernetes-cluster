@@ -1,0 +1,29 @@
+---
+# Derive the role groups from the single node list in 00-hosts.yml.
+#
+# WHY THIS EXISTS: the control-plane and worker views are needed as GROUPS, not just as
+# a flag, because a `when:` can filter tasks but cannot select hosts for a play or
+# produce a set for a cluster-wide aggregate. Three things depend on the sets:
+#
+#   * play targets — `hosts: worker_nodes`, `hosts: "{{ target_host | default('control_plane') }}"`
+#     (a play has no `when:`; it must be handed a host set)
+#   * the kubectl delegate — `groups['control_plane'][0]`, and the "first member other
+#     than the host being removed" variants
+#   * the loop/quorum inputs — `loop: groups['worker_nodes']`, `groups['control_plane'] | length`
+#
+# ! FILE NAME IS LOAD-BEARING. Ansible loads inventory sources in filename order, and an
+# ! inventory plugin only sees hosts from sources loaded BEFORE it. Named `10-` so it sorts
+# ! after `00-hosts.yml`; renamed below that, every group comes out empty and the failure is
+# ! silent — 0 control planes, 0 workers, and playbooks that "succeed" having done nothing.
+#
+# * The membership rule lives in ONE place (here) and reads the attribute that lives in
+# * ONE place (00-hosts.yml), so the two cannot disagree — which is the thing a
+# * hand-maintained second list could not guarantee.
+#
+# * `strict: false` because the plugin is also offered hosts that carry no `node_role`
+# * (e.g. implicit localhost); with the default it would abort on them.
+plugin: ansible.builtin.constructed
+strict: false
+groups:
+  control_plane: "node_role | default('') == 'control-plane'"
+  worker_nodes: "node_role | default('') == 'worker'"
