@@ -259,24 +259,32 @@ spec:
     # ! dropped (the same shape of bug as the etcd tlsConfig above).
     #
     # * `instance` is the scrape target address, and the upstream node-exporter
-    # * ServiceMonitor relabels it to the hostname:
+    # * ServiceMonitor relabels it to the hostname.
     # *
     # *     sourceLabels: [__meta_kubernetes_pod_node_name]
     # *     targetLabel: instance
     # *
-    # * A relabel with no `targetLabel` defaults to `instance`, and a sourceLabels
-    # * default of [__address__] is overridden here, so this one entry is the whole
-    # * change. ServiceMonitor (not PodMonitor) is what this chart enables.
-    #
-    # ! Applied at SCRAPE time, so samples already stored keep the old `instance`.
-    # ! Only new samples carry the node name, and the old series goes stale after ~5m —
-    # ! so a query spanning the change shows both, and any alert or dashboard query
-    # ! filtering `instance=<IP>` must switch to the node name. The dashboard itself
-    # ! needs no edit: its `instance` variable picks up whatever values the label has.
+    # ! `targetLabel: instance` is REQUIRED — do not omit it. Prometheus itself
+    # ! defaults a `replace` relabel's target_label to `instance`, but the
+    # ! prometheus-operator's validation is stricter and rejects the whole
+    # ! ServiceMonitor without it:
+    # !
+    # !   endpoints[0]: relabelConfigs: [0]: relabel configuration for replace
+    # !   action needs targetLabel value
+    # !
+    # ! Every other layer reports success — the YAML is valid, the Helm release is
+    # ! Ready and Flux is Healthy — because only the OPERATOR drops the object, with
+    # ! a Warning event and "skipping object". Verified live: omitting it left
+    # ! node-exporter with NO scrape job at all and its metrics going stale.
+    # ! `helm template` is therefore NOT sufficient validation for a ServiceMonitor:
+    # ! when a job disappears, check
+    # ! `kubectl -n monitoring get events --field-selector reason=InvalidConfiguration`
+    # ! or the operator log for "skipping object".
     prometheus-node-exporter:
       prometheus:
         monitor:
           relabelings:
             - sourceLabels: [__meta_kubernetes_pod_node_name]
+              targetLabel: instance
               action: replace
 
