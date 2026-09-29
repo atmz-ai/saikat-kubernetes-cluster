@@ -50,10 +50,48 @@ spec:
   # condition. Re-add `suspend: true` immediately and investigate — do not leave it
   # running to "see what happens".
   #
-  # ── ENABLED 2026-09-29 ─────────────────────────────────────────────────────
+  # ── ENABLED 2026-09-29, AND WHAT IT ACTUALLY LOOKS LIKE ────────────────────
   # Removed 2026-09-29 after the preconditions above were verified on all 40 nodes
   # (force-internal-ip != force-endpoint, and equal to the address actually on each
-  # node's enp0s31f6.4000 interface). Prior to this the flag was set since 2026-09-26.
+  # node's enp0s31f6.4000 interface). The flag had been set since 2026-09-26.
+  #
+  # THE LEADER CHECK AS WRITTEN ABOVE IS MISLEADING, so here is the real state. The
+  # annotation it looks for is never written by this version — `kubectl get nodes -l
+  # kilo.squat.ai/leader=true` returns NOTHING, both now and during the outages. The
+  # leader is observable instead as `kilo.squat.ai/wireguard-ip`, which only the
+  # leader gets:
+  #
+  #   node-1  10.4.0.2/16   (helsinki leader)
+  #   node-2  10.4.0.1/16   (falkenstein leader)
+  #
+  # Exactly 2 of 40 nodes hold it, one per region — the outcome the check was for. Had
+  # the per-node-location fallback still applied, all 40 would have it. Do not treat
+  # the empty leader query as a failure; check wireguard-ip.
+  #
+  # A second, related observation worth not re-investigating: every non-leader also
+  # carries 10.4.0.1/16 on its own kilo0 (the address the leader route needs, per
+  # docs/location.md) and installs ZERO routes on it. That is what makes the mesh's
+  # leader-hub shape work — a non-leader's kilo0 exists to hold the tunnel address,
+  # not to route. The leader has ~230 routes on its kilo0 (10.244.x.x/24 per node, via
+  # the peer's WG IP).
+  #
+  # It also means node-to-node ICMP to a PRIVATE address is NOT proof of anything: a
+  # non-leader has no route for the other region's private subnet, so ping between
+  # non-leader private IPs fails while the mesh is perfectly healthy. Test the datapath
+  # at POD level instead, which is what the cluster actually uses. Verified 2026-09-29:
+  # a full 4-pod matrix across two non-leader node pairs in different regions gave 12/12
+  # pairs at 0% loss (~36ms), pod->ClusterIP returns HTTP 200 in ~0.06s, and a pod on a
+  # non-leader reached cert-manager-webhook cross-region. Cluster held at 40/40 Ready,
+  # 7/7 etcd, readyz ok, 0 pod crashes, 0 Kilo restarts.
+  #
+  # EXPECTED NOISE, not a fault: the Kilo agents log roughly one error a minute in
+  # total (steady state, ~1/min across all 40), always
+  #   mesh.go:610  failed to add route "dst: ..., via: -, src: ..., dev: 0": invalid argument
+  # with `dev: 0` and `via: -`. That is Kilo trying to add a route to its OWN segment
+  # with no device (the self-route it does not need, since Kilo already reaches that
+  # segment directly), so it is rejected and skipped. The routes that matter are added
+  # successfully — which is why the pod-level matrix above passes. Treat a RISE in this
+  # rate, or errors with a real `dev:`/`via:`, as the signal to look again.
   # The kill switch below is the rollback: re-add `suspend: true`, push, and the
   # webhook reverts within seconds.
   interval: 1h
