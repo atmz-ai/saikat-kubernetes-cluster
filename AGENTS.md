@@ -461,6 +461,8 @@ The repo uses a single monorepo-wide `mise.toml` at the repository root as the s
 
 **mise (not direnv)** for env var management and tool versioning. Plaintext environment values belong in the `mise.toml` `[env]` section; secrets are managed by **fnox** (age-encrypted, committed to git in `fnox.toml`). No `.env` file is generated or loaded — `_.file = '.env'` was removed.
 
+**Never put a tool's own credential variable names in `[env]`, repo-wide (Hard Rule).** Several CLIs give real environment variables precedence over **every** other credential source — `aws-cli` reads `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_ENDPOINT_URL` before `~/.aws/credentials` *and* before an `aws login` session. A repo-wide `[env]` entry using another service's variable names therefore silently hijacks that tool: every call is redirected at the wrong endpoint, and when only one half of the pair is globally set (the secret lives in fnox, absent from a bare shell) it fails with `Partial credentials found in env` before it ever reaches the real provider. Measured: `AWS_*` in `[env]`, set for Hetzner Object Storage, broke all real AWS access. Name shared values for what they are (`HETZNER_S3_*`) and have each task map them into the tool's expected names in its **own** `env` table (mise interpolates `{{env.X}}` there) — the standard names then exist only for the task that needs them. When a tool misreports an auth/credential error, suspect an ambient env var before suspecting the credential itself.
+
 **Secret management (fnox + age) — two separate keys:**
 
 There are **two distinct age keys** in this repo. Do not confuse them:
