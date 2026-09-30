@@ -121,15 +121,20 @@
   # !
   # ! Exit code alone is not enough — the command also reports problems in UNRELATED
   # ! system units (observed: `xfs_scrub_all.service` warns about a removed CPUAccounting
-  # ! option on Ubuntu 26.04). So the check is scoped to lines naming OUR unit path.
+  # ! option on Ubuntu 26.04). So the check is scoped to lines naming OUR unit.
+  # !
+  # ! Use a plain substring `in` test, NOT `regex_search`. regex_search returns None when
+  # ! there is no match, and OR-ing None with a boolean is not a boolean — Ansible fails
+  # ! the task with "Conditional result (False) was derived from value of type 'NoneType'"
+  # ! on exactly the healthy case we want to pass. `in` always yields a real boolean.
+  # ! Measured: this bit on the first real run against node-1.
   ansible.builtin.command:
     cmd: systemd-analyze verify {{ beszel_agent_unit_path }}
   register: beszel_agent_unit_verify
   changed_when: false
   failed_when: >-
     beszel_agent_unit_verify.rc != 0
-    or (beszel_agent_unit_verify.stderr ~ beszel_agent_unit_verify.stdout)
-       | regex_search('beszel-agent\\.service')
+    or 'beszel-agent.service' in (beszel_agent_unit_verify.stdout ~ beszel_agent_unit_verify.stderr)
 
 - name: Enable and start the agent service
   ansible.builtin.systemd_service:
