@@ -85,6 +85,10 @@
     yaml.preserve_quotes = True
     # ! Lossless round-trip depends on this exact indent. Do not "simplify" it away.
     yaml.indent(mapping=2, sequence=4, offset=2)
+    # ! Keep the leading `---` document marker. ruamel omits it by default, so without
+    # ! this the FIRST LINE of the inventory is dropped on every removal — an unrelated
+    # ! diff hunk that silently contradicts the "round-trips byte-for-byte" claim.
+    yaml.explicit_start = True
 
     with open(path) as handle:
         document = yaml.load(handle)
