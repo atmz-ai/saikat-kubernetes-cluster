@@ -8,9 +8,18 @@
 # * "Migrates" means REBUILDS, never moves: Longhorn builds a new replica on another node
 # * and deletes the old one only once the new one is healthy. A 1-replica volume
 # * (longhorn-1replica SC) goes through exactly the same path as a 2-replica one — it is
-# * not reused or relocated because some second copy exists. The node's own
-# * instance-manager performs that delete, which `kubectl drain --ignore-daemonsets`
-# * preserves: it SKIPS DaemonSet pods rather than deleting them.
+# * not reused or relocated because some second copy exists.
+# *
+# ! CALL THIS BEFORE THE DRAIN, NEVER AFTER. The eviction is performed by the target
+# ! node's own instance-manager, so that pod must stay alive for the wait to finish.
+# ! `kubectl drain` cordons the node, and a cordoned node cannot host the
+# ! instance-manager — it is evicted and cannot be rescheduled, the InstanceManager CR
+# ! goes to `currentState: error`, and the engine on that node can no longer be synced,
+# ! so the eviction ticket never detaches and this role times out. `--ignore-daemonsets`
+# ! does NOT protect it: instance-manager pods are owned by InstanceManager CRs, not a
+# ! DaemonSet (verified — all 31 in the cluster have owner kind InstanceManager).
+# ! Measured on worker-16 (2026-09-30): drain-first left a 2-replica volume's engine
+# ! stranded, blocked the workload's reattach and took harbor-registry to zero endpoints.
 # *
 # * The drain also cordons the node, and `node-drain-policy: block-if-contains-last-replica`
 # * auto-evicts on CORDON — so a 1-replica volume normally starts migrating before this role

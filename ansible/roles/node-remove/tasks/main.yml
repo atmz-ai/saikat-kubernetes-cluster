@@ -225,6 +225,46 @@
     msg: "Node {{ node_remove_k8s_name }} not found in cluster, skipping drain"
   when: node_check.rc != 0
 
+# --- Evacuate Longhorn replicas BEFORE draining ---
+# ! ORDER IS LOAD-BEARING, and this is the OPPOSITE of what this role used to do.
+# !
+# ! Draining first DEADLOCKS the eviction. `kubectl drain` cordons the node, and a
+# ! cordoned node cannot host the pod that performs the eviction: Longhorn's
+# ! instance-manager. Measured on worker-16 (2026-09-30), removing a node that held
+# ! one replica of the 2-replica harbor-registry volume:
+# !   1. drain cordons worker-16
+# !   2. its instance-manager pod is evicted and cannot be rescheduled (cordoned)
+# !   3. the InstanceManager CR goes to `currentState: error`
+# !   4. the volume's engine CR lives on that node, so Longhorn logs
+# !      "Failed to sync Longhorn engine ... invalid instance manager ..., state error"
+# !   5. the volume-eviction-controller ticket can never detach, so evictionRequested
+# !      never completes — the wait times out after 30 min
+# !   6. the pod rescheduled to another node but the volume stays "exclusively attached"
+# !      to the cordoned node -> FailedAttachVolume DeadlineExceeded, pod stuck in
+# !      ContainerCreating, and harbor-registry ended up with NO ready endpoints
+# !
+# ! Evicting first avoids all six: the node is still schedulable, so its instance-manager
+# ! is alive and can rebuild each replica onto another node and delete the local one.
+# ! Rebuilding works while a volume is ATTACHED — the old comment here claimed the
+# ! opposite, but Longhorn has always been able to rebuild a replica of an attached
+# ! volume (observed on the Prometheus volume, which rebuilt at ~15 MB/s while attached).
+# ! Only the ENGINE has to move, and that happens later, at drain time, once the pods
+# ! have been evicted and the volume detaches.
+# !
+# ! The instance-manager pods are OWNED BY InstanceManager CRs, NOT a DaemonSet (verified:
+# ! all 31 across the cluster have owner kind InstanceManager). `--ignore-daemonsets`
+# ! therefore does NOT protect them — it protects longhorn-manager, longhorn-csi-plugin
+# ! and the engine-images. That is the whole reason the drain must come second.
+- name: Evict Longhorn replicas from the node before draining
+  ansible.builtin.include_role:
+    name: longhorn-evict
+  vars:
+    target_host: "{{ node_remove_k8s_name }}"
+  when:
+    - node_check.rc == 0
+    - not is_control_plane
+  run_once: true
+
 - name: Force-delete Terminating pods on dead node before drain
   # Pods stuck in Terminating on an unreachable node will never complete graceful
   # termination — kubectl drain waits for them and times out. Force-deleting them
@@ -277,21 +317,9 @@
     msg: "{{ drain_result.stdout_lines }}"
   when: node_check.rc == 0
 
-# --- Post-drain: evacuate Longhorn replicas ---
-# Longhorn replicas must be evacuated AFTER draining. While the node is still
-# running, pods have their PVCs attached — Longhorn cannot move a replica
-# that is actively mounted by a running pod. Draining first evicts all pods
-# (including stateful workloads like Loki), detaching PVCs. Once detached,
-# Longhorn can freely rebuild replicas on other nodes.
-- name: Evict Longhorn replicas from node (post-drain)
-  ansible.builtin.include_role:
-    name: longhorn-evict
-  vars:
-    target_host: "{{ node_remove_k8s_name }}"
-  when:
-    - node_check.rc == 0
-    - not is_control_plane
-  run_once: true
+# The Longhorn replica eviction used to live here, after the drain. It now runs
+# BEFORE the drain — see the load-bearing comment above — because draining first
+# cordons the node and kills the instance-manager the eviction needs.
 
 - name: Find a v1.36.x control plane node for etcd operations
   # ! `etcd_delegate` MUST be set on EVERY path, worker included, even though every task
