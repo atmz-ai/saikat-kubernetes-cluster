@@ -418,26 +418,6 @@ all:
           cloudflare_dns_records:
             - hostname: "*.yral.com"
               proxied: false
-        worker-22:
-          ansible_host: 138.201.120.189
-          provider: hetzner
-          datacenter: FSN1-DC8
-          region: falkenstein
-          country: de
-          disk_type: nvme
-          cloudflare_dns_records:
-            - hostname: "*.yral.com"
-              proxied: false
-        worker-23:
-          ansible_host: 95.217.35.190
-          provider: hetzner
-          datacenter: HEL1-DC2
-          region: helsinki
-          country: fi
-          disk_type: nvme
-          cloudflare_dns_records:
-            - hostname: "*.yral.com"
-              proxied: false
         worker-24:
           ansible_host: 95.216.16.50
           provider: hetzner
@@ -458,72 +438,12 @@ all:
           cloudflare_dns_records:
             - hostname: "*.yral.com"
               proxied: false
-        worker-26:
-          ansible_host: 95.216.24.51
-          provider: hetzner
-          datacenter: HEL1-DC2
-          region: helsinki
-          country: fi
-          disk_type: nvme
-          cloudflare_dns_records:
-            - hostname: "*.yral.com"
-              proxied: false
-        worker-27:
-          ansible_host: 116.202.84.59
-          provider: hetzner
-          datacenter: FSN1-DC14
-          region: falkenstein
-          country: de
-          disk_type: nvme
-          cloudflare_dns_records:
-            - hostname: "*.yral.com"
-              proxied: false
         worker-28:
           ansible_host: 116.202.234.107
           provider: hetzner
           datacenter: FSN1-DC15
           region: falkenstein
           country: de
-          disk_type: nvme
-          cloudflare_dns_records:
-            - hostname: "*.yral.com"
-              proxied: false
-        worker-29:
-          ansible_host: 176.9.86.220
-          provider: hetzner
-          datacenter: FSN1-DC6
-          region: falkenstein
-          country: de
-          disk_type: nvme
-          cloudflare_dns_records:
-            - hostname: "*.yral.com"
-              proxied: false
-        worker-30:
-          ansible_host: 138.201.18.222
-          provider: hetzner
-          datacenter: FSN1-DC8
-          region: falkenstein
-          country: de
-          disk_type: nvme
-          cloudflare_dns_records:
-            - hostname: "*.yral.com"
-              proxied: false
-        worker-31:
-          ansible_host: 138.201.138.101
-          provider: hetzner
-          datacenter: FSN1-DC8
-          region: falkenstein
-          country: de
-          disk_type: nvme
-          cloudflare_dns_records:
-            - hostname: "*.yral.com"
-              proxied: false
-        worker-32:
-          ansible_host: 95.217.43.62
-          provider: hetzner
-          datacenter: HEL1-DC2
-          region: helsinki
-          country: fi
           disk_type: nvme
           cloudflare_dns_records:
             - hostname: "*.yral.com"
