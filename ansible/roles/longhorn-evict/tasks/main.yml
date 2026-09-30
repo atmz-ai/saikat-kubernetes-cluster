@@ -142,7 +142,7 @@
     "
   register: replica_count
   until: replica_count.stdout | int == 0
-  retries: 60
+  retries: 2
   delay: 30
   changed_when: false
   failed_when: false
