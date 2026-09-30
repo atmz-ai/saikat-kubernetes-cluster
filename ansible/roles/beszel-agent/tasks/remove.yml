@@ -1,0 +1,120 @@
+---
+# beszel-agent_remove — uninstall the beszel agent from a node being removed.
+#
+# Two halves, and the ORDER matters:
+#   1. stop and remove the service on the node (best-effort — the node may already be
+#      unreachable by the time a removal play runs, and that must not fail the play)
+#   2. delete the corresponding SYSTEM from the hub, so the node does not linger as a
+#      permanently "down" entry forever
+#
+# The hub deletion is the part with no local equivalent: Longhorn and Kubernetes clean
+# up their own objects on removal, but Beszel's `systems` record is owned by the hub and
+# nothing else will ever garbage-collect it.
+
+- name: Check whether the agent unit exists on the node
+  ansible.builtin.stat:
+    path: "{{ beszel_agent_unit_path }}"
+  register: beszel_agent_remove_unit
+  # ! A node in a removal play is frequently already dead — that is often WHY it is being
+  # ! removed. Unreachable must not abort the play, or the hub-side cleanup below (the half
+  # ! that has no other owner) would never run. `failed_when: false` + `ignore_unreachable`
+  # ! is the explicit form of "tolerate, but keep going", which ignore_errors cannot express.
+  failed_when: false
+  ignore_unreachable: true
+
+- name: Stop and disable the agent service
+  ansible.builtin.systemd_service:
+    name: "{{ beszel_agent_service_name }}"
+    state: stopped
+    enabled: false
+    daemon_reload: true
+  when:
+    - beszel_agent_remove_unit.stat is defined
+    - beszel_agent_remove_unit.stat.exists | default(false)
+  failed_when: false
+  ignore_unreachable: true
+
+- name: Remove the unit, environment file and install directory
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "{{ beszel_agent_unit_path }}"
+    - "{{ beszel_agent_env_dir }}"
+    - "{{ beszel_agent_install_dir }}"
+  # These paths already exist in the node image / were created by the install, so a
+  # failure here means the host is unreachable, not that the removal was wrong.
+  failed_when: false
+  ignore_unreachable: true
+
+- name: Reload systemd after removing the unit
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+  failed_when: false
+  ignore_unreachable: true
+
+# ── Hub-side cleanup ────────────────────────────────────────────────────────────────
+# The agent registers itself under SYSTEM_NAME, which defaults to the hostname (see
+# https://beszel.dev/guide/environment-variables). The inventory name is what the hub
+# stores for these nodes, so it is the identifier to delete by.
+
+- name: Look up the node's system record on the hub
+  # ! The universal token CANNOT read this. Only /api/beszel/agent-connect is exempted
+  # ! from oauth2-proxy (see kubernetes/infrastructure/oauth2-proxy/deployment-beszel.yaml),
+  # ! so every PocketBase data-API path is behind Google SSO and answers 302 to the
+  # ! login page. A 302 is therefore the EXPECTED outcome with today's credentials, not
+  # ! an error — it is reported explicitly below rather than swallowed.
+  ansible.builtin.uri:
+    url: "{{ beszel_hub_url }}/api/collections/systems/records?filter=(name='{{ target_host | default(inventory_hostname) }}')&perPage=1"
+    method: GET
+    headers:
+      Authorization: "{{ beszel_agent_token }}"
+    status_code: [200, 302, 401, 403, 404]
+    return_content: false
+  delegate_to: localhost
+  register: beszel_agent_hub_lookup
+  changed_when: false
+  run_once: true
+
+- name: Delete the node's system record from the hub
+  ansible.builtin.uri:
+    url: "{{ beszel_hub_url }}/api/collections/systems/records/{{ item.id }}"
+    method: DELETE
+    headers:
+      Authorization: "{{ beszel_agent_token }}"
+    status_code: [200, 204, 404]
+  delegate_to: localhost
+  loop: "{{ beszel_agent_hub_lookup.json.items | default([]) }}"
+  loop_control:
+    label: "{{ item.id }} ({{ item.name }})"
+  register: beszel_agent_hub_delete
+  # 404 is tolerated as "already gone" so a re-run is idempotent. With a loop the
+  # registered variable is an aggregate, so the per-item result is `item.status`.
+  changed_when: item.status in [200, 204]
+  run_once: true
+
+- name: Report the hub cleanup result
+  ansible.builtin.debug:
+    msg: >-
+      {{ 'Removed' if (beszel_agent_hub_lookup.json.items | default([]) | length) > 0 else 'No' }}
+      Beszel system record for {{ target_host | default(inventory_hostname) }} on the hub.
+  when: beszel_agent_hub_lookup.status == 200
+  run_once: true
+
+- name: Warn that the hub entry could not be removed automatically
+  # ! A WARNING, not a failure: the node's local agent really was removed, and the
+  # ! remaining hub record is cosmetic (it shows as a permanently down system). Failing
+  # ! the whole removal play over it would block the node removal for a bookkeeping
+  # ! reason. The operator action is one UI click, so say exactly that.
+  ansible.builtin.debug:
+    msg: >-
+      Could not remove the Beszel system record for
+      {{ target_host | default(inventory_hostname) }} automatically
+      (hub returned HTTP {{ beszel_agent_hub_lookup.status }} — the PocketBase data API
+      is behind oauth2-proxy/Google SSO and the universal agent token cannot reach it).
+      The node's agent IS removed locally; its hub entry will show as permanently DOWN
+      until it is deleted by hand at {{ beszel_hub_url }} → Systems → delete.
+      To automate this, store the PocketBase superuser credentials and switch this task
+      to an authenticated call.
+  when: beszel_agent_hub_lookup.status != 200
+  run_once: true

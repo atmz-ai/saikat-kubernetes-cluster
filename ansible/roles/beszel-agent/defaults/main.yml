@@ -1,0 +1,34 @@
+---
+# Beszel agent — the host-side collector for the Beszel hub at beszel_hub_url.
+#
+# The hub runs in-cluster (kubernetes/infrastructure/beszel). This role installs the
+# BINARY agent as a systemd service rather than a container, on purpose: the agent's own
+# docs note that a containerised agent cannot see most host-level resources, and that
+# "if you need these metrics, consider running the binary agent as a systemd service
+# instead" (https://beszel.dev/guide/agent-installation — Docker/Podman section). On a
+# Kubernetes NODE we want exactly those host metrics, so the binary is the correct form.
+#
+# Version is pinned here and nowhere else (repo rule: one place to change a version).
+beszel_agent_version: "0.20.0"
+
+# Upstream release asset. `linux_amd64.tar.gz` is the portable build; the `_glibc`
+# variant additionally needs a matching glibc, which we cannot assume across Hetzner and
+# Azure images, so the portable one is the safe default.
+beszel_agent_asset: "beszel-agent_linux_{{ ansible_facts['architecture'] | replace('x86_64', 'amd64') | replace('aarch64', 'arm64') }}.tar.gz"
+
+beszel_agent_user: beszel
+beszel_agent_group: beszel
+# Binary + version stamp live together so the version check has one place to read.
+beszel_agent_install_dir: /opt/beszel-agent
+# The env file holds the registration TOKEN, so it is root-owned and 0600. The unit
+# reads it via EnvironmentFile, which systemd resolves as root before dropping to the
+# service user — the agent process itself never needs to open it.
+beszel_agent_env_dir: /etc/beszel
+beszel_agent_env_file: "{{ beszel_agent_env_dir }}/beszel-agent.env"
+beszel_agent_data_dir: /var/lib/beszel-agent
+beszel_agent_service_name: beszel-agent
+beszel_agent_unit_path: "/etc/systemd/system/{{ beszel_agent_service_name }}.service"
+
+# Hub connection lives in group_vars (beszel_hub_url / beszel_listen_port /
+# beszel_ssh_key / beszel_agent_token) so both this repo's nodes and the Hetzner fleet
+# project share one definition of the hub. See ansible/inventory/group_vars/all/vars.yml.

@@ -1,0 +1,23 @@
+---
+# Install the Beszel agent on every node that does not have it yet.
+#
+# One-time backfill for the existing fleet. New nodes get the agent from add-node.yml
+# (which includes the same role), so this playbook only needs running against nodes that
+# predate the role.
+#
+# Usage:
+#   mise run ansible-playbook -- ansible/playbooks/operations/beszel-agents-install.yml
+#   mise run ansible-playbook -- ansible/playbooks/operations/beszel-agents-install.yml -e target_host=worker-1
+#
+# ! `serial: 1` and it matters twice over. The role restarts a systemd unit on each host,
+# ! and the agent's registration to the hub is an outbound connection — running 40 at
+# ! once would put a thundering herd on the hub and make a partial failure hard to read.
+# ! Serial also matches the repo rule for multi-node operations: complete and verify one
+# ! host before touching the next.
+- name: Install the Beszel agent on the fleet
+  hosts: "{{ target_host | default('nodes') }}"
+  become: true
+  gather_facts: true
+  serial: 1
+  roles:
+    - role: beszel-agent

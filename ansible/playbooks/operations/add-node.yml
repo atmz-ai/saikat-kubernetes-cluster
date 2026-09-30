@@ -68,6 +68,10 @@
       when: node_role == 'worker'
     - role: node-labels
     - role: cloudflare-dns
+    # LAST, and only after the node has joined: the agent registers itself with the hub
+    # under the node's name, so the name must already be the real one. It is not gated on
+    # node_role — control planes are monitored too.
+    - role: beszel-agent
 
 # Regenerate the DNS records from the updated inventory — a SECOND play, because the
 # generator reads hostvars and must run after the join rather than alongside it.

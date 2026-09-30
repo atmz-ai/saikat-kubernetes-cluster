@@ -1,0 +1,133 @@
+---
+# beszel-agent — install the binary agent as a systemd service on a cluster node.
+#
+# Idempotent: re-running is safe. The download is skipped when the installed version
+# stamp already matches the pinned version, so a second run makes no changes.
+
+- name: Check for the pinned version stamp
+  # * The stamp is written only after a successful install, so its presence means
+  # * "this exact version is installed". A missing stamp (fresh node, or an operator
+  # * cleaned /opt) simply falls through to the install path.
+  ansible.builtin.stat:
+    path: "{{ beszel_agent_install_dir }}/.version"
+  register: beszel_agent_version_stamp
+
+- name: Read the installed version
+  ansible.builtin.slurp:
+    src: "{{ beszel_agent_install_dir }}/.version"
+  register: beszel_agent_installed_version
+  when: beszel_agent_version_stamp.stat.exists
+
+- name: Decide whether the install or upgrade is needed
+  ansible.builtin.set_fact:
+    beszel_agent_needs_install: >-
+      {{ not beszel_agent_version_stamp.stat.exists
+         or (beszel_agent_installed_version.content | default('') | b64decode | trim) != beszel_agent_version }}
+
+- name: Report the version decision
+  ansible.builtin.debug:
+    msg: >-
+      beszel-agent {{ beszel_agent_version }} —
+      {{ 'installing' if beszel_agent_needs_install else 'already at the pinned version, nothing to do' }}
+
+- name: Ensure the service account exists
+  ansible.builtin.user:
+    name: "{{ beszel_agent_user }}"
+    system: true
+    create_home: false
+    shell: /usr/sbin/nologin
+    state: present
+
+- name: Ensure the install, config and data directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ beszel_agent_user }}"
+    group: "{{ beszel_agent_group }}"
+    mode: "0755"
+  loop:
+    - "{{ beszel_agent_install_dir }}"
+    - "{{ beszel_agent_data_dir }}"
+  # The config dir is NOT in this loop: it holds the token env file, which must stay
+  # root-only, so it is created separately below rather than owned by the agent user.
+
+- name: Ensure the config directory exists (root-owned — it holds the token)
+  ansible.builtin.file:
+    path: "{{ beszel_agent_env_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Check whether the agent binary is present
+  ansible.builtin.stat:
+    path: "{{ beszel_agent_install_dir }}/beszel-agent"
+  register: beszel_agent_binary
+
+- name: Download and unpack the pinned agent release
+  # ! Download happens only when the version differs. `creates:` would be wrong here
+  # ! because the binary may exist at an OLD version — the stamp, not the file, is the
+  # ! thing that says which version is installed.
+  ansible.builtin.unarchive:
+    src: "https://github.com/henrygd/beszel/releases/download/v{{ beszel_agent_version }}/{{ beszel_agent_asset }}"
+    dest: "{{ beszel_agent_install_dir }}"
+    remote_src: true
+    owner: "{{ beszel_agent_user }}"
+    group: "{{ beszel_agent_group }}"
+    mode: "0755"
+  when: beszel_agent_needs_install
+
+- name: Record the installed version
+  ansible.builtin.copy:
+    content: "{{ beszel_agent_version }}\n"
+    dest: "{{ beszel_agent_install_dir }}/.version"
+    owner: "{{ beszel_agent_user }}"
+    group: "{{ beszel_agent_group }}"
+    mode: "0644"
+  when: beszel_agent_needs_install
+
+- name: Write the agent environment file
+  ansible.builtin.template:
+    src: beszel-agent.env.j2
+    dest: "{{ beszel_agent_env_file }}"
+    owner: root
+    group: root
+    mode: "0600"
+  # The token lives in here, so this is always 0600 root:root. It is templated even when
+  # the version matches, because the hub URL / token / key can change independently of
+  # the binary version.
+  notify: Reload systemd and restart the beszel agent
+
+- name: Install the systemd unit
+  ansible.builtin.template:
+    src: beszel-agent.service.j2
+    dest: "{{ beszel_agent_unit_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload systemd and restart the beszel agent
+
+- name: Enable and start the agent service
+  ansible.builtin.systemd_service:
+    name: "{{ beszel_agent_service_name }}"
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Confirm the agent is running
+  # * Assert on the live unit state rather than the handler's exit code. A unit that
+  # * fails to start (bad token, bad unit file) reports success at the systemd module
+  # * level and only shows up here; without this check the node silently reports no
+  # * metrics to the hub.
+  ansible.builtin.systemd_service:
+    name: "{{ beszel_agent_service_name }}"
+  register: beszel_agent_active
+  changed_when: false
+  retries: 5
+  delay: 3
+  until: beszel_agent_active.status.ActiveState == "active"
+  failed_when: beszel_agent_active.status.ActiveState != "active"
+
+- name: Report the agent state
+  ansible.builtin.debug:
+    msg: "beszel-agent {{ beszel_agent_version }} is {{ beszel_agent_active.status.ActiveState }} on {{ inventory_hostname }}"

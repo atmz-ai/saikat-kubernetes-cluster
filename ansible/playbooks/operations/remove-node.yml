@@ -12,6 +12,28 @@
 # ! writes the same records the manual step used to leave stale: the departed node stays
 # ! listed and every generated apex/wildcard/NS record keeps pointing at it.
 
+# Uninstall the Beszel agent FIRST, and as its own play against the node.
+#
+# ! It has to precede the localhost play, not follow it: `node-remove` ends by disabling
+# ! SSH and resetting the node's Kubernetes config, after which the agent cannot be
+# ! reached to uninstall (and the files would be left behind on a box that is about to be
+# ! wiped or reprovisioned). Running it before also means the node is still a valid host
+# ! for the hub-side cleanup that happens in the same role.
+#
+# Host is the node itself rather than localhost because the tasks act on the remote host.
+- name: Uninstall the Beszel agent from the departing node
+  # Matches add-node.yml's form. The `default('nodes')` is not cosmetic: lint runs a
+  # syntax check without -e, where an undefined `target_host` is a hard error, and
+  # `nodes` is the correct no-argument behaviour anyway (the removal tasks are no-ops on
+  # a node with no agent, so a fleet-wide default is safe and inert).
+  hosts: "{{ target_host | default('nodes') }}"
+  gather_facts: false
+  tasks:
+    - name: Remove the agent service and its Beszel hub entry
+      ansible.builtin.include_role:
+        name: beszel-agent
+        tasks_from: remove.yml
+
 - name: Remove node from cluster
   hosts: localhost
   gather_facts: false

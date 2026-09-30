@@ -1,0 +1,18 @@
+# Managed by Ansible (role: beszel-agent). Do not edit on the host.
+[Unit]
+Description=Beszel Agent (host metrics collector for {{ beszel_hub_url }})
+Documentation=https://beszel.dev/guide/agent-installation
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{ beszel_agent_user }}
+Group={{ beszel_agent_group }}
+EnvironmentFile={{ beszel_agent_env_file }}
+ExecStart={{ beszel_agent_install_dir }}/beszel-agent
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
