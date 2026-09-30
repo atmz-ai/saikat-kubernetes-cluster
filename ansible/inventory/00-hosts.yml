@@ -428,16 +428,6 @@ all:
           cloudflare_dns_records:
             - hostname: "*.yral.com"
               proxied: false
-        worker-34:
-          ansible_host: 95.216.112.246
-          provider: hetzner
-          datacenter: HEL1-DC2
-          region: helsinki
-          country: fi
-          disk_type: nvme
-          cloudflare_dns_records:
-            - hostname: "*.yral.com"
-              proxied: false
         worker-35:
           ansible_host: 95.216.77.98
           provider: hetzner

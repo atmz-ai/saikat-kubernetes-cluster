@@ -50,7 +50,6 @@ data:
     saikat.dev.	300	IN	A	94.130.128.105
     saikat.dev.	300	IN	A	94.130.217.94
     saikat.dev.	300	IN	A	95.216.101.114
-    saikat.dev.	300	IN	A	95.216.112.246
     saikat.dev.	300	IN	A	95.216.16.174
     saikat.dev.	300	IN	A	95.216.16.50
     saikat.dev.	300	IN	A	95.216.228.60
@@ -89,7 +88,6 @@ data:
     *.saikat.dev.	300	IN	A	94.130.128.105
     *.saikat.dev.	300	IN	A	94.130.217.94
     *.saikat.dev.	300	IN	A	95.216.101.114
-    *.saikat.dev.	300	IN	A	95.216.112.246
     *.saikat.dev.	300	IN	A	95.216.16.174
     *.saikat.dev.	300	IN	A	95.216.16.50
     *.saikat.dev.	300	IN	A	95.216.228.60
