@@ -107,6 +107,42 @@ Run playbooks in the foreground. Lint before PRs: `mise run ansible-lint`.
 Short poll loops (≤10s sleep) when waiting for something to converge. Never a long
 `sleep` — poll, re-check, or stop and let the operator reinitiate.
 
+## systemd units: no native module exists — validate with `systemd-analyze verify`
+
+**There is no Ansible module that CREATES a systemd unit file.** `ansible.builtin.systemd_service`
+only *controls* units that already exist (`state`, `enabled`, `masked`, `daemon_reload`), and no
+vendored community module fills the gap — `community.general` has `systemd_info` (read facts),
+`ini_file` (generic INI editing), `runit`, `openwrt_init`; none writes a unit. So a unit file is
+necessarily written by `template` (or `copy`). Checked against the collection sources in
+`ansible/collections/` and the module docs, not assumed.
+
+**Because we therefore cannot get type safety from the module, get it from systemd itself.**
+Follow the unit-file task with a `systemd-analyze verify` task:
+
+```yaml
+- name: Validate the unit file with systemd's own parser
+  ansible.builtin.command:
+    cmd: systemd-analyze verify {{ unit_path }}
+  register: unit_verify
+  changed_when: false
+  # ! rc alone is not enough — `verify` also reports problems in UNRELATED system units.
+  failed_when: >-
+    unit_verify.rc != 0
+    or (unit_verify.stderr ~ unit_verify.stdout)
+       | regex_search('myunit\.service')
+```
+
+Why this matters, and why the second condition is not optional: **systemd silently IGNORES
+directives it does not recognise.** A typo'd directive name or a removed option does not fail the
+unit — it is dropped, the service starts, and the setting simply never takes effect. That is the
+same silent-failure class as a dropped `extraArgs:` key. `systemd-analyze verify` fails loudly
+instead.
+
+The `regex_search` is load-bearing, measured on Ubuntu 26.04: `verify` prints warnings for other
+units in the image (`xfs_scrub_all.service: Support for option CPUAccounting= has been removed`)
+and returns 0 for them, so exit code alone is fine — but scoping to our unit name keeps the check
+meaningful once a shipped unit in the image genuinely errors.
+
 ## Roles and playbooks
 
 The structural rules (atomic roles, thin playbooks, no `include_role` inside roles,

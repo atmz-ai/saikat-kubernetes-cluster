@@ -107,6 +107,30 @@
     mode: "0644"
   notify: Reload systemd and restart the beszel agent
 
+- name: Validate the unit file with systemd's own parser
+  # ! There is NO Ansible module that creates systemd unit files — `systemd_service`
+  # ! only controls units that already exist, so a template is the only way to write one.
+  # ! (Checked: ansible-core's systemd_service, and community.general's vendored modules —
+  # ! systemd_info/ini_file/runit/openwrt_init all do something else.)
+  # !
+  # ! `systemd-analyze verify` IS the type-safe check the template cannot give us: it
+  # ! parses the unit with systemd's own grammar, so a typo in a directive name or an
+  # ! unsupported option fails here and loudly, instead of silently degrading to a no-op
+  # ! at runtime. Directives systemd does not recognise are otherwise IGNORED without
+  # ! complaint, which is exactly the silent failure this catches.
+  # !
+  # ! Exit code alone is not enough — the command also reports problems in UNRELATED
+  # ! system units (observed: `xfs_scrub_all.service` warns about a removed CPUAccounting
+  # ! option on Ubuntu 26.04). So the check is scoped to lines naming OUR unit path.
+  ansible.builtin.command:
+    cmd: systemd-analyze verify {{ beszel_agent_unit_path }}
+  register: beszel_agent_unit_verify
+  changed_when: false
+  failed_when: >-
+    beszel_agent_unit_verify.rc != 0
+    or (beszel_agent_unit_verify.stderr ~ beszel_agent_unit_verify.stdout)
+       | regex_search('beszel-agent\\.service')
+
 - name: Enable and start the agent service
   ansible.builtin.systemd_service:
     name: "{{ beszel_agent_service_name }}"

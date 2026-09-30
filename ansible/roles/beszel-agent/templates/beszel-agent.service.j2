@@ -1,4 +1,9 @@
 # Managed by Ansible (role: beszel-agent). Do not edit on the host.
+#
+# ! systemd IGNORES directives it does not recognise, so a typo here is silent — the unit
+# ! starts and the setting is simply dropped. There is no Ansible module that creates unit
+# ! files (see ansible/AGENTS.md "systemd units"), so the tasks/main.yml runs
+# ! `systemd-analyze verify` against this file after writing it to catch exactly that.
 [Unit]
 Description=Beszel Agent (host metrics collector for {{ beszel_hub_url }})
 Documentation=https://beszel.dev/guide/agent-installation
