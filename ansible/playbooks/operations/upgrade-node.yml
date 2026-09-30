@@ -9,7 +9,7 @@
 #   ansible-playbook ansible/playbooks/operations/upgrade-node.yml -e target_host=node-3
 #
 # ! TARGETING DEFAULTS TO THE WHOLE FLEET, AND THAT IS DELIBERATE. With no target_host
-# ! this touches all 43 nodes serially, control planes included, which is a long rolling
+# ! this touches all 41 nodes serially, control planes included, which is a long rolling
 # ! operation. Pass -e target_host=<name> for a single node.
 #
 # serial: 1 keeps etcd quorum intact for a control-plane pass (one member out of the

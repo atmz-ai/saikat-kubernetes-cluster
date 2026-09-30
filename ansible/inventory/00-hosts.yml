@@ -75,7 +75,7 @@ all:
       # ! endpoint records and skipped by the control-plane upgrade playbook while
       # ! everything still reports healthy.
       #
-      # * `worker` is the default rather than the exception so the 33 workers need no
+      # * `worker` is the default rather than the exception so the 31 workers need no
       # * per-host line at all — only the 10 control planes state their role. Default-first:
       # * the common case carries no configuration, and a host's entry states only what
       # * makes it different.
@@ -365,16 +365,6 @@ all:
           country: de
           disk_type: nvme
           namecheap_nameserver: "ns11"
-          cloudflare_dns_records:
-            - hostname: "*.yral.com"
-              proxied: false
-        worker-15:
-          ansible_host: 138.201.16.44
-          provider: hetzner
-          datacenter: FSN1-DC8
-          region: falkenstein
-          country: de
-          disk_type: nvme
           cloudflare_dns_records:
             - hostname: "*.yral.com"
               proxied: false
