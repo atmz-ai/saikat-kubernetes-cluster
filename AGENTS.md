@@ -575,8 +575,8 @@ group. `control_plane` and `worker_nodes` are **derived** from each host's `node
 `ansible/inventory/10-role-groups.yml` (the `constructed` inventory plugin), so the two
 views cannot drift from the list.
 
-41 nodes today: **10 control planes** (node-1..node-7 Hetzner stacked + 3 Azure Central
-India) and **31 workers**. Target via `-e target_host=...`.
+32 nodes today: **10 control planes** (node-1..node-7 Hetzner stacked + 3 Azure Central
+India) and **22 workers**. Target via `-e target_host=...`.
 
 **One playbook per operation, not one per node kind** — `add-node.yml` and
 `upgrade-node.yml` each handle both, and the host's `node_role` decides which roles run.
