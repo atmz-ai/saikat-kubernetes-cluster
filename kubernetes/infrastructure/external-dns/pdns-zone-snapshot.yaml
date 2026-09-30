@@ -38,7 +38,6 @@ data:
     saikat.dev.	300	IN	A	138.201.199.41
     saikat.dev.	300	IN	A	138.201.251.32
     saikat.dev.	300	IN	A	138.201.85.40
-    saikat.dev.	300	IN	A	167.235.0.121
     saikat.dev.	300	IN	A	167.235.115.50
     saikat.dev.	300	IN	A	168.119.139.49
     saikat.dev.	300	IN	A	176.9.7.19
@@ -79,7 +78,6 @@ data:
     *.saikat.dev.	300	IN	A	138.201.199.41
     *.saikat.dev.	300	IN	A	138.201.251.32
     *.saikat.dev.	300	IN	A	138.201.85.40
-    *.saikat.dev.	300	IN	A	167.235.0.121
     *.saikat.dev.	300	IN	A	167.235.115.50
     *.saikat.dev.	300	IN	A	168.119.139.49
     *.saikat.dev.	300	IN	A	176.9.7.19

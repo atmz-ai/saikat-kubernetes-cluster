@@ -121,7 +121,7 @@
   run_once: true
   changed_when: true
 
-- name: Wait for all replicas to evacuate (up to 30 min)
+- name: Wait for all replicas to evacuate before continuing removal
   ansible.builtin.shell: |
     kubectl get node.longhorn.io {{ target_host }} -n longhorn-system \
       -o json | python3 -c "
@@ -145,7 +145,7 @@
   retries: 2
   delay: 30
   changed_when: false
-  failed_when: false
+  failed_when: replica_count.rc != 0 or replica_count.stdout | trim != "0"
   when:
     - longhorn_node_check.rc == 0
     - replica_count_before.stdout | int > 0

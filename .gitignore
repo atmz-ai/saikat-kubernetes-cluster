@@ -22,3 +22,4 @@ apps/yral-rishi-agent/.venv/
 spacetime.local.json
 target/
 tailwind.config.js
+video-generation/
