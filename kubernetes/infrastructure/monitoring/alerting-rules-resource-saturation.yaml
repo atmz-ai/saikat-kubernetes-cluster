@@ -103,11 +103,22 @@ data:
                     type: prometheus
                     uid: prometheus
                   editorMode: code
+                  # ! Do NOT add a `max by(namespace, pod, container)` around the limit lookup
+                  # ! here. Grafana's expression engine fails to evaluate the rule with it:
+                  # !   msg="Failed to evaluate rule"
+                  # !   error="failed to execute query [A]: execution: multiple matches for
+                  # !          labels: many-to-one matching must be explicit (group_left/group_right)"
+                  # ! The identical aggregation succeeds against the Prometheus API, so the
+                  # ! failure is in Grafana's own evaluation path, not the query. Measured
+                  # ! 2026-09-30: this rule retried every minute and never fired, so NO
+                  # ! critical memory alerts were ever delivered. The warning rule below uses
+                  # ! the bare matcher and evaluates cleanly, which is why only the critical
+                  # ! severity was silent.
                   expr: |
                     (
                       container_memory_working_set_bytes{container!="", container!="POD", namespace!=""}
                       / on(namespace, pod, container)
-                      max by(namespace, pod, container) (kube_pod_container_resource_limits{resource="memory"})
+                      kube_pod_container_resource_limits{resource="memory"}
                     ) * 100
                   refId: A
               - refId: B
