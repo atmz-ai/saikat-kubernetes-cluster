@@ -37,6 +37,10 @@ spec:
         # Compactor runs as part of SingleBinary; retention_enabled must be
         # set here to activate deletion of chunks older than retention_period.
         retention_enabled: true
+        # TODO Loki storage is not cleaning up: the S3 bucket is at ~380 GiB against a 720h retention.
+        # TODO Prime suspect is this value — it is `filesystem` while chunks live in S3, and retention
+        # TODO deletes are applied through the delete-request store, so chunk deletions may never reach
+        # TODO the bucket. Try `s3`, confirm the compactor actually runs, and watch the bucket size drop.
         delete_request_store: filesystem
       limits_config:
         # Required for the Grafana Logs Drilldown plugin's log volume histogram
