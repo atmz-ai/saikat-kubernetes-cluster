@@ -1,23 +1,9 @@
 ---
-# Daily local snapshot — fast point-in-time restore without S3 round-trip.
-# Kept for 7 days; runs at 01:00 UTC every day.
-# groups: [default] applies to every volume that has no explicit recurring job
-# selector set (i.e. all current volumes).
-apiVersion: longhorn.io/v1beta2
-kind: RecurringJob
-metadata:
-  name: daily-snapshot
-  namespace: longhorn-system
-spec:
-  cron: "0 1 * * *"
-  task: snapshot
-  groups:
-    - default
-  retain: 7
-  concurrency: 2
-  labels: {}
-
----
+# * No local snapshots on any volume. The former daily `snapshot` job is what pushed Loki (401 GiB on a
+# * 50 GiB volume) and Prometheus (203 GiB on 100 GiB) 3-8x past their provisioned size, and a volume
+# * that size cannot be copied to a fresh replica over the Helsinki<->India link before the engine's 8 s
+# * replica timeout tears the rebuild down. The weekly S3 backup below is the only scheduled job, and the
+# * only copy that survives losing the node holding the volume.
 # Weekly S3 backup — full incremental backup to Hetzner Object Storage.
 # Kept for 8 weeks (2 months); runs at 02:00 UTC every Sunday.
 # groups: [default] applies to every volume that has no explicit recurring job

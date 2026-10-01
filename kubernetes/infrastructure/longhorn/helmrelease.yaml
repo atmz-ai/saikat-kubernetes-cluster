@@ -55,6 +55,11 @@ spec:
       # for new volume creation defaults.
       disableRevisionCounter: '{"v1":"false"}'
 
+      # * fast-check (the default) hashes a snapshot file only when its mtime changes, so bit-rot in an
+      # * untouched file is never detected. enabled hashes everything and catches it, at a periodic I/O
+      # * cost. Only the per-engine-type JSON form is read (v1.11+), same as disableRevisionCounter above.
+      snapshotDataIntegrity: '{"v1":"enabled","v2":"enabled"}'
+
       # Allow Longhorn to rebalance replica placement over time. best-effort tries to
       # spread replicas evenly across nodes and zones, and evicts replicas from disks
       # under storage pressure. This is required for Longhorn to remove excess replicas
