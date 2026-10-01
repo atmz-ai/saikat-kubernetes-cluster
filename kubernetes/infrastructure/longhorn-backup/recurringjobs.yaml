@@ -31,15 +31,25 @@ spec:
 # *
 # * ! snapshot-delete drops snapshots a `backup` may be mid-upload on. Weekly backup runs Sun 02:00, so
 # * ! the steady-state cron stays well clear of it.
-# * The every-minute cron is the one-off backlog purge (it clears within ~2 min instead of waiting for a
-# * daily window); relax it to the daily time below once the volumes have settled.
+# * ! BLOCKED on two volumes: Loki (pvc-728ed435, worker-35+azure-india-2) and Prometheus
+# * ! (pvc-6e1d6c64, worker-17+azure-india-3) sit at 431/218 GiB and are NOT purging, because a
+# * ! cross-region replica on them is perpetually rebuilding. A rebuilding replica blocks snapshot
+# * ! removal outright -- the engine returns `cannot remove a snapshot because tcp://<india-ip>:10160
+# * ! is rebuilding`. That is a deadlock: the volume is too big to copy to an India replica over the
+# * ! ~146 ms link, the un-finishable rebuild blocks the purge, and the purge is what would shrink the
+# * ! volume enough for the rebuild to finish. Every other volume purged cleanly (143 -> 50 snapshots,
+# * ! 9 -> 2 per volume) and reclaimed its space.
+# * Fix is to remove the cross-region replica for those two volumes, not to tune this job -- see the
+# * volume owner's replica placement. Loki's durable data is in S3 anyway (this PVC is only WAL/index/
+# * compactor working dir), so its WAN replica buys nothing.
+# * The every-minute cron was the one-off backlog purge; daily is the steady-state schedule.
 apiVersion: longhorn.io/v1beta2
 kind: RecurringJob
 metadata:
   name: snapshot-delete
   namespace: longhorn-system
 spec:
-  cron: "* * * * *"
+  cron: "0 3 * * *"
   task: snapshot-delete
   groups:
     - default
