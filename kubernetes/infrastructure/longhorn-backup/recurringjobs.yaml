@@ -20,9 +20,9 @@ spec:
   labels: {}
 ---
 # * No local snapshots accumulate on any volume. The former daily `snapshot` job is what pushed Loki
-# * (431 GiB on a 50 GiB volume) and Prometheus (218 GiB on 100 GiB) 4-8x past their provisioned size,
-# * and a volume that size cannot be copied to a fresh replica over the Helsinki<->India link before the
-# * engine's 8 s replica timeout tears the rebuild down.
+# * (431 GiB on a 50 GiB volume) and Prometheus (218 GiB on 100 GiB) 4-8x past their provisioned size.
+# * A volume that size also cannot be copied to a fresh replica over the Helsinki<->India link anywhere
+# * near promptly, which is where the replica churn below comes from.
 # *
 # * `snapshot-delete` is the documented task that removes and purges all kinds of snapshots exceeding the
 # * retention count — it clears the backlog the old snapshot job left behind, then holds every volume at
@@ -31,18 +31,22 @@ spec:
 # *
 # * ! snapshot-delete drops snapshots a `backup` may be mid-upload on. Weekly backup runs Sun 02:00, so
 # * ! the steady-state cron stays well clear of it.
-# * ! Loki (pvc-728ed435, replicas on worker-35 + azure-india-2) is NOT purging: 431 GiB on a 50 GiB
-# * ! volume, held by a cross-region replica that rebuilds perpetually and never completes. A rebuilding
-# * ! replica blocks snapshot removal outright -- the engine returns `cannot remove a snapshot because
-# * ! tcp://<india-ip>:10160 is rebuilding`. That is a deadlock: the volume is too big to copy to an
-# * ! India replica over the ~146 ms link, the un-finishable rebuild blocks the purge, and the purge is
-# * ! what would shrink the volume enough for the rebuild to finish.
+# * ! Loki (pvc-728ed435, 431 GiB on a 50 GiB volume) purges slowly, and the cause is replica placement,
+# * ! not this job. A leftover eviction ticket on worker-35's disk (from an interrupted `remove-node`)
+# * ! pushed Longhorn to relocate Loki's replica onto saikat-azure-central-india-2 -- a surplus second
+# * ! replica on a volume whose numberOfReplicas is 1. That replica has to copy 431 GiB over the
+# * ! Helsinki<->India link before anything else can proceed, and while it is `isRebuilding`, snapshot
+# * ! removal is refused outright: `cannot remove a snapshot because tcp://<india-ip>:10160 is
+# * ! rebuilding`. It does progress (~75% and climbing at ~1-2%/10 min), so it is slow rather than stuck.
+# * Clearing the stale ticket stopped the rebuild churn but does NOT cull the surplus replica -- Longhorn
+# * finishes an in-flight rebuild regardless of desired count, and nothing in the logs asks for the
+# * replica to be removed. So the purge stays blocked until this rebuild completes on its own.
 # * Every other volume purged cleanly -- 143 -> 47 snapshots, 9 -> 2 per volume, all back under
-# * provisioned. Prometheus was blocked the same way and cleared itself once its India replica finally
-# * finished rebuilding (18:12): healthy and reclaiming, 218 -> 190 GiB. Loki cannot clear on its own
-# * because its rebuild never finishes, so it needs its cross-region replica removed -- see the volume's
-# * replica placement. Its durable data is in S3 anyway (this PVC is only WAL/index/compactor working
-# * directory), so the WAN replica buys no durability.
+# * provisioned. Prometheus was blocked the same way and cleared itself once its India replica finished
+# * rebuilding (18:12): healthy and reclaiming, 218 -> 190 GiB.
+# * ! Check for a stale eviction ticket before any future `remove-node`: it leaves
+# * ! evictionRequested=true on the disk, which is invisible in `kubectl get nodes` and silently forces
+# * ! WAN relocations long after the removal attempt failed.
 # * The every-minute cron was the one-off backlog purge; daily is the steady-state schedule.
 apiVersion: longhorn.io/v1beta2
 kind: RecurringJob
