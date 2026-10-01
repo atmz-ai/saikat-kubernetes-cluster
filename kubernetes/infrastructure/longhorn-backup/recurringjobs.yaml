@@ -1,13 +1,10 @@
 ---
-# * No local snapshots on any volume. The former daily `snapshot` job is what pushed Loki (401 GiB on a
-# * 50 GiB volume) and Prometheus (203 GiB on 100 GiB) 3-8x past their provisioned size, and a volume
-# * that size cannot be copied to a fresh replica over the Helsinki<->India link before the engine's 8 s
-# * replica timeout tears the rebuild down. The weekly S3 backup below is the only scheduled job, and the
-# * only copy that survives losing the node holding the volume.
 # Weekly S3 backup — full incremental backup to Hetzner Object Storage.
 # Kept for 8 weeks (2 months); runs at 02:00 UTC every Sunday.
 # groups: [default] applies to every volume that has no explicit recurring job
 # selector set (i.e. all current volumes).
+# ! This is the only copy that survives losing the node holding a volume. Local
+# ! snapshots never did — deleting them is lossless, but never drop this job.
 apiVersion: longhorn.io/v1beta2
 kind: RecurringJob
 metadata:
@@ -19,5 +16,33 @@ spec:
   groups:
     - default
   retain: 8
+  concurrency: 2
+  labels: {}
+---
+# * No local snapshots accumulate on any volume. The former daily `snapshot` job is what pushed Loki
+# * (431 GiB on a 50 GiB volume) and Prometheus (218 GiB on 100 GiB) 4-8x past their provisioned size,
+# * and a volume that size cannot be copied to a fresh replica over the Helsinki<->India link before the
+# * engine's 8 s replica timeout tears the rebuild down.
+# *
+# * `snapshot-delete` is the documented task that removes and purges all kinds of snapshots exceeding the
+# * retention count — it clears the backlog the old snapshot job left behind, then holds every volume at
+# * `retain`. retain is 2, not 1, because Longhorn needs two snapshots to coalesce and rebuild; the two
+# * newest are small incremental deltas, so the bulk of the space is reclaimed either way.
+# *
+# * ! snapshot-delete drops snapshots a `backup` may be mid-upload on. Weekly backup runs Sun 02:00, so
+# * ! the steady-state cron stays well clear of it.
+# * The every-minute cron is the one-off backlog purge (it clears within ~2 min instead of waiting for a
+# * daily window); relax it to the daily time below once the volumes have settled.
+apiVersion: longhorn.io/v1beta2
+kind: RecurringJob
+metadata:
+  name: snapshot-delete
+  namespace: longhorn-system
+spec:
+  cron: "* * * * *"
+  task: snapshot-delete
+  groups:
+    - default
+  retain: 2
   concurrency: 2
   labels: {}

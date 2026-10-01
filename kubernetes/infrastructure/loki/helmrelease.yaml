@@ -41,6 +41,10 @@ spec:
         # TODO Prime suspect is this value — it is `filesystem` while chunks live in S3, and retention
         # TODO deletes are applied through the delete-request store, so chunk deletions may never reach
         # TODO the bucket. Try `s3`, confirm the compactor actually runs, and watch the bucket size drop.
+        # * Independent of the above: the Longhorn volume for this pod read 431 GiB actual against 50 GiB
+        # * provisioned, and that was NOT the compactor — it was a local snapshot chain from the removed
+        # * daily `snapshot` job. The `snapshot-delete` RecurringJob now purges it. Do not read the two
+        # * numbers as one bug: re-check the bucket after the purge before concluding retention is broken.
         delete_request_store: filesystem
       limits_config:
         # Required for the Grafana Logs Drilldown plugin's log volume histogram
