@@ -389,6 +389,8 @@ Run `ansible-lint ansible/playbooks/operations/` before changes. Playbooks must 
 - `cloudflare-dns` role (at end of add-* playbooks) and `node-remove` handle DNS automatically from `cloudflare_dns_records` in `hosts.yml`.
 - `namecheap-dns` role + `update-namecheap-dns.yml` playbook manages custom nameserver glue records at Namecheap from `namecheap_nameserver` per-host annotations in `hosts.yml`.
 
+**Nameservers live on the control planes** (node-1..node-6 — `ns1`/`ns4`/`ns5`/`ns8`/`ns9`/`ns10`), not on workers. The annotation drives all three copies of the address list — the registrar glue records, the zone's NS records, and the PowerDNS Service `externalIPs` — so they cannot drift. A nameserver needs only its address bound to `:53`; Cilium routes that to whichever node hosts a PowerDNS pod over the VXLAN tunnel, so **no PowerDNS pod need run on the annotated node** (verified: the previous worker-based nameservers answered queries while running no pod at all). The prefixes are reused across the move rather than renumbered, which keeps each zone's NS set byte-identical and makes the change a glue-IP update; re-point a prefix, never just delete one, because the role has no glue-record delete path.
+
 **Full init flow (never partial):** provision → storage-longhorn → ssh-hardening → base-system (reboot if needed) → containerd → kubernetes → (init or join) → node-labels → cloudflare-dns.
 
 ### Kubernetes Cluster
@@ -599,8 +601,8 @@ group. `control_plane` and `worker_nodes` are **derived** from each host's `node
 `ansible/inventory/10-role-groups.yml` (the `constructed` inventory plugin), so the two
 views cannot drift from the list.
 
-23 nodes today: **10 control planes** (node-1..node-7 Hetzner stacked + 3 Azure
-Central India) and **13 workers**. Target via `-e target_host=...`.
+18 nodes today: **10 control planes** (node-1..node-7 Hetzner stacked + 3 Azure
+Central India) and **8 workers**. Target via `-e target_host=...`.
 
 **One playbook per operation, not one per node kind** — `add-node.yml` and
 `upgrade-node.yml` each handle both, and the host's `node_role` decides which roles run.
@@ -614,6 +616,16 @@ exist rather than a `hosts:` expression) are in `ansible/AGENTS.md`.
   collection module exists for the API being touched, use it — `community.hrobot`
   covers the Hetzner Robot API. Raw `uri` calls in older roles are legacy, not
   precedent. Details, the two parameter traps, and the reasoning: `ansible/AGENTS.md`.
+- **! `regex_search(...) | bool` is not a validity test — it is always `false`.** `regex_search`
+  returns the matched **string**, and `| bool` coerces an unrecognised string to `False`, even
+  one that plainly reads `Status="OK"`. A role gated on it silently takes the wrong branch
+  forever. Use `is search` (returns a real boolean) or `not (x is search(...))`. Also: many
+  XML APIs put data in **attributes**, not elements (`<Result ... IP="1.2.3.4">`), so a
+  parse for `<IP>` matches nothing and yields an empty value. Both defects report `changed`
+  and look like success — measured 2026-10-02 in `namecheap-dns`, where glue records were
+  never updated for months while every run reported changes. A remote API answering errors
+  with HTTP 200 compounds it: assert the parse succeeded, and fail on an error **body**,
+  where the cause is still visible.
 - Always run playbooks in foreground.
 - **Always use mise tasks for Ansible operations.** Never invoke `ansible-playbook`, `ansible-vault`, `ansible-lint`, or `.venv/bin/ansible-*` directly — use the corresponding mise task instead:
   - `mise run ansible-playbook -- ansible/playbooks/operations/<playbook>.yml [-e target_host=...]` — run a playbook
