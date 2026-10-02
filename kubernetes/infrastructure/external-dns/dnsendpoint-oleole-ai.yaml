@@ -107,7 +107,6 @@ spec:
         - 95.216.228.60
         - 95.217.57.130
         - 95.217.58.83
-        - 95.217.74.238
 ---
 apiVersion: externaldns.k8s.io/v1alpha1
 kind: DNSEndpoint
