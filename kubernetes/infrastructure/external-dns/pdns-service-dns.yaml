@@ -49,8 +49,6 @@ spec:
     - 88.99.148.85
     # ns5 — worker-5 (glue record + NS record must match this)
     - 138.201.199.41
-    # ns6 — worker-6 (glue record + NS record must match this)
-    - 138.201.125.248
     # ns7 — worker-7 (glue record + NS record must match this)
     - 168.119.139.49
     # ns8 — worker-8 (glue record + NS record must match this)

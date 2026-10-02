@@ -54,11 +54,6 @@ spec:
       recordType: A
       targets:
         - 138.201.199.41
-    - dnsName: ns6.oleole.ai
-      recordTTL: 300
-      recordType: A
-      targets:
-        - 138.201.125.248
     - dnsName: ns7.oleole.ai
       recordTTL: 300
       recordType: A
@@ -112,7 +107,6 @@ spec:
       targets:
         - 116.202.234.107
         - 136.243.145.173
-        - 138.201.125.248
         - 138.201.199.41
         - 138.201.251.32
         - 138.201.85.40
