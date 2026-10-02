@@ -16,13 +16,13 @@ resources:
   # ! password fails over TCP) but it is still wired in; retiring it is a separate,
   # ! coordinated change.
   - harbor-db-superuser.sops.yaml
-  # The `harbor` application role and its password.
+  # The `harbor` application role and its password. This is what Harbor connects as —
+  # see databaserole.yaml. Keep this file in the kustomization: it is the only
+  # credential Harbor uses, and it cannot drift because the DatabaseRole owns it.
   - harbor-role-secret.sops.yaml
   - databaserole.yaml
+  # Owns the ownership-transfer SQL. Live use was a one-off migration Job (now removed,
+  # its work done and verified); it remains here because cnpg-cluster.yaml references it
+  # as the postInitApplicationSQLRefs hook, so a fresh bootstrap stays correct.
   - harbor-db-grants.yaml
-  # One-off ownership migration: reassigns the registry database's objects from
-  # `postgres` to the `harbor` role. Idempotent, no service impact (Harbor keeps
-  # running on its current credentials), and a no-op once it has run. Kept in git so
-  # the change is reviewable and reproducible rather than an undocumented hand-run.
-  - harbor-db-ownership-migration.yaml
   - cnpg-cluster.yaml
