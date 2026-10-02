@@ -154,15 +154,13 @@ autoDirectNodeRoutes: false
 
 # ! Explicit MTU. Cilium's auto-detection reads each node's primary interface, and the Azure
 # ! nodes' NICs report 1500 while every Hetzner NIC reports 1400 — so pods on the Azure nodes
-# ! were given a 1500 pod MTU that does not account for the VXLAN + WireGuard encapsulation
+# ! are given a 1500 pod MTU that does not account for the VXLAN + WireGuard encapsulation
 # ! overhead. Oversize packets are then dropped with no ICMP frag-needed (the chart default
 # ! pmtuDiscovery.packetizationLayerPMTUDMode is "blackhole"), so the sender stalls.
-# ! Measured 2026-10-02: AXFR against every Azure-hosted PowerDNS replica timed out, which
-# ! left external-dns unable to list records and therefore unable to apply --policy=sync,
-# ! while UDP kept answering and the pods stayed Ready.
-# ! Declaring the value removes the per-provider divergence. 1400 is what the Hetzner nodes
-# ! already auto-detected, so this is a no-op for them. Full reasoning, with the measurements:
-# ! kubernetes/infrastructure/cilium/helmrelease.yaml.
+# ! This is a real defect and still worth pinning, but it was NOT the cause of the 2026-10-02
+# ! AXFR outage it was first blamed for — that was the control planes advertising their
+# ! unroutable private Azure address as InternalIP, so the VXLAN tunnel endpoint pointed at an
+# ! address no other node can reach. Kept in sync with kubernetes/infrastructure/cilium/.
 MTU: 1400
 
 # Enable MTU detection

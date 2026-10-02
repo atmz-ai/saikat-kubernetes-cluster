@@ -41,21 +41,13 @@ spec:
     # ! no ICMP frag-needed, because the chart's default pmtuDiscovery.packetizationLayerPMTUDMode
     # ! is "blackhole"; the sender simply stalls.
     # !
-    # ! Measured 2026-10-02: TCP DNS responses — and therefore AXFR, which external-dns needs
-    # ! to list records under --policy=sync — timed out against every Azure-hosted PowerDNS
-    # ! replica, while UDP answers kept working and the pods all reported Ready. The zone
-    # ! transfers sat at "transfer initiated" forever and external-dns logged nothing but
-    # ! "AXFR error: i/o timeout".
-    # !
-    # ! This was latent on the three Azure nodes and became load-bearing the moment the
-    # ! PowerDNS Deployment stopped excluding control planes: that affinity was, incidentally,
-    # ! the only thing keeping pods off them. Declaring the value removes the divergence —
-    # ! 1400 is what the Hetzner nodes already auto-detected, so this is a no-op for them.
-    # ?
-    # ? Whether the deeper fix is this (declare one MTU for every node) or making Cilium detect
-    # ? per-node correctly is unresolved. Declaring it is the conservative move: it assumes the
-    # ? 1400 the Hetzner nodes already report is the correct value, which their working pod
-    # ? traffic demonstrates. Revisit if a provider ever needs a genuine 1500.
+    # ! This is a REAL defect and still worth pinning, but it was NOT the cause of the
+    # ! 2026-10-02 AXFR outage it was first blamed for — that was the control planes
+    # ! advertising their unroutable private Azure address as InternalIP, so the VXLAN
+    # ! tunnel endpoint pointed at an address no other node can reach. Pinned and then
+    # ! reverted to keep the tree clean while that real cause was investigated; re-apply
+    # ! this once it is settled, and verify AXFR on an Azure-hosted replica afterwards to
+    # ! confirm the two were independent.
     MTU: 1400
 
     encryption:
