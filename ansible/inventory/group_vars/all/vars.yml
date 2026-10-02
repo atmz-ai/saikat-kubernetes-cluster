@@ -137,18 +137,25 @@ pdns_zones:
 # ── Nameserver cutover window (TEMPORARY — set back to [] once retired) ───────
 # The nameserver delegation moved from the Hetzner workers to the control planes.
 # The registrar's glue records, and every resolver that has cached the delegation, still
-# name the OLD addresses until `update-namecheap-dns` runs and the delegation TTL expires
-# (measured at 300s for both zones).
+# name the OLD addresses until `update-namecheap-dns` runs and the relevant caches expire.
 #
 # While this list is non-empty the PowerDNS DNS Service binds :53 on BOTH the old and the
 # new addresses. That is the point: the Service is the only place the two sets need to
 # overlap.
 #
+# ! The cache window is the PARENT (registry) NS TTL, NOT this zone's own NS TTL. Measured
+# ! 2026-10-02: the parent TLD serves the delegation with TTL 10800 (3h) for .dev and 3600
+# ! (1h) for .ai, while the child zone's own NS records are the usual 300. A resolver that
+# ! cached the delegation from the TLD will keep using the old addresses for the PARENT TTL
+# ! — so sizing this window from the 300 in the zone would retire the old addresses three
+# ! hours too early for .dev, silently turning those nameservers into timeouts.
+# ! Keep both sets bound for at least the parent TTL after the registrar update, then drop
+# ! them.
+#
 # ! Do NOT widen the glue records or the zone's NS set with these addresses. Those must
 # ! converge to control planes only — widening them would make the transition permanent
 # ! and re-anchor the delegation on nodes that are being decommissioned.
-# ! Drop an IP here only once every resolver that could still hold the cached delegation
-# ! has expired it. Dropping one early makes that nameserver time out, and nothing in the
+# ! Dropping a still-cached address makes that nameserver time out, and nothing in the
 # ! cluster reports it (see pdns-service-dns.yaml.j2 on why this fails silently).
 pdns_nameservers_previous_ips:
   - 138.201.85.40 # ns1  — was worker-1
