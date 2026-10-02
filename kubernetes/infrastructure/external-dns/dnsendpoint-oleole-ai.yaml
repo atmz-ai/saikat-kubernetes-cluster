@@ -44,11 +44,6 @@ spec:
       recordType: A
       targets:
         - 88.99.213.237
-    - dnsName: ns3.oleole.ai
-      recordTTL: 300
-      recordType: A
-      targets:
-        - 94.130.128.105
     - dnsName: ns4.oleole.ai
       recordTTL: 300
       recordType: A
@@ -132,7 +127,6 @@ spec:
         - 88.99.147.157
         - 88.99.148.85
         - 88.99.213.237
-        - 94.130.128.105
         - 94.130.217.94
         - 95.216.228.60
         - 95.217.57.130
