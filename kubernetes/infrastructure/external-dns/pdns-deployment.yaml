@@ -63,6 +63,43 @@ spec:
     spec:
       securityContext:
         fsGroup: 953
+      # ! Pin PowerDNS to the node running the pdns-db PRIMARY.
+      #
+      # PowerDNS here is a thin layer over PostgreSQL: gpgsql-host is pdns-db-rw, and the
+      # -rw service resolves ONLY to the primary (its selector is
+      # cnpg.io/instanceRole=primary). So every query — and every RFC2136 update — is a
+      # round trip to one specific pod, wherever it happens to be scheduled.
+      #
+      # Measured 2026-10-02 with PowerDNS spread across Hetzner and Azure (Central India),
+      # primary on worker-28: a single zone read cost 728-1126 ms on the local node and
+      # ~2835 ms cross-region (~146 ms RTT per round trip, and a zone read is many). That
+      # is fine for ordinary queries, but an AXFR needs several seconds and external-dns
+      # gives up at 2s — a hardcoded default (provider/rfc2136's makeClient does
+      # `c := new(dns.Client)` with no Timeout set, and there is no flag for it). The
+      # result was every AXFR failing and Flux stuck unhealthy on two DNSEndpoints, while
+      # UDP answers kept working and every pod reported Ready.
+      #
+      # podAffinity (not nodeAffinity) is the right form: it names the DATABASE rather than
+      # a hostname, so it keeps holding when the primary fails over — a newly scheduled pod
+      # follows the primary automatically, and no worker name is hardcoded.
+      #
+      # ! Only newly scheduled pods move. Kubernetes does not evict a running pod when
+      # ! affinity stops being satisfied, so after a failover the existing PowerDNS pods stay
+      # ! where they are until they are restarted. Correct for scheduling, not an instant
+      # ! re-placement.
+      #
+      # ? The durable multi-region answer is not this. It is a writer PowerDNS on -rw (what
+      # ? external-dns targets) plus per-region readers against local standbys, because one
+      # ? Deployment cannot hold two different gpgsql-host values. Revisit before GCP/AWS/OVH
+      # ? are added, at which point most replicas would again be WAN-remote from the primary.
+      affinity:
+        podAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  cnpg.io/cluster: pdns-db
+                  cnpg.io/instanceRole: primary
+              topologyKey: kubernetes.io/hostname
       containers:
         - name: powerdns
           image: docker.io/powerdns/pdns-auth-52:latest
