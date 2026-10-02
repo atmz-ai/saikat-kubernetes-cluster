@@ -42,8 +42,8 @@ spec:
   # ! `owner` and `postInitApplicationSQLRefs` are read ONLY at bootstrap, so both are
   # ! inert on the live cluster and safe to change. They exist so a FUTURE rebuild comes
   # ! up correct by construction rather than repeating the 2026-10-02 outage: the live
-  # ! database was migrated to the `harbor` role by hand (see
-  # ! harbor-db-ownership-migration.yaml) and this keeps a fresh bootstrap matching it.
+  # ! database was migrated to the `harbor` role once, via the ownership-transfer SQL in
+  # ! harbor-db-grants.yaml, and this keeps a fresh bootstrap matching that state.
   bootstrap:
     initdb:
       database: registry

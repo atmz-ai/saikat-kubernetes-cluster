@@ -419,18 +419,33 @@ Do NOT use 1-replica for workloads without app-layer replication. Losing the sin
 
 **Never `ALTER USER postgres PASSWORD ...` on a live CNPG database.** The password is managed declaratively via the CNPG Cluster CR spec:
 
-- `enableSuperuserAccess: true` — the operator syncs the `postgres` superuser password from the `superuserSecret` into the database on every reconcile. Without this (default `false`), the operator **ignores** the secret and sets the password to `NULL`, disabling password auth.
+- `enableSuperuserAccess: true` — the operator generates/syncs the `postgres` superuser credential from the `superuserSecret`. With it `false` (the default), **the operator sets the `postgres` password to `NULL`, disabling password auth for that role.** Measured on `harbor-db` (2026-10-02): flipping the flag to `false` took `postgres` from a working password to `rolpassword IS NULL` — verified via `pg_authid` and by a TCP auth attempt that went from succeeding to `fe_sendauth: no password supplied`.
 - `superuserSecret: name: <secret-name>` — references a Secret of type `kubernetes.io/basic-auth` (or `Opaque` with `username` + `password` keys) containing the desired superuser credentials.
 - To change the superuser password: update the SOPS-encrypted secret in git, ensure `enableSuperuserAccess: true` is set on the Cluster, push, and let the CNPG operator reconcile the new password into the database.
-- The `harbor-db` Cluster in `kubernetes/infrastructure/harbor/cnpg-cluster.yaml` must have `enableSuperuserAccess: true` set, with `superuserSecret: name: harbor-db-superuser` (the SOPS-encrypted secret in `harbor-db-superuser.sops.yaml`).
-- This applies to ALL CNPG clusters in the repo — every service's PostgreSQL cluster must use this pattern for superuser password management.
+
+**! None of that makes the superuser Secret the winner for a *running client* — and believing it does is how a six-hour outage started.** Measured on `harbor-db` (2026-10-02), with `enableSuperuserAccess: true` and a correctly-declared `superuserSecret`:
+
+| Credential | TCP auth result |
+|---|---|
+| the `superuserSecret`'s password | **FAILED** — `password authentication failed for user "postgres"` |
+| the `-app` Secret's password | **succeeded** |
+
+The superuser Secret's value was never synced into the database, and its password did not match `pg_authid`. So **never assume which of a cluster's `postgres` credentials the server actually accepts** — a `psql` without `-h` cannot tell you either, because it connects over the Unix socket where CNPG trusts any password and will report *both* as valid. Test with `psql -h 127.0.0.1 -U postgres ...` and compare against `pg_authid.rolpassword`.
+
+**The real rule: do not share a role between the application and the superuser.** The root cause of that outage was `initdb.owner: postgres`, which made the application role and CNPG's superuser the **same role** — two credential sources owning one password, with the client reading the one that drifted. A dedicated low-privilege app role removes the entire class of bug: nothing in the app's path then shares a name with `postgres`, so a superuser rotation (or toggling `enableSuperuserAccess`) cannot invalidate the app's credentials. This is the pattern to follow, and `harbor-db` now matches it:
+
+- `initdb.owner: <app>` — a dedicated role, never `postgres`. See `kubernetes/infrastructure/external-dns/cnpg-cluster.yaml` for the worked example and the full reasoning.
+- Declare that role with a standalone `DatabaseRole` (`passwordSecret` + `databaseRoleReclaimPolicy: retain`), which is CNPG's recommended GitOps approach and means the operator, not a hand-written Secret, owns the password. Worked example: `kubernetes/infrastructure/harbor/databaserole.yaml`.
+- **Only enable `enableSuperuserAccess` if something genuinely performs administrative work** — a backup plugin, an operator, manual DB maintenance. If nothing does, omit it entirely (as `pdns-db` and `harbor-db` both now do), because the superuser role is what the app must then be kept away from.
+- Adding `enableSuperuserAccess` to "fix" an auth failure is the wrong move — it *creates* the ambiguity described above. The fix is to stop sharing the role.
 
 ### CNPG Application Role (Hard Rule)
 
 `initdb.owner` provisions a **low-privilege application role** that owns the database, and the operator generates an `-app` Secret for it. Use it — do NOT reach for the superuser for application connections.
 
 - **Prefer `-app` over `-superuser` for every application.** The `-superuser` Secret is administrative only and is generated ONLY when `enableSuperuserAccess: true`. Without it, CNPG sets the `postgres` password to `NULL`, so any client authenticating as `postgres` gets `FATAL: password authentication failed`.
-- **`enableSuperuserAccess: true` makes the superuser Secret win for the `postgres` role.** If both a `-superuser` Secret and a stale `-app`-era password disagree, the superuser value is what the operator syncs — so a client holding the old app password fails. Adding `enableSuperuserAccess` to "fix" an auth failure is the wrong move; it usually *creates* the mismatch.
+- **The application role must be a distinct role, not `postgres`.** `initdb.owner: postgres` makes the app role and the superuser the same role, so two credential sources own one password and a client reads whichever drifted — that is the outage described under "CNPG Superuser Password Management". With a distinct `owner`, `enableSuperuserAccess` and the superuser Secret become irrelevant to the app, and can be omitted.
+- **`enableSuperuserAccess` does NOT reliably make the superuser Secret authoritative for a client.** Measured on `harbor-db` (2026-10-02): with the flag `true`, the `superuserSecret`'s password failed TCP auth while the `-app` Secret's succeeded — so the operator had not synced the declared secret into `pg_authid`. Do not reason from which secret "should" win; test over TCP (`psql -h 127.0.0.1`) and read `pg_authid.rolpassword`. Adding `enableSuperuserAccess` to "fix" an auth failure is the wrong move — the fix is to give the application its own role.
 - **`postInitApplicationSQLRefs` always runs as the superuser**, regardless of `initdb.owner`. SQL it applies (e.g. from a schema ConfigMap) therefore creates **superuser-owned tables**, and the app role then hits `permission denied for table ...` on its first write. Pair any schema ConfigMap with a grants ConfigMap that transfers ownership (`ALTER TABLE ... OWNER TO <app>` / `ALTER SEQUENCE ...` / `ALTER SCHEMA public OWNER TO <app>`). List the schema ConfigMap first in `configMapRefs` — ordering is Secrets first, then ConfigMaps, each in array order.
 - Verify ownership directly before wiring the client: `SELECT tablename, tableowner FROM pg_tables WHERE schemaname='public';`. Sequence names are easy to miss — list them from the live database rather than guessing.
 
@@ -579,8 +594,8 @@ group. `control_plane` and `worker_nodes` are **derived** from each host's `node
 `ansible/inventory/10-role-groups.yml` (the `constructed` inventory plugin), so the two
 views cannot drift from the list.
 
-32 nodes today: **10 control planes** (node-1..node-7 Hetzner stacked + 3 Azure Central
-India) and **22 workers**. Target via `-e target_host=...`.
+23 nodes today: **10 control planes** (node-1..node-7 Hetzner stacked + 3 Azure
+Central India) and **13 workers**. Target via `-e target_host=...`.
 
 **One playbook per operation, not one per node kind** — `add-node.yml` and
 `upgrade-node.yml` each handle both, and the host's `node_role` decides which roles run.
