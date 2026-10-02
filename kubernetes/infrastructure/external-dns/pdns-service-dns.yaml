@@ -43,8 +43,6 @@ spec:
   externalIPs:
     # ns1 — worker-1 (glue record + NS record must match this)
     - 138.201.85.40
-    # ns2 — worker-2 (glue record + NS record must match this)
-    - 88.99.213.237
     # ns4 — worker-4 (glue record + NS record must match this)
     - 88.99.148.85
     # ns5 — worker-5 (glue record + NS record must match this)
