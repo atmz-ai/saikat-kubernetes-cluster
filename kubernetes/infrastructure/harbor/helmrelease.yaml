@@ -108,7 +108,20 @@ spec:
         port: "5432"
         username: postgres
         coreDatabase: registry
-        existingSecret: harbor-db-superuser
+        # ! Must be the secret whose password the DATABASE actually accepts — verified
+        # ! over TCP, not inferred from the CR. harbor-db-superuser's password is STALE:
+        # ! it fails with `password authentication failed for user "postgres"` over TCP,
+        # ! while harbor-db-app's succeeds, even though both name the user `postgres`
+        # ! (initdb.owner is postgres, so there is no distinct low-privilege app role).
+        # ! Pointing this at harbor-db-superuser injected that stale password into
+        # ! harbor-core, which 500'd on GET /api/v2.0/internalconfig and crashed
+        # ! harbor-jobservice with `failed to load rest config` (2026-10-02).
+        # ! ? AGENTS.md claims "enableSuperuserAccess makes the superuser Secret win for
+        # ! ? the postgres role". That does not hold for this cluster — the app secret is
+        # ! ? the live one. Re-verify with a TCP auth test before changing this, and note
+        # ! ? that a `psql` without -h uses the Unix socket, where CNPG trusts anything,
+        # ! ? so it will report BOTH passwords as working and prove nothing.
+        existingSecret: harbor-db-app
         sslmode: disable
     
     redis:
