@@ -1,0 +1,49 @@
+# The `harbor` application role for the harbor-db Cluster, and the password it uses.
+#
+# Declared as a standalone DatabaseRole rather than inline `spec.managed.roles`
+# because CNPG documents DatabaseRole as the recommended approach for GitOps
+# workflows — it decouples the role's lifecycle from the cluster's infrastructure
+# and can be adopted or retired independently of a cluster change.
+#
+# WHY THIS EXISTS AT ALL. Previously harbor-db set `initdb.owner: postgres`, so the
+# only role it had was CNPG's own superuser. That is the exact configuration the
+# pdns-db Cluster comment in external-dns/ warns about, and it failed the same way:
+#
+#   - `postgres` is simultaneously the application role and CNPG's superuser.
+#   - With `enableSuperuserAccess: true`, the operator manages the `postgres`
+#     password from the SUPERUSER secret and leaves the `-app` secret's password
+#     stale.
+#   - harbor-core read its password from the `-app` secret and got
+#     `FATAL: password authentication failed for user "postgres"` (SQLSTATE 28P01).
+#
+# Keeping the application role and the administrative role distinct removes that
+# whole class of bug: nothing in Harbor's path shares a name with the superuser, so
+# a superuser-password rotation can never invalidate what Harbor uses.
+#
+# `passwordSecret` is what makes the role's password declarative. The Secret carries
+# the `cnpg.io/reload: "true"` label so a password change is applied immediately,
+# and must be `kubernetes.io/basic-auth` with its `username` matching the role name.
+apiVersion: postgresql.cnpg.io/v1
+kind: DatabaseRole
+metadata:
+  name: harbor
+  namespace: harbor
+spec:
+  cluster:
+    name: harbor-db
+  name: harbor
+
+  # Application role: can log in, owns the registry database, but is not a
+  # superuser. Mirrors pdns-db's `pdns` role, which is the same shape.
+  login: true
+  superuser: false
+  createdb: false
+
+  passwordSecret:
+    name: harbor-role-secret
+
+  # retain, not delete. The role owns every object in the registry database, so a
+  # DROP ROLE would fail anyway (CNPG will not drop owned objects for you), and the
+  # default safe behaviour — leaving it in place — is what we want if this manifest
+  # is ever removed by accident.
+  databaseRoleReclaimPolicy: retain

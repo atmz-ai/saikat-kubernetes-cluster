@@ -10,5 +10,19 @@ resources:
   - helmrepository.yaml
   - helmrelease.yaml
   - harbor-admin-secret.sops.yaml
+  # ! Kept until the superuser role is genuinely retired. cnpg-cluster.yaml still
+  # ! references it via superuserSecret, and removing it from this list would make
+  # ! Flux PRUNE the live Secret out from under that reference. It is stale (its
+  # ! password fails over TCP) but it is still wired in; retiring it is a separate,
+  # ! coordinated change.
   - harbor-db-superuser.sops.yaml
+  # The `harbor` application role and its password.
+  - harbor-role-secret.sops.yaml
+  - databaserole.yaml
+  - harbor-db-grants.yaml
+  # One-off ownership migration: reassigns the registry database's objects from
+  # `postgres` to the `harbor` role. Idempotent, no service impact (Harbor keeps
+  # running on its current credentials), and a no-op once it has run. Kept in git so
+  # the change is reviewable and reproducible rather than an undocumented hand-run.
+  - harbor-db-ownership-migration.yaml
   - cnpg-cluster.yaml

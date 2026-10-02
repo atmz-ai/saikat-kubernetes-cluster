@@ -1,0 +1,91 @@
+# Ownership transfer for the `registry` database, handing every object from the
+# `postgres` superuser to the `harbor` application role.
+#
+# WHY THIS IS NEEDED. harbor-db was originally bootstrapped with `owner: postgres`,
+# so this database has no application role at all — `postgres` owns all 49 tables,
+# the sequences behind them, and the schema. Switching Harbor to a dedicated role
+# therefore requires reassigning ownership of everything that already exists; the
+# role itself is created separately by databaserole.yaml.
+#
+# This is the same shape as external-dns/pdns-db-grants.yaml, which does the same
+# job for PowerDNS. The difference is that PowerDNS's schema is 7 fixed tables, so
+# that file names each one; Harbor's schema is 49 tables and grows with every
+# Harbor release, so this uses catalog-driven loops that cover whatever exists.
+#
+# The SQL is deliberately idempotent: every statement is guarded by an ownership
+# check, so re-running it is a no-op. That lets the same script serve both the
+# one-off migration Job and the `postInitApplicationSQLRefs` bootstrap hook on
+# cnpg-cluster.yaml, with no risk of the two drifting apart. On a FRESH bootstrap
+# it does nothing at all, because `initdb.owner: harbor` means Harbor already owns
+# everything by the time it runs.
+#
+# ! `ALTER DATABASE registry OWNER TO harbor` is not optional and is easy to miss.
+# ! The `public` schema here is owned by `pg_database_owner`, a pseudo-role that
+# ! resolves to whichever role owns the DATABASE — currently `postgres`. Reassigning
+# ! the schema alone would leave `pg_database_owner` still pointing at `postgres`, so
+# ! the object ownership and the schema's effective owner would disagree.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: harbor-db-grants
+  namespace: harbor
+data:
+  grants.sql: |
+    -- Hand every table in `public` to the application role. Ownership rather than
+    -- plain GRANT, because Harbor performs DDL on these during its schema
+    -- migrations (Alembic creates and alters tables on start-up), and an owner has
+    -- the full set of rights without having to enumerate them.
+    DO $$
+    DECLARE
+      obj record;
+    BEGIN
+      FOR obj IN
+        SELECT tablename FROM pg_tables
+        WHERE schemaname = 'public' AND tableowner <> 'harbor'
+      LOOP
+        EXECUTE format('ALTER TABLE public.%I OWNER TO harbor', obj.tablename);
+      END LOOP;
+    END
+    $$;
+
+    -- Sequences back the SERIAL/BIGSERIAL primary keys; ownership is required for
+    -- INSERTs to draw from them.
+    DO $$
+    DECLARE
+      obj record;
+    BEGIN
+      FOR obj IN
+        SELECT sequencename FROM pg_sequences
+        WHERE schemaname = 'public' AND sequenceowner <> 'harbor'
+      LOOP
+        EXECUTE format('ALTER SEQUENCE public.%I OWNER TO harbor', obj.sequencename);
+      END LOOP;
+    END
+    $$;
+
+    -- Harbor ships one stored function in `public`. pg_get_userbyid on proowner is
+    -- used rather than the information_schema view, which only lists functions the
+    -- current user can execute and would silently skip the ones needing the fix.
+    DO $$
+    DECLARE
+      obj record;
+    BEGIN
+      FOR obj IN
+        SELECT p.oid::regprocedure AS signature
+        FROM pg_proc p
+        JOIN pg_namespace n ON n.oid = p.pronamespace
+        WHERE n.nspname = 'public'
+          AND pg_get_userbyid(p.proowner) <> 'harbor'
+      LOOP
+        EXECUTE format('ALTER FUNCTION %s OWNER TO harbor', obj.signature);
+      END LOOP;
+    END
+    $$;
+
+    -- The schema itself, so Harbor can create tables it needs in future upgrades
+    -- without an operator intervention.
+    ALTER SCHEMA public OWNER TO harbor;
+
+    -- See the alert in the header: this is what makes `pg_database_owner` resolve to
+    -- `harbor`, which is what the `public` schema's original owner referred to.
+    ALTER DATABASE registry OWNER TO harbor;
