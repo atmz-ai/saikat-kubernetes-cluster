@@ -34,22 +34,6 @@ spec:
     ipam:
       mode: kubernetes
 
-    # ! Explicit MTU. Cilium's auto-detection reads each node's primary interface, and the
-    # ! Azure nodes' NICs report 1500 while every Hetzner NIC reports 1400 — so pods on the
-    # ! Azure nodes were given a 1500 pod MTU that does not account for the VXLAN + WireGuard
-    # ! encapsulation overhead. Anything larger than the real path MTU is then dropped with
-    # ! no ICMP frag-needed, because the chart's default pmtuDiscovery.packetizationLayerPMTUDMode
-    # ! is "blackhole"; the sender simply stalls.
-    # !
-    # ! This is a REAL defect and still worth pinning, but it was NOT the cause of the
-    # ! 2026-10-02 AXFR outage it was first blamed for — that was the control planes
-    # ! advertising their unroutable private Azure address as InternalIP, so the VXLAN
-    # ! tunnel endpoint pointed at an address no other node can reach. Pinned and then
-    # ! reverted to keep the tree clean while that real cause was investigated; re-apply
-    # ! this once it is settled, and verify AXFR on an Azure-hosted replica afterwards to
-    # ! confirm the two were independent.
-    MTU: 1400
-
     encryption:
       enabled: true
       type: wireguard
