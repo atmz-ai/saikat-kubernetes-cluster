@@ -313,17 +313,6 @@ all:
           cloudflare_dns_records:
             - hostname: "*.yral.com"
               proxied: false
-        worker-11:
-          ansible_host: 136.243.145.173
-          provider: hetzner
-          datacenter: FSN1-DC8
-          region: falkenstein
-          country: de
-          disk_type: nvme
-          namecheap_nameserver: "ns11"
-          cloudflare_dns_records:
-            - hostname: "*.yral.com"
-              proxied: false
         worker-18:
           ansible_host: 95.217.74.238
           provider: hetzner

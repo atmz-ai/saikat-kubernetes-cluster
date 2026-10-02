@@ -53,8 +53,6 @@ spec:
     - 88.99.147.157
     # ns10 — worker-10 (glue record + NS record must match this)
     - 95.217.57.130
-    # ns11 — worker-11 (glue record + NS record must match this)
-    - 136.243.145.173
   ports:
     - name: dns-udp
       port: 53
