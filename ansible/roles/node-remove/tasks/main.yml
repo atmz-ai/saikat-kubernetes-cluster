@@ -423,6 +423,88 @@
     msg: "{{ delete_result.stdout }}"
   when: delete_result.rc == 0
 
+- name: Delete stale VolumeAttachments and orphaned attachment tickets for the removed node
+  # ! THIS MUST RUN BEFORE "Delete Longhorn Node CR", not after. Longhorn's webhook
+  # ! refuses to delete that CR while any engine is still recorded on the node
+  # ! ("... node schedulable false, and 0 replica, 1 engine running on it"), and the
+  # ! CR is what keeps the engine alive — so the two block each other. This task used
+  # ! to sit far below the CR deletion AND below the "Verify the Longhorn Node CR is
+  # ! gone" task that fails on exactly that condition, so when the cleanup was actually
+  # ! needed it could never run.
+  # ! Measured on worker-35 (2026-10-02): Loki's volume sat in `attaching` for ~6 hours
+  # ! with loki-0 Pending, across three playbook runs that each failed at the CR verify
+  # ! step, until this cleanup was run by hand out of order.
+  #
+  # After a node is deleted, the CSI detach finalizer can leave VolumeAttachment
+  # objects pointing to the dead node. These block new attachments on the pod's
+  # rescheduled node since RWO volumes can only attach to one node at a time.
+  #
+  # Two independent leftovers pin a volume to the dead node, so both are cleared:
+  # 1. Kubernetes VolumeAttachments whose nodeName is the departed node.
+  # !   A plain delete — do NOT add `--grace-period=0 --force`. The comment here used
+  # !   to prescribe force "to prevent kubectl from blocking on webhook callbacks", but
+  # !   that blocking IS the CSI detachment removing its own attachment ticket in
+  # !   Longhorn's VolumeAttachment CR. Force-deleting skips it and orphans the ticket,
+  # !   which then holds volume.spec.nodeID on the deleted node. Measured on worker-35:
+  # !   force-deleting one VolumeAttachment is what stranded Loki for six hours — a
+  # !   plain delete lets the CSI's teardown complete and the ticket goes with it.
+  # 2. Orphaned attachmentTickets inside Longhorn's volumeattachments.longhorn.io CRs.
+  #    volume.spec.nodeID is derived from these, so a ticket left behind by an earlier
+  #    removal keeps the volume bound to the dead node long after the K8s VA is gone.
+  #    Removing the ticket is what finally released Loki's volume.
+  ansible.builtin.shell: |
+    set -o pipefail
+    python3 -c "
+    import json, subprocess
+
+    node = '{{ node_remove_k8s_name }}'
+
+    def kget(*args):
+        return json.loads(subprocess.run(
+            ['kubectl', *args, '-o', 'json'], capture_output=True, text=True
+        ).stdout or '{}')
+
+    vas = kget('get', 'volumeattachment')
+    stale = [
+        va['metadata']['name']
+        for va in vas.get('items', [])
+        if va['spec'].get('nodeName') == node
+    ]
+    for name in stale:
+        print(f'Deleting VolumeAttachment {name} (plain delete, so the CSI ticket is cleaned up)')
+        subprocess.run(
+            ['kubectl', 'delete', 'volumeattachment', name,
+             '--ignore-not-found', '--timeout=60s'],
+            capture_output=True
+        )
+    print(f'VolumeAttachments deleted: {len(stale)}')
+
+    lh = kget('get', 'volumeattachments.longhorn.io', '-n', 'longhorn-system')
+    cleaned = 0
+    for cr in lh.get('items', []):
+        cr_name = cr['metadata']['name']
+        for tid, ticket in (cr.get('spec', {}).get('attachmentTickets') or {}).items():
+            if ticket.get('nodeID') == node:
+                print(f'Removing orphaned ticket {tid} from {cr_name}')
+                subprocess.run(
+                    ['kubectl', 'patch', 'volumeattachments.longhorn.io',
+                     cr_name, '-n', 'longhorn-system',
+                     '--type=json', '-p',
+                     json.dumps([{'op': 'remove',
+                                  'path': f'/spec/attachmentTickets/{tid}'}])],
+                    capture_output=True
+                )
+                cleaned += 1
+    print(f'Orphaned Longhorn attachment tickets removed: {cleaned}')
+    "
+  delegate_to: "{{ kubectl_delegate }}"
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  when: node_check.rc == 0
+  changed_when: true
+  run_once: true
+  timeout: 120
+
 # Delete the Longhorn Node CR so a reprovisioned node gets a fresh CR with the
 # correct disk UUID. Without this, the stale CR persists with the old disk UUID
 # from the previous installation, causing a "DiskFilesystemChanged" mismatch
@@ -542,48 +624,6 @@
   ignore_unreachable: true
   changed_when: true   # iptables -F/-X flushes all rules/chains
   when: reset_iptables | default(false)
-
-- name: Delete stale VolumeAttachments for removed node
-  # After a node is deleted, the CSI detach finalizer can leave VolumeAttachment
-  # objects pointing to the dead node. These block new attachments on the pod's
-  # rescheduled node since RWO volumes can only attach to one node at a time.
-  #
-  # Two-step pattern:
-  # 1. Merge-patch finalizers to null — more reliable than json-patch "remove"
-  #    which errors when the path doesn't exist (and capture_output hides it).
-  # 2. Force-delete with --grace-period=0 --force to prevent kubectl from
-  #    blocking on webhook callbacks or residual controller finalizer processing.
-  ansible.builtin.shell: |
-    set -o pipefail
-    kubectl get volumeattachment -o json | python3 -c "
-    import sys, json, subprocess
-    items = json.load(sys.stdin)['items']
-    stale = [
-        va['metadata']['name']
-        for va in items
-        if va['spec'].get('nodeName') == '{{ node_remove_k8s_name }}'
-    ]
-    for name in stale:
-        print(f'Clearing finalizers on VolumeAttachment {name}')
-        subprocess.run(
-            ['kubectl', 'patch', 'volumeattachment', name,
-             '--type=merge', '-p', '{\"metadata\":{\"finalizers\":null}}'],
-            capture_output=True
-        )
-        print(f'Force-deleting VolumeAttachment {name}')
-        subprocess.run(
-            ['kubectl', 'delete', 'volumeattachment', name,
-             '--ignore-not-found', '--grace-period=0', '--force'],
-            capture_output=True
-        )
-    print(f'Done: {len(stale)} stale VolumeAttachment(s) deleted')
-    "
-  delegate_to: "{{ kubectl_delegate }}"
-  environment:
-    KUBECONFIG: /etc/kubernetes/admin.conf
-  changed_when: true
-  run_once: true
-  timeout: 60
 
 - name: List remaining nodes
   ansible.builtin.command: kubectl get nodes

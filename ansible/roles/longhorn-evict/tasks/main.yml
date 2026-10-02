@@ -142,7 +142,14 @@
     "
   register: replica_count
   until: replica_count.stdout | int == 0
-  retries: 2
+  # ! 30 minutes, matching what the diagnostics below already assume ("a rebuild that
+  # ! needs longer than the 30-minute wait"). This was `retries: 2, delay: 30` — 60
+  # ! seconds total — so the wait could never outlast a real rebuild and the docs and
+  # ! the code disagreed. Eviction is a full replica copy: a ~50 GiB replica took ~30 min
+  # ! Helsinki->India (measured, Loki/worker-35, 2026-10-02), and a 200 GiB one takes most
+  # ! of a day. Under 60 s the eviction was effectively guaranteed to "time out", which
+  # ! is the normal path for any node that holds a replica of a non-trivial volume.
+  retries: 60
   delay: 30
   changed_when: false
   failed_when: replica_count.rc != 0 or replica_count.stdout | trim != "0"
