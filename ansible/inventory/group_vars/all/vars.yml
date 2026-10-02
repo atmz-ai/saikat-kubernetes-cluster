@@ -134,46 +134,26 @@ pdns_zones:
   - name: oleole.ai
     snapshot: false
 
-# ── Nameserver cutover window (TEMPORARY — set back to [] once retired) ───────
-# TODO(nameserver-retire): after 2026-10-02 20:02 (+04), set this list back to [] and push.
-# The window is 3h counted from the registrar update (see below); .ai's 1h window has already
-# passed. Once the old addresses stop being answered, worker-1/-4/-5/-8/-9/-10 unblock.
-# The nameserver delegation moved from the Hetzner workers to the control planes.
-# The registrar's glue records, and every resolver that has cached the delegation, still
-# name the OLD addresses until `update-namecheap-dns` runs and the relevant caches expire.
+# ── Nameserver cutover window — CLOSED, list emptied 2026-10-02 20:20 (+04) ───
+# The nameserver delegation moved from the Hetzner workers to the control planes. While the
+# cutover was in flight the PowerDNS DNS Service bound :53 on BOTH address sets, because
+# every resolver still holding the cached delegation named the old worker addresses.
 #
-# While this list is non-empty the PowerDNS DNS Service binds :53 on BOTH the old and the
-# new addresses. That is the point: the Service is the only place the two sets need to
-# overlap.
+# Both zones are now verified cut over at the registrar (the .dev and .ai TLDs serve the
+# control plane addresses), and the parent TTL window has passed, so the old addresses are
+# retired and the Service binds the control planes only.
 #
-# ! The cache window is the PARENT (registry) NS TTL, NOT this zone's own NS TTL. Measured
-# ! 2026-10-02: the parent TLD serves the delegation with TTL 10800 (3h) for .dev and 3600
-# ! (1h) for .ai, while the child zone's own NS records are the usual 300. A resolver that
-# ! cached the delegation from the TLD will keep using the old addresses for the PARENT TTL
-# ! — so sizing this window from the 300 in the zone would retire the old addresses three
-# ! hours too early for .dev, silently turning those nameservers into timeouts.
-# ! Keep both sets bound for at least the parent TTL after the registrar update, then drop
-# ! them.
+# ! The window is the PARENT (registry) NS TTL, NOT the zone's own NS TTL. Measured
+# ! 2026-10-02: the parent TLD serves the delegation at 10800 (3h) for .dev and 3600 (1h) for
+# ! .ai, while the child zone's NS records are the usual 300. Sizing from the 300 retires the
+# ! old addresses three hours too early for .dev, and a retired address is a nameserver that
+# ! times out — with nothing in the cluster reporting it.
 #
-# ! Do NOT widen the glue records or the zone's NS set with these addresses. Those must
-# ! converge to control planes only — widening them would make the transition permanent
-# ! and re-anchor the delegation on nodes that are being decommissioned.
-# ! Dropping a still-cached address makes that nameserver time out, and nothing in the
-# ! cluster reports it (see pdns-service-dns.yaml.j2 on why this fails silently).
-#
-# ! COUPLED TO NODE REMOVAL: these six addresses belong to worker-1/-4/-5/-8/-9/-10. An
-# ! address here is only answered while its node still exists (Cilium routes :53 from that
-# ! node to a PowerDNS pod), so removing one of those workers before the parent TTL has
-# ! passed kills that nameserver for any resolver still holding the cached delegation —
-# ! even though the address is still listed here. Do not remove those workers, and do not
-# ! empty this list, until the window has closed for every zone.
-pdns_nameservers_previous_ips:
-  - 138.201.85.40 # ns1  — was worker-1
-  - 88.99.148.85 # ns4  — was worker-4
-  - 138.201.199.41 # ns5  — was worker-5
-  - 138.201.251.32 # ns8  — was worker-8
-  - 88.99.147.157 # ns9  — was worker-9
-  - 95.217.57.130 # ns10 — was worker-10
+# ! Re-adding a non-empty list here is only correct alongside a registrar change that still
+# ! names those addresses. It is a transition aid, not a permanent second address set: the
+# ! glue records and the zone's NS set must converge on the current nameserver nodes, or the
+# ! delegation re-anchors on nodes being decommissioned.
+pdns_nameservers_previous_ips: []
 
 # ── NO vSwitch / VLAN / Kilo mesh configuration ──────────────────────────────
 # All of this was removed on 2026-09-29, together with Kilo itself, because CILIUM
