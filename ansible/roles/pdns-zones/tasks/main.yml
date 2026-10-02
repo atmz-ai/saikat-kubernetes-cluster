@@ -105,7 +105,7 @@
   #
   # Sorted, so the generated file's target order does not churn with inventory order.
   ansible.builtin.set_fact:
-    pdns_all_node_ips: "{{ (groups['worker_nodes'] + groups['control_plane']) | map('extract', hostvars) | map(attribute='ansible_host') | sort }}"
+    pdns_all_node_ips: "{{ groups['nodes'] | map('extract', hostvars) | map(attribute='ansible_host') | sort }}"
 
 - name: Collect control plane node IPs
   # For the API server endpoint records only. Distinct from the full node set on purpose:
@@ -114,7 +114,14 @@
   ansible.builtin.set_fact:
     pdns_control_plane_ips: "{{ groups['control_plane'] | map('extract', hostvars) | map(attribute='ansible_host') | sort }}"
 
-- name: Gather the nameservers (workers with a namecheap_nameserver annotation)
+- name: Gather the nameservers (any node with a namecheap_nameserver annotation)
+  # ! Deliberately `nodes`, not `worker_nodes`. Nameservers were previously limited to
+  # ! workers, from when control planes were dedicated and did not run workloads. Every
+  # ! control plane here is `stacked_control_plane: true`, so they host pods like any
+  # ! other node — and they are the stable set, which is exactly what a nameserver
+  # ! delegation wants. A nameserver only needs its IP to be in the Service's
+  # ! externalIPs (Cilium routes :53 to whichever PowerDNS pod exists, over the VXLAN
+  # ! tunnel), so nothing here requires a pod on the annotated node.
   # `host` is carried alongside the prefix and IP so the generated Service can label each
   # externalIP with the node it belongs to — without it, an IP in the Service can only be
   # traced to hosts.yml by matching addresses by eye.
@@ -124,7 +131,7 @@
          + [{'prefix': hostvars[item].namecheap_nameserver,
              'host': item,
              'ip': hostvars[item].ansible_host}] }}
-  loop: "{{ groups['worker_nodes'] }}"
+  loop: "{{ groups['nodes'] }}"
   when: hostvars[item].namecheap_nameserver is defined
 
 - name: Report the node sets the zone records will carry

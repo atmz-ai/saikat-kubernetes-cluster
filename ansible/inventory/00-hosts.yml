@@ -82,6 +82,28 @@ all:
       vars:
         node_role: worker
       hosts:
+        # ── Control planes ─────────────────────────────────────────────
+        # `namecheap_nameserver` on a control plane makes it one of the domain's
+        # nameservers: the annotation drives the registrar glue record, the zone's NS
+        # set, AND the PowerDNS Service's externalIPs, all from this one line.
+        #
+        # The set lives here, on the control planes, rather than on the workers: every
+        # control plane is `stacked_control_plane: true` and runs workloads like any other
+        # node, and they are the stable set — a delegation anchored on the workers has to be
+        # re-pointed every time the worker fleet churns.
+        #
+        # A nameserver needs only its address bound to :53; Cilium routes that to whichever
+        # node hosts a PowerDNS pod over the VXLAN tunnel, so NO PowerDNS pod needs to run
+        # on the annotated node. Verified: the previous worker-based nameservers answered
+        # queries while running no PowerDNS pod at all.
+        #
+        # ! The prefixes (ns1..ns10) are NOT renumbered. A prefix is a registry identity:
+        # ! reusing it across the move keeps the domain's NS set byte-identical, so the
+        # ! change is a glue-IP update rather than a registrar-level add/remove.
+        #
+        # ! There is no glue-record delete path in the namecheap-dns role, so a prefix that
+        # ! simply disappears from this file would linger at the registrar and in the zone
+        # ! forever. Remove one by re-pointing it, or add a delete task first.
         # node-1 = stacked CP (was control-plane-2)
         node-1:
           ansible_host: 65.21.137.111
@@ -92,6 +114,7 @@ all:
           region: helsinki
           country: fi
           disk_type: nvme
+          namecheap_nameserver: "ns1"
           cloudflare_dns_records:
             - hostname: kubernetes-api.yral.com
               proxied: false
@@ -107,6 +130,7 @@ all:
           region: falkenstein
           country: de
           disk_type: nvme
+          namecheap_nameserver: "ns4"
           cloudflare_dns_records:
             - hostname: kubernetes-api.yral.com
               proxied: false
@@ -122,6 +146,7 @@ all:
           region: helsinki
           country: fi
           disk_type: nvme
+          namecheap_nameserver: "ns5"
           cloudflare_dns_records:
             - hostname: kubernetes-api.yral.com
               proxied: false
@@ -137,6 +162,7 @@ all:
           region: helsinki
           country: fi
           disk_type: nvme
+          namecheap_nameserver: "ns8"
           cloudflare_dns_records:
             - hostname: kubernetes-api.yral.com
               proxied: false
@@ -152,6 +178,7 @@ all:
           region: helsinki
           country: fi
           disk_type: nvme
+          namecheap_nameserver: "ns9"
           cloudflare_dns_records:
             - hostname: kubernetes-api.yral.com
               proxied: false
@@ -167,6 +194,7 @@ all:
           region: helsinki
           country: fi
           disk_type: nvme
+          namecheap_nameserver: "ns10"
           cloudflare_dns_records:
             - hostname: kubernetes-api.yral.com
               proxied: false
@@ -254,7 +282,6 @@ all:
           region: falkenstein
           country: de
           disk_type: nvme
-          namecheap_nameserver: "ns1"
           cloudflare_dns_records:
             - hostname: "*.yral.com"
               proxied: false
@@ -265,7 +292,6 @@ all:
           region: falkenstein
           country: de
           disk_type: nvme
-          namecheap_nameserver: "ns4"
           cloudflare_dns_records:
             - hostname: "*.yral.com"
               proxied: false
@@ -276,7 +302,6 @@ all:
           region: falkenstein
           country: de
           disk_type: nvme
-          namecheap_nameserver: "ns5"
           cloudflare_dns_records:
             - hostname: "*.yral.com"
               proxied: false
@@ -287,7 +312,6 @@ all:
           region: falkenstein
           country: de
           disk_type: nvme
-          namecheap_nameserver: "ns8"
           cloudflare_dns_records:
             - hostname: "*.yral.com"
               proxied: false
@@ -298,7 +322,6 @@ all:
           region: falkenstein
           country: de
           disk_type: nvme
-          namecheap_nameserver: "ns9"
           cloudflare_dns_records:
             - hostname: "*.yral.com"
               proxied: false
@@ -309,7 +332,6 @@ all:
           region: helsinki
           country: fi
           disk_type: nvme
-          namecheap_nameserver: "ns10"
           cloudflare_dns_records:
             - hostname: "*.yral.com"
               proxied: false

@@ -1,9 +1,10 @@
 ---
 # Register/update Namecheap custom nameservers (glue records) from inventory.
 #
-# Iterates over all worker_nodes hosts. Workers with `namecheap_nameserver`
-# defined in hosts.yml are registered as custom nameservers at Namecheap.
-# The worker's ansible_host IP is used as the glue record IP (single source of truth).
+# Iterates over all `nodes` hosts — control planes included, since nameservers are no
+# longer workers-only. Any node with `namecheap_nameserver` defined in hosts.yml is
+# registered as a custom nameserver at Namecheap. That node's ansible_host IP is used
+# as the glue record IP (single source of truth).
 #
 # API calls are delegated to node-3 (IP 95.216.228.60) — that is the static IP
 # whitelisted in the Namecheap dashboard. It was `control-plane-1` before the
@@ -32,9 +33,9 @@
 #     -e namecheap_domain_sld=saikat -e namecheap_domain_tld=dev
 
 - name: Register Namecheap glue records and set custom nameservers
-  hosts: worker_nodes
+  hosts: nodes
   # Serial — Namecheap API rate-limits parallel requests ("Too many requests").
-  # One worker at a time: getInfo → create/update, then move to the next.
+  # One node at a time: getInfo → create/update, then move to the next.
   serial: 1
   gather_facts: false
   vars:

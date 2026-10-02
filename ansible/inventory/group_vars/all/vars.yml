@@ -134,6 +134,30 @@ pdns_zones:
   - name: oleole.ai
     snapshot: false
 
+# ── Nameserver cutover window (TEMPORARY — set back to [] once retired) ───────
+# The nameserver delegation moved from the Hetzner workers to the control planes.
+# The registrar's glue records, and every resolver that has cached the delegation, still
+# name the OLD addresses until `update-namecheap-dns` runs and the delegation TTL expires
+# (measured at 300s for both zones).
+#
+# While this list is non-empty the PowerDNS DNS Service binds :53 on BOTH the old and the
+# new addresses. That is the point: the Service is the only place the two sets need to
+# overlap.
+#
+# ! Do NOT widen the glue records or the zone's NS set with these addresses. Those must
+# ! converge to control planes only — widening them would make the transition permanent
+# ! and re-anchor the delegation on nodes that are being decommissioned.
+# ! Drop an IP here only once every resolver that could still hold the cached delegation
+# ! has expired it. Dropping one early makes that nameserver time out, and nothing in the
+# ! cluster reports it (see pdns-service-dns.yaml.j2 on why this fails silently).
+pdns_nameservers_previous_ips:
+  - 138.201.85.40 # ns1  — was worker-1
+  - 88.99.148.85 # ns4  — was worker-4
+  - 138.201.199.41 # ns5  — was worker-5
+  - 138.201.251.32 # ns8  — was worker-8
+  - 88.99.147.157 # ns9  — was worker-9
+  - 95.217.57.130 # ns10 — was worker-10
+
 # ── NO vSwitch / VLAN / Kilo mesh configuration ──────────────────────────────
 # All of this was removed on 2026-09-29, together with Kilo itself, because CILIUM
 # ALREADY PROVIDES THE CROSS-PROVIDER POD NETWORK IT WAS ADDED FOR.

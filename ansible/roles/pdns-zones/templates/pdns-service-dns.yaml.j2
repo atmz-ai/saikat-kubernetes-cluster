@@ -1,7 +1,7 @@
 {{ ansible_managed | comment }}
 # PowerDNS DNS Service — LoadBalancer with externalIPs.
 #
-# GENERATED from the nameserver list in ansible/inventory/00-hosts.yml (workers with a
+# GENERATED from the nameserver list in ansible/inventory/00-hosts.yml (the nodes with a
 # `namecheap_nameserver` annotation) — do not hand-edit. Regenerate with:
 #   mise run dns-generate
 #
@@ -43,6 +43,17 @@ spec:
     # {{ ns.prefix }} — {{ ns.host }} (glue record + NS record must match this)
     - {{ ns.ip }}
 {% endfor %}
+{% if pdns_nameservers_previous_ips | default([]) | length > 0 %}
+    # ── TRANSITION ONLY — addresses from the previous nameserver set ──────────
+    # Kept bound so resolvers still holding the cached delegation reach a live nameserver.
+    # Nothing else references these (not the glue records, not the zone's NS set), so the
+    # delegation converges to the current set above and these can be dropped once the
+    # delegation TTL has expired everywhere. See pdns_nameservers_previous_ips for the
+    # removal condition and why an early removal fails silently.
+{% for ip in pdns_nameservers_previous_ips %}
+    - {{ ip }}
+{% endfor %}
+{% endif %}
   ports:
     - name: dns-udp
       port: 53

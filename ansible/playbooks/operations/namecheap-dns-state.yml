@@ -20,7 +20,7 @@
 #     -e namecheap_domain_sld=oleole -e namecheap_domain_tld=ai
 
 - name: Report Namecheap DNS state (read-only)
-  hosts: worker_nodes
+  hosts: nodes
   serial: 1
   gather_facts: false
   vars:
@@ -30,7 +30,7 @@
     namecheap_delegate_host: "node-3"
   tasks:
     # Only the first host runs anything: this is one domain-level report, not a
-    # per-node operation, and the role is written to run on worker_nodes because the
+    # per-node operation, and the role is written to run on `nodes` because the
     # Namecheap delegate must be one of them. Everything else is skipped.
     - name: Query Namecheap
       ansible.builtin.include_role:

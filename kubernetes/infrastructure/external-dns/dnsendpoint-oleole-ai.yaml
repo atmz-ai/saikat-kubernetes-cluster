@@ -33,37 +33,37 @@ metadata:
 spec:
   endpoints:
     # Glue records — nameserver IPs (must match Namecheap glue records + pdns-service-dns externalIPs)
-    # These IPs come from 00-hosts.yml (workers with namecheap_nameserver annotation)
+    # These IPs come from 00-hosts.yml (the nodes annotated with namecheap_nameserver)
     - dnsName: ns1.oleole.ai
       recordTTL: 300
       recordType: A
       targets:
-        - 138.201.85.40
+        - 65.21.137.111
     - dnsName: ns4.oleole.ai
       recordTTL: 300
       recordType: A
       targets:
-        - 88.99.148.85
+        - 167.235.115.50
     - dnsName: ns5.oleole.ai
       recordTTL: 300
       recordType: A
       targets:
-        - 138.201.199.41
+        - 95.216.228.60
     - dnsName: ns8.oleole.ai
       recordTTL: 300
       recordType: A
       targets:
-        - 138.201.251.32
+        - 95.217.58.83
     - dnsName: ns9.oleole.ai
       recordTTL: 300
       recordType: A
       targets:
-        - 88.99.147.157
+        - 65.108.76.154
     - dnsName: ns10.oleole.ai
       recordTTL: 300
       recordType: A
       targets:
-        - 95.217.57.130
+        - 37.27.109.138
 ---
 apiVersion: externaldns.k8s.io/v1alpha1
 kind: DNSEndpoint

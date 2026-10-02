@@ -16,7 +16,14 @@
 # appending it in pdns-db-seed.yaml AND to external-dns's --rfc2136-zone /
 # --domain-filter lists, plus its DNSEndpoint CRD.
 #
-# Scheduling: worker nodes only (node affinity excludes control-plane).
+# Scheduling: any node, control planes included. There is deliberately no affinity here.
+#
+# ! It previously carried `node-role.kubernetes.io/control-plane: DoesNotExist`, a leftover
+# ! from when control planes were dedicated and ran no workloads. Every control plane in
+# ! this cluster is `stacked_control_plane: true`, so they host pods like any other node —
+# ! and they are the more stable set, which is what a DNS backend wants. The exclusion had
+# ! no remaining justification and forced PowerDNS off the very nodes that are not being
+# ! decommissioned.
 #
 # Ports:
 #   - 5300/UDP + 5300/TCP: DNS (LoadBalancer Service maps 53→5300)
@@ -56,13 +63,6 @@ spec:
     spec:
       securityContext:
         fsGroup: 953
-      affinity:
-        nodeAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            nodeSelectorTerms:
-              - matchExpressions:
-                  - key: node-role.kubernetes.io/control-plane
-                    operator: DoesNotExist
       containers:
         - name: powerdns
           image: docker.io/powerdns/pdns-auth-52:latest

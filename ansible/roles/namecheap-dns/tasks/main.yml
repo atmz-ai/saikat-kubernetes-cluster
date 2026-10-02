@@ -3,9 +3,14 @@
 # Uses the Namecheap API (HTTP GET, XML response) via ansible.builtin.uri.
 # API docs: https://www.namecheap.com/support/api/methods/
 #
-# This role runs on all worker_nodes hosts. Workers with `namecheap_nameserver`
-# defined in hosts.yml are registered as custom nameservers — the worker's
-# ansible_host IP is used as the glue record IP (single source of truth).
+# This role runs on every node in `nodes` — control planes included. Any node with
+# `namecheap_nameserver` defined in hosts.yml is registered as a custom nameserver —
+# that node's ansible_host IP is used as the glue record IP (single source of truth).
+#
+# ! It used to run on worker_nodes only, from when control planes were dedicated and ran
+# ! no workloads. Every control plane here is stacked, so they host pods like any other
+# ! node and are the more stable set — a better home for a nameserver delegation than a
+# ! fleet of workers that is being torn down.
 #
 # The setCustom call (setting the domain's NS records) runs only once — on the
 # first host in the play — to avoid duplicate API calls.

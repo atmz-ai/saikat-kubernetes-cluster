@@ -41,13 +41,6 @@ spec:
         app: external-dns
     spec:
       serviceAccountName: external-dns
-      affinity:
-        nodeAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            nodeSelectorTerms:
-              - matchExpressions:
-                  - key: node-role.kubernetes.io/control-plane
-                    operator: DoesNotExist
       containers:
         - name: external-dns
           image: registry.k8s.io/external-dns/external-dns:v0.23.0

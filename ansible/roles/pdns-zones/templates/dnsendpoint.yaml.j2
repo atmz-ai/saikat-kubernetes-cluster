@@ -31,7 +31,7 @@ metadata:
 spec:
   endpoints:
     # Glue records — nameserver IPs (must match Namecheap glue records + pdns-service-dns externalIPs)
-    # These IPs come from 00-hosts.yml (workers with namecheap_nameserver annotation)
+    # These IPs come from 00-hosts.yml (the nodes annotated with namecheap_nameserver)
 {% for ns in pdns_nameservers %}
     - dnsName: {{ ns.prefix }}.{{ pdns_zone_name }}
       recordTTL: 300
