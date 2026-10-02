@@ -135,6 +135,9 @@ pdns_zones:
     snapshot: false
 
 # ── Nameserver cutover window (TEMPORARY — set back to [] once retired) ───────
+# TODO(nameserver-retire): after 2026-10-02 20:02 (+04), set this list back to [] and push.
+# The window is 3h counted from the registrar update (see below); .ai's 1h window has already
+# passed. Once the old addresses stop being answered, worker-1/-4/-5/-8/-9/-10 unblock.
 # The nameserver delegation moved from the Hetzner workers to the control planes.
 # The registrar's glue records, and every resolver that has cached the delegation, still
 # name the OLD addresses until `update-namecheap-dns` runs and the relevant caches expire.
