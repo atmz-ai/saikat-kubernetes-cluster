@@ -191,6 +191,11 @@ Rust and Swift use `//` (or `///` for doc comments); Ansible, Python and YAML us
 **Length is the tell.** A justified comment is usually one to three lines saying the counter-intuitive thing and stopping. A comment block longer than the code it annotates is almost always an essay that should move to `AGENTS.md`/`README`.
 
 When touching code whose comments violate this, tighten them in the same change — gradual migration, same policy as the macro-free rules. This targets REDUNDANCY, not contract documentation: wire-pin shapes, incident references, and ownership/invariant statements that names genuinely cannot carry remain and are load-bearing.
+### Commit Messages — No AI Attribution (Hard Rule)
+**Never add `Co-authored-by:` trailers, `Generated with` lines, or any other AI attribution to a commit message — not for Copilot, not for any assistant.** The commit author is the operator. Attribution trailers also render as an extra avatar in GitHub's contributor list, misattributing the work.
+
+This is a hard rule, not a style preference: do not add the trailer even when a default tool prompt suggests it. An existing message that carries one should have it stripped (amend + `--force-with-lease`) when the commit has not been built on yet.
+
 ### Commit Scope — Include the Operator's Parallel Changes (Preference)
 When the operator makes manual changes in parallel with agent work (dependency bumps, edits done in another editor, etc.), **include them in the same commit set rather than excluding them** — review the diff, describe it accurately in the commit message, and commit everything together. Deliberately excluding the operator's own changes strands their work uncommitted while the agent's work ships. Only exception: changes the operator explicitly asks to keep separate.
 
