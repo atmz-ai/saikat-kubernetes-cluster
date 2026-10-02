@@ -157,6 +157,13 @@ pdns_zones:
 # ! and re-anchor the delegation on nodes that are being decommissioned.
 # ! Dropping a still-cached address makes that nameserver time out, and nothing in the
 # ! cluster reports it (see pdns-service-dns.yaml.j2 on why this fails silently).
+#
+# ! COUPLED TO NODE REMOVAL: these six addresses belong to worker-1/-4/-5/-8/-9/-10. An
+# ! address here is only answered while its node still exists (Cilium routes :53 from that
+# ! node to a PowerDNS pod), so removing one of those workers before the parent TTL has
+# ! passed kills that nameserver for any resolver still holding the cached delegation —
+# ! even though the address is still listed here. Do not remove those workers, and do not
+# ! empty this list, until the window has closed for every zone.
 pdns_nameservers_previous_ips:
   - 138.201.85.40 # ns1  — was worker-1
   - 88.99.148.85 # ns4  — was worker-4
