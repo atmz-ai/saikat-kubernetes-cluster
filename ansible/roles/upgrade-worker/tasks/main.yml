@@ -171,11 +171,13 @@
       delegate_to: "{{ kubectl_delegate }}"
 
     - name: Drain node (evict all evictable pods)
+      # ! No --force: it is only needed for unmanaged pods, and forcing past a
+      # ! PodDisruptionBudget is how the last healthy replica of a volume gets evicted.
+      # ! The PDB wait above already releases the instance-manager budget.
       ansible.builtin.command: >
         kubectl drain {{ inventory_hostname }}
         --ignore-daemonsets
         --delete-emptydir-data
-        --force
         --grace-period=300
         --timeout=600s
       environment:

@@ -112,11 +112,12 @@
       changed_when: true
 
     - name: Drain node pods
+      # ! No --force: it is only needed for unmanaged pods, and forcing past a
+      # ! PodDisruptionBudget is how the last healthy replica of a volume gets evicted.
       ansible.builtin.command: >
         kubectl drain {{ node_target }}
         --ignore-daemonsets
         --delete-emptydir-data
-        --force
         --grace-period=300
         --timeout=600s
       environment:

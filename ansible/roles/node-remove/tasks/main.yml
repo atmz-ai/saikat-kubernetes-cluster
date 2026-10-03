@@ -27,8 +27,8 @@
       Target: {{ target_host }}
 
       Steps:
-      1. Drain node (evict all pods)
-      2. Evacuate Longhorn replicas off the node
+      1. Evacuate Longhorn replicas off the node (before any pod is evicted)
+      2. Drain node (evict all pods, honouring PodDisruptionBudgets)
       3. Delete node from cluster
       4. Cleanup kubelet config on node
       5. Remove from inventory (automated by the node-inventory-remove role)
@@ -50,11 +50,12 @@
       Target: {{ target_host }}
 
       Steps:
-      1. Drain node (evict all pods)
-      2. Remove from etcd cluster
-      3. Delete node from cluster
-      4. Cleanup kubelet config on node
-      5. Remove from inventory (automated by the node-inventory-remove role)
+      1. Evacuate Longhorn replicas off the node (before any pod is evicted)
+      2. Drain node (evict all pods, honouring PodDisruptionBudgets)
+      3. Remove from etcd cluster
+      4. Delete node from cluster
+      5. Cleanup kubelet config on node
+      6. Remove from inventory (automated by the node-inventory-remove role)
 
       ⚠️  CRITICAL WARNING: This is EXTREMELY DESTRUCTIVE!
       - Reduces HA quorum (3 → 2 control planes)
@@ -256,57 +257,63 @@
 # ! therefore does NOT protect them — it protects longhorn-manager, longhorn-csi-plugin
 # ! and the engine-images. That is the whole reason the drain must come second.
 - name: Evict Longhorn replicas from the node before draining
+  # ! Runs for EVERY node, control plane included. Stacked control planes run
+  # ! workloads, so they hold replicas too; skipping them would strand a volume on a
+  # ! node that is about to be deleted. The role skips cleanly when the node has no
+  # ! Longhorn registration.
   ansible.builtin.include_role:
     name: longhorn-evict
   vars:
     target_host: "{{ node_remove_k8s_name }}"
-  when:
-    - node_check.rc == 0
-    - not is_control_plane
+  when: node_check.rc == 0
   run_once: true
 
-- name: Force-delete Terminating pods on dead node before drain
-  # Pods stuck in Terminating on an unreachable node will never complete graceful
-  # termination — kubectl drain waits for them and times out. Force-deleting them
-  # removes the pod objects immediately (the containers are already gone since the
-  # node is dead), unblocking drain.
+- name: Release the target node's Longhorn instance-manager PDB so a non-forced drain can proceed
+  # ! The instance-manager PDB is minAvailable: 1 with expectedPods: 1, so
+  # ! disruptionsAllowed is permanently 0 and the eviction API blocks the drain
+  # ! forever. Deleting it is safe and is what makes a NON-forced drain possible: the
+  # ! pod is pinned to this node and cannot reschedule, and Longhorn recreates the PDB
+  # ! when the instance-manager restarts. This replaces the old `--disable-eviction`
+  # ! flag, which bypassed EVERY PDB (Kafka's included) rather than only the one that
+  # ! can never be satisfied.
   ansible.builtin.shell: |
     set -o pipefail
-    kubectl get pods --all-namespaces --field-selector \
-      spec.nodeName={{ node_remove_k8s_name }},status.phase=Running \
-      -o json | python3 -c "
-    import sys, json, subprocess
-    pods = json.load(sys.stdin)['items']
-    terminating = [
-        (p['metadata']['namespace'], p['metadata']['name'])
-        for p in pods
-        if p.get('metadata', {}).get('deletionTimestamp')
-    ]
-    for ns, name in terminating:
-        print(f'Force-deleting Terminating pod {ns}/{name}')
-        subprocess.run([
-            'kubectl', 'delete', 'pod', name,
-            '-n', ns,
-            '--grace-period=0', '--force'
-        ])
-    print(f'Done: {len(terminating)} Terminating pod(s) force-deleted')
-    "
+    pdb=$(kubectl get pdb -n longhorn-system -o json | python3 -c "
+    import sys, json
+    data = json.load(sys.stdin)
+    for p in data['items']:
+        sel = p.get('spec', {}).get('selector', {}).get('matchLabels', {})
+        if sel.get('longhorn.io/node') == '{{ node_remove_k8s_name }}' and 'instance-manager' in p['metadata']['name']:
+            print(p['metadata']['name'])
+            break
+    ")
+    if [ -n "$pdb" ]; then
+      kubectl delete pdb "$pdb" -n longhorn-system
+      echo "deleted $pdb"
+    else
+      echo "no instance-manager PDB found for {{ node_remove_k8s_name }}"
+    fi
   delegate_to: "{{ kubectl_delegate }}"
   environment:
     KUBECONFIG: /etc/kubernetes/admin.conf
+  register: node_remove_im_pdb
+  changed_when: "'deleted' in node_remove_im_pdb.stdout"
   when: node_check.rc == 0
-  changed_when: true
   run_once: true
 
 - name: Drain the node
+  # ! NO --force and NO --disable-eviction. --disable-eviction bypasses every
+  # ! PodDisruptionBudget, which is how a drain can evict the last healthy replica of a
+  # ! volume (Kafka's PDB is minAvailable: 2 of 3) and leave a workload unable to
+  # ! attach. Without it, drain honours the PDBs and fails loudly instead of destroying
+  # ! data. --force is also omitted: it is only needed for unmanaged pods, and a node
+  # ! that cannot drain cleanly must be investigated, not forced.
   ansible.builtin.command: >
     kubectl drain {{ node_remove_k8s_name }}
     --ignore-daemonsets
     --delete-emptydir-data
-    --disable-eviction
-    --force
-    --grace-period=30
-    --timeout=120s
+    --grace-period=300
+    --timeout=600s
   delegate_to: "{{ kubectl_delegate }}"
   when: node_check.rc == 0
   register: drain_result
@@ -316,6 +323,21 @@
   ansible.builtin.debug:
     msg: "{{ drain_result.stdout_lines }}"
   when: node_check.rc == 0
+
+- name: Fail if the drain did not complete
+  # ! Do NOT force past this. A PDB with disruptionsAllowed 0 means a workload is
+  # ! already degraded (fix that first); an unmanaged pod means the node needs
+  # ! investigation. Forcing past either is how the last healthy replica gets evicted.
+  ansible.builtin.fail:
+    msg: >-
+      Drain of {{ node_remove_k8s_name }} failed. Do NOT force it. Read the drain
+      output above: a PodDisruptionBudget with disruptionsAllowed 0 means a workload
+      is already degraded, and an unmanaged pod means the node needs investigation.
+      stderr: {{ drain_result.stderr }}
+  when:
+    - node_check.rc == 0
+    - drain_result.rc != 0
+  run_once: true
 
 # The Longhorn replica eviction used to live here, after the drain. It now runs
 # BEFORE the drain — see the load-bearing comment above — because draining first
