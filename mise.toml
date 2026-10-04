@@ -395,6 +395,12 @@ for persistent_volumes in [[], [{'metadata': {'name': 'rustfs-azure-1-disk-0'}}]
   assert rendered_loop == persistent_volumes
   assert not callable(rendered_loop)
 print('Verified node-removal storage guard reads JSON items, including an empty list.')
+cleanup_tasks = yaml.safe_load(pathlib.Path('ansible/roles/node-remove/tasks/cleanup.yml').read_text())
+assert cleanup_tasks[0]['ansible.builtin.command']['cmd'].startswith('kubeadm reset phase cleanup-node ')
+assert next(index for index, task in enumerate(cleanup_tasks) if 'ansible.builtin.wait_for' in task) < next(index for index, task in enumerate(cleanup_tasks) if 'ansible.builtin.file' in task)
+assert all('failed_when' not in task and 'ignore_unreachable' not in task for task in cleanup_tasks)
+assert any(task.get('ansible.builtin.include_tasks') == 'cleanup.yml' for task in removal_tasks)
+print('Verified container cleanup precedes configuration deletion and failures are not ignored.')
 release = list(yaml.safe_load_all((directory / 'helmrelease.yaml').read_text()))[1]
 with tempfile.TemporaryDirectory() as temporary:
   archive = pathlib.Path(temporary) / 'rustfs.tgz'

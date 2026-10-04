@@ -637,28 +637,8 @@
     msg: "{{ longhorn_node_delete.stdout }}"
   when: longhorn_node_delete.rc == 0
 
-- name: Stop kubelet service
-  ansible.builtin.systemd:
-    name: kubelet
-    state: stopped
-    enabled: false
-  delegate_to: "{{ target_host }}"
-  become: true
-  failed_when: false
-  ignore_unreachable: true
-
-- name: Remove Kubernetes configuration
-  ansible.builtin.file:
-    path: "{{ item }}"
-    state: absent
-  loop:
-    - /etc/kubernetes
-    - /var/lib/kubelet
-    - /var/lib/etcd
-  delegate_to: "{{ target_host }}"
-  become: true
-  failed_when: false
-  ignore_unreachable: true
+- name: Clean up the retired node and verify its API server has stopped
+  ansible.builtin.include_tasks: cleanup.yml
 
 - name: Reset iptables (optional)
   ansible.builtin.command: iptables -F && iptables -t nat -F && iptables -t mangle -F && iptables -X

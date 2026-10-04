@@ -33,6 +33,7 @@
       ansible.builtin.include_role:
         name: beszel-agent
         tasks_from: remove.yml
+      when: not (node_remove_cleanup_only | default(false) | bool)
 
 - name: Remove node from cluster
   hosts: localhost
@@ -42,11 +43,22 @@
     # location is visible at the call site, next to the role that depends on it.
     node_inventory_file: "{{ playbook_dir }}/../../inventory/00-hosts.yml"
 
-  roles:
-    - role: node-remove
+  tasks:
+    - name: Run normal node removal
+      ansible.builtin.include_role:
+        name: node-remove
+      when: not (node_remove_cleanup_only | default(false) | bool)
+    - name: Clean up an already retired node
+      ansible.builtin.include_role:
+        name: node-remove
+        tasks_from: cleanup.yml
+      when: node_remove_cleanup_only | default(false) | bool
     # Removes the host from the node list and reloads the inventory, so the DNS
     # regeneration below derives its records from the post-removal node set.
-    - role: node-inventory-remove
+    - name: Remove the departed node from inventory
+      ansible.builtin.include_role:
+        name: node-inventory-remove
+      when: not (node_remove_cleanup_only | default(false) | bool)
 
 # Regenerate the DNS records from the updated inventory, for the same reason as on add:
 # the apex, wildcard and API endpoint records each list node IPs, so a removed node left
@@ -61,5 +73,8 @@
   gather_facts: false
   vars:
     pdns_zones_output_dir: "{{ playbook_dir }}/../../../kubernetes/infrastructure/external-dns"
-  roles:
-    - role: pdns-zones
+  tasks:
+    - name: Regenerate inventory-derived DNS
+      ansible.builtin.include_role:
+        name: pdns-zones
+      when: not (node_remove_cleanup_only | default(false) | bool)

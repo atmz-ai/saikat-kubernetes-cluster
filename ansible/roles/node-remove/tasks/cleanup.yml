@@ -1,0 +1,36 @@
+---
+- name: Stop Kubernetes containers and clean node state through kubeadm
+  # ! Stopping kubelet alone leaves existing static-pod containers running.
+  ansible.builtin.command:
+    cmd: kubeadm reset phase cleanup-node --cri-socket unix:///run/containerd/containerd.sock
+  delegate_to: "{{ target_host }}"
+  become: true
+
+  changed_when: true
+
+- name: Disable kubelet on the retired node
+  ansible.builtin.systemd_service:
+    name: kubelet
+    state: stopped
+    enabled: false
+  delegate_to: "{{ target_host }}"
+  become: true
+
+- name: Verify the retired API server is no longer accepting connections
+  ansible.builtin.wait_for:
+    host: "{{ hostvars[target_host].ansible_host | default(target_host) }}"
+    port: 6443
+    state: stopped
+    timeout: 60
+  delegate_to: localhost
+
+- name: Remove remaining Kubernetes configuration and retired etcd data
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/kubernetes
+    - /var/lib/kubelet
+    - /var/lib/etcd
+  delegate_to: "{{ target_host }}"
+  become: true
