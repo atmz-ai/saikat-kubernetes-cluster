@@ -51,6 +51,8 @@ spec:
     - 172.16.0.5
     # ns5 — saikat-azure-central-india-3 (glue record + NS record must match this)
     - 20.235.109.17
+    # ! Azure DNAT delivers port 53 to the private interface address, not the public glue IP.
+    - 172.16.0.6
     # ── TRANSITION ONLY — addresses from the previous nameserver set ──────────
     # Kept bound so resolvers still holding the cached delegation reach a live nameserver.
     # Nothing else references these (not the glue records, not the zone's NS set), so the

@@ -257,6 +257,7 @@ all:
         saikat-azure-central-india-3:
           ansible_host: 20.235.109.17
           namecheap_nameserver: "ns5"
+          powerdns_frontend_address: 172.16.0.6
           ansible_user: saikat-machine-access
           provider: azure
           node_role: control-plane
