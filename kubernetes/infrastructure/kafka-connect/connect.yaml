@@ -14,8 +14,7 @@
 # KafkaConnector configs can reference ${env:VAR_NAME} for S3 credentials.
 # Strimzi's own EnvVarConfigProvider was removed in 0.46.0.
 #
-# 2 replicas for connector task distribution. Pinned to falkenstein nodes
-# (required, not preferred) to colocate with Kafka and the FSN1 S3 bucket.
+# * 2 replicas for connector task distribution; host anti-affinity spreads them.
 ---
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaConnect
@@ -62,14 +61,6 @@ spec:
   template:
     pod:
       affinity:
-        nodeAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            nodeSelectorTerms:
-              - matchExpressions:
-                  - key: topology.kubernetes.io/region
-                    operator: In
-                    values:
-                      - falkenstein
         podAntiAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
             - weight: 100

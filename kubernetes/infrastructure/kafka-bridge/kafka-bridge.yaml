@@ -83,15 +83,7 @@ spec:
     -Xms: "512m"
     -Xmx: "512m"
 
-  # Pod scheduling — pin to falkenstein region
+  # * Pod scheduling — no region pin; the single replica may run on any node.
   template:
     pod:
-      affinity:
-        nodeAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            nodeSelectorTerms:
-              - matchExpressions:
-                  - key: topology.kubernetes.io/region
-                    operator: In
-                    values:
-                      - falkenstein
+      affinity: {}

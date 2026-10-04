@@ -376,18 +376,27 @@ description = "Run an Ansible playbook (usage: mise run ansible-playbook -- ansi
 run = "./.venv/bin/ansible-playbook"
 
 [tasks.kafka-manifests-check]
-description = "Validate Kafka placement and preserve broker count and persistent storage"
+description = "Validate Kafka, Connect, and Bridge placement and preserve replica counts and persistent storage"
 run = '''
 ./.venv/bin/python - <<'PY'
 import pathlib, yaml
-documents = list(yaml.safe_load_all(pathlib.Path('kubernetes/infrastructure/kafka/kafka.yaml').read_text()))
-pool = next(document for document in documents if document['kind'] == 'KafkaNodePool')
-affinity = pool['spec']['template']['pod']['affinity']
-assert 'nodeAffinity' not in affinity
-assert affinity['podAntiAffinity']['preferredDuringSchedulingIgnoredDuringExecution'][0]['podAffinityTerm']['topologyKey'] == 'topology.kubernetes.io/zone'
+def load(path):
+  return list(yaml.safe_load_all(pathlib.Path(path).read_text()))
+pool = next(document for document in load('kubernetes/infrastructure/kafka/kafka.yaml') if document['kind'] == 'KafkaNodePool')
+connect = next(document for document in load('kubernetes/infrastructure/kafka-connect/connect.yaml') if document['kind'] == 'KafkaConnect')
+bridge = next(document for document in load('kubernetes/infrastructure/kafka-bridge/kafka-bridge.yaml') if document['kind'] == 'KafkaBridge')
+for affinity, topology_key in [
+  (pool['spec']['template']['pod']['affinity'], 'topology.kubernetes.io/zone'),
+  (connect['spec']['template']['pod']['affinity'], 'kubernetes.io/hostname'),
+]:
+  assert 'nodeAffinity' not in affinity
+  assert affinity['podAntiAffinity']['preferredDuringSchedulingIgnoredDuringExecution'][0]['podAffinityTerm']['topologyKey'] == topology_key
+assert 'nodeAffinity' not in bridge['spec']['template']['pod']['affinity']
 assert pool['spec']['replicas'] == 3
 assert pool['spec']['storage'] == {'type': 'persistent-claim', 'size': '250Gi', 'class': 'longhorn-1replica', 'deleteClaim': True}
-print('Verified unrestricted regional placement, zone anti-affinity, three brokers, and unchanged persistent storage.')
+assert connect['spec']['replicas'] == 2
+assert bridge['spec']['replicas'] == 1
+print('Verified unrestricted regional placement and preserved replica counts and persistent storage.')
 PY
 '''
 
