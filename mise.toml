@@ -394,7 +394,22 @@ with tempfile.TemporaryDirectory() as temporary:
   print(rendered.stdout)
   print(rendered.stderr)
   documents = list(yaml.safe_load_all(rendered.stdout))
+  authorization = list(yaml.safe_load_all((directory / 'google-authorization.yaml').read_text()))
+  documents.extend(authorization)
+  import json
+  policy = json.loads(next(document for document in authorization if document['kind'] == 'ConfigMap')['data']['policy.json'])
+  for statement in policy['Statement']:
+    operator = 'StringEquals' if statement['Effect'] == 'Allow' else 'StringNotEquals'
+    assert statement['Condition'] == {operator: {'jwt:email': 'saikat@atmz.ai'}}
+    assert len({action.split(':')[0] for action in statement['Action']}) == 1
+  for family in ['admin', 'kms', 's3', 'sts']:
+    assert {statement['Effect'] for statement in policy['Statement'] if statement['Action'][0].startswith(family + ':')} == {'Allow', 'Deny'}
+  console_service = next(document for document in authorization if document['kind'] == 'Service')
+  assert console_service['spec']['selector'] == {'statefulset.kubernetes.io/pod-name': 'rustfs-0'}
   statefulset = next(document for document in documents if document and document['kind'] == 'StatefulSet')
+  environment = {entry['name']: entry for entry in statefulset['spec']['template']['spec']['containers'][0]['env']}
+  assert environment['RUSTFS_IDENTITY_OPENID_ROLE_POLICY_google']['value'] == 'google-saikat-administrator'
+  assert environment['RUSTFS_IDENTITY_OPENID_CLIENT_SECRET_google']['valueFrom']['secretKeyRef'] == {'name': 'rustfs-google-oauth', 'key': 'client-secret'}
   assert statefulset['metadata']['name'] == 'rustfs'
   assert statefulset['spec']['replicas'] == 3
   assert [claim['metadata']['name'] for claim in statefulset['spec']['volumeClaimTemplates']] == ['data']

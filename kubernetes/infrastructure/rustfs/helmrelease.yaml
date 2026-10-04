@@ -36,6 +36,29 @@ spec:
       existingSecret: rustfs-credentials
     localEndpointHost:
       autoInject: true
+    extraEnv:
+      - name: RUSTFS_BROWSER_REDIRECT_URL
+        value: https://rust-fs.saikat.oleole.ai
+      - name: RUSTFS_IDENTITY_OPENID_CONFIG_URL_google
+        value: https://accounts.google.com/.well-known/openid-configuration
+      - name: RUSTFS_IDENTITY_OPENID_CLIENT_ID_google
+        valueFrom:
+          secretKeyRef:
+            name: rustfs-google-oauth
+            key: client-id
+      - name: RUSTFS_IDENTITY_OPENID_CLIENT_SECRET_google
+        valueFrom:
+          secretKeyRef:
+            name: rustfs-google-oauth
+            key: client-secret
+      - name: RUSTFS_IDENTITY_OPENID_REDIRECT_URI_google
+        value: https://rust-fs.saikat.oleole.ai/rustfs/admin/v3/oidc/callback/google
+      - name: RUSTFS_IDENTITY_OPENID_REDIRECT_URI_DYNAMIC_google
+        value: "off"
+      - name: RUSTFS_IDENTITY_OPENID_DISPLAY_NAME_google
+        value: Google
+      - name: RUSTFS_IDENTITY_OPENID_ROLE_POLICY_google
+        value: google-saikat-administrator
     config:
       rustfs:
         # ! No log PVC: dedicated data claims must not be consumed by log volumes.

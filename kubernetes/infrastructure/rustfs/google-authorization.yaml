@@ -1,0 +1,112 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: rustfs-console
+  namespace: rustfs
+spec:
+  # ! OAuth state is process-local; console availability follows rustfs-0.
+  selector:
+    statefulset.kubernetes.io/pod-name: rustfs-0
+  ports:
+    - name: console
+      port: 9001
+      targetPort: 9001
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rustfs-google-policy
+  namespace: rustfs
+data:
+  policy.json: |
+    {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Effect": "Deny",
+          "Action": ["admin:*"],
+          "Condition": {"StringNotEquals": {"jwt:email": "saikat@atmz.ai"}}
+        },
+        {
+          "Effect": "Deny",
+          "Action": ["kms:*"],
+          "Condition": {"StringNotEquals": {"jwt:email": "saikat@atmz.ai"}}
+        },
+        {
+          "Effect": "Deny",
+          "Action": ["s3:*"],
+          "Resource": ["arn:aws:s3:::*"],
+          "Condition": {"StringNotEquals": {"jwt:email": "saikat@atmz.ai"}}
+        },
+        {
+          "Effect": "Deny",
+          "Action": ["sts:AssumeRole"],
+          "Condition": {"StringNotEquals": {"jwt:email": "saikat@atmz.ai"}}
+        },
+        {
+          "Effect": "Allow",
+          "Action": ["admin:*"],
+          "Condition": {"StringEquals": {"jwt:email": "saikat@atmz.ai"}}
+        },
+        {
+          "Effect": "Allow",
+          "Action": ["kms:*"],
+          "Condition": {"StringEquals": {"jwt:email": "saikat@atmz.ai"}}
+        },
+        {
+          "Effect": "Allow",
+          "Action": ["s3:*"],
+          "Resource": ["arn:aws:s3:::*"],
+          "Condition": {"StringEquals": {"jwt:email": "saikat@atmz.ai"}}
+        },
+        {
+          "Effect": "Allow",
+          "Action": ["sts:AssumeRole"],
+          "Condition": {"StringEquals": {"jwt:email": "saikat@atmz.ai"}}
+        }
+      ]
+    }
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: rustfs-google-policy-1
+  namespace: rustfs
+spec:
+  backoffLimit: 6
+  activeDeadlineSeconds: 600
+  template:
+    spec:
+      automountServiceAccountToken: false
+      restartPolicy: OnFailure
+      containers:
+        - name: provision-policy
+          image: rustfs/rustfs:1.0.1
+          command: [/bin/sh, -ec]
+          args:
+            - |
+              printf 'Installing email-restricted Google administrator policy\n'
+              curl --fail-with-body --connect-timeout 10 --max-time 60 \
+                --aws-sigv4 aws:amz:us-east-1:s3 \
+                --variable '%RUSTFS_ACCESS_KEY' --variable '%RUSTFS_SECRET_KEY' \
+                --expand-user '{{RUSTFS_ACCESS_KEY}}:{{RUSTFS_SECRET_KEY}}' \
+                --request PUT --header 'Content-Type: application/json' \
+                --data-binary @/policy/policy.json \
+                'http://rustfs-svc:9000/rustfs/admin/v3/add-canned-policy?name=google-saikat-administrator'
+              printf '\nReading back Google administrator policy\n'
+              curl --fail-with-body --connect-timeout 10 --max-time 60 \
+                --aws-sigv4 aws:amz:us-east-1:s3 \
+                --variable '%RUSTFS_ACCESS_KEY' --variable '%RUSTFS_SECRET_KEY' \
+                --expand-user '{{RUSTFS_ACCESS_KEY}}:{{RUSTFS_SECRET_KEY}}' \
+                'http://rustfs-svc:9000/rustfs/admin/v3/info-canned-policy?name=google-saikat-administrator'
+          envFrom:
+            - secretRef:
+                name: rustfs-credentials
+          volumeMounts:
+            - name: policy
+              mountPath: /policy
+              readOnly: true
+      volumes:
+        - name: policy
+          configMap:
+            name: rustfs-google-policy
