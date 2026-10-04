@@ -139,8 +139,13 @@
     success_msg: "{{ target_host }} is gone from the in-memory inventory; the node set the DNS play will use is correct."
 
 - name: Report the node set that will be used for DNS generation
+  # ! `default([])` is load-bearing: the `constructed` plugin only creates a group
+  # ! when at least one host matches, so removing the LAST worker deletes the
+  # ! `worker_nodes` group entirely and `groups['worker_nodes']` raises
+  # ! "object of type 'dict' has no attribute 'worker_nodes'". That aborted the play
+  # ! AFTER the node was already removed, so the DNS regeneration play never ran.
   ansible.builtin.debug:
     msg:
-      - "control planes: {{ groups['control_plane'] | length }}"
-      - "workers: {{ groups['worker_nodes'] | length }}"
+      - "control planes: {{ groups['control_plane'] | default([]) | length }}"
+      - "workers: {{ groups['worker_nodes'] | default([]) | length }}"
       - "total nodes: {{ groups['all'] | length }}"

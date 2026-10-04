@@ -15,9 +15,12 @@
     success_msg: "Host {{ node_target }} found in inventory"
 
 - name: Determine node role
+  # ! `default([])` is load-bearing: the `constructed` plugin only creates a group when
+  # ! at least one host matches, so with zero workers `groups['worker_nodes']` raises
+  # ! "object of type 'dict' has no attribute 'worker_nodes'".
   ansible.builtin.set_fact:
     is_control_plane: "{{ node_target in groups['control_plane'] }}"
-    is_worker: "{{ node_target in groups['worker_nodes'] }}"
+    is_worker: "{{ node_target in groups['worker_nodes'] | default([]) }}"
     node_role: "{{ 'control-plane' if node_target in groups['control_plane'] else 'worker' }}"
 
 - name: Display upgrade plan

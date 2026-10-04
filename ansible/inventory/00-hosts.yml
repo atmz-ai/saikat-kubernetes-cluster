@@ -275,13 +275,3 @@ all:
         #
         # Kafka DNS entries were removed — *.yral.com wildcard + SNI passthrough handles routing.
         # All DNS records are grey cloud (proxied: false) — Cloudflare proxy removed to avoid upload limits.
-        worker-4:
-          ansible_host: 88.99.148.85
-          provider: hetzner
-          datacenter: FSN1-DC1
-          region: falkenstein
-          country: de
-          disk_type: nvme
-          cloudflare_dns_records:
-            - hostname: "*.yral.com"
-              proxied: false
