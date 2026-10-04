@@ -102,6 +102,22 @@ spec:
               done < /apex/apex-records
 
               echo "Replaced $applied rrset(s)."
+{% for zone in pdns_zones %}
+{% if zone.soa_primary_nameserver is defined %}
+
+              # ! Read the live serial; a fixed serial would roll back ongoing DNS updates.
+              zone_records="$(pdnsutil --config-dir=/tmp/pdns-apex zone list '{{ zone.name }}')"
+              soa_content="$(printf '%s\n' "$zone_records" | awk '$4 == "SOA" { for (field = 5; field <= NF; field++) printf "%s%s", $field, (field == NF ? "\n" : " ") }')"
+              set -- $soa_content
+              if [ "$#" -ne 7 ]; then
+                echo "ERROR: expected one seven-field SOA for {{ zone.name }}, got: $soa_content" >&2
+                exit 1
+              fi
+              echo "Normalizing {{ zone.name }} SOA, preserving serial $3"
+              pdnsutil --config-dir=/tmp/pdns-apex rrset replace '{{ zone.name }}' '{{ zone.name }}' SOA '{{ zone.soa_negative_cache_ttl_seconds }}' \
+                "{{ zone.soa_primary_nameserver }} $2 $3 $4 $5 $6 {{ zone.soa_negative_cache_ttl_seconds }}"
+{% endif %}
+{% endfor %}
           env:
             - name: PDNS_DB_HOST
               value: pdns-db-rw.external-dns.svc.cluster.local

@@ -185,7 +185,7 @@
   # ! A changed checksum is a NEW Job object: Flux creates it (it runs) and prunes the
   # ! previous one. No hand step, no --force on the Kustomization.
   ansible.builtin.set_fact:
-    pdns_apex_checksum: "{{ (pdns_apex_record_lines | join(';') | hash('sha256'))[:12] }}"
+    pdns_apex_checksum: "{{ (((pdns_apex_record_lines | join(';')) ~ (pdns_zones | to_json)) | hash('sha256'))[:12] }}"
 
 - name: Generate the apex records ConfigMap and its apply Job
   ansible.builtin.template:

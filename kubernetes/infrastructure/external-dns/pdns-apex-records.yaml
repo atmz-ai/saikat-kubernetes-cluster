@@ -24,7 +24,7 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: pdns-apex-records-885691f30069
+  name: pdns-apex-records-9a9f01a0d2f6
   namespace: external-dns
   labels:
     app.kubernetes.io/name: pdns-apex-records
@@ -38,7 +38,7 @@ data:
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: pdns-apex-records-885691f30069
+  name: pdns-apex-records-9a9f01a0d2f6
   namespace: external-dns
   labels:
     app.kubernetes.io/name: pdns-apex-records
@@ -105,6 +105,18 @@ spec:
               done < /apex/apex-records
 
               echo "Replaced $applied rrset(s)."
+
+              # ! Read the live serial; a fixed serial would roll back ongoing DNS updates.
+              zone_records="$(pdnsutil --config-dir=/tmp/pdns-apex zone list 'oleole.ai')"
+              soa_content="$(printf '%s\n' "$zone_records" | awk '$4 == "SOA" { for (field = 5; field <= NF; field++) printf "%s%s", $field, (field == NF ? "\n" : " ") }')"
+              set -- $soa_content
+              if [ "$#" -ne 7 ]; then
+                echo "ERROR: expected one seven-field SOA for oleole.ai, got: $soa_content" >&2
+                exit 1
+              fi
+              echo "Normalizing oleole.ai SOA, preserving serial $3"
+              pdnsutil --config-dir=/tmp/pdns-apex rrset replace 'oleole.ai' 'oleole.ai' SOA '300' \
+                "ns1.oleole.ai. $2 $3 $4 $5 $6 300"
           env:
             - name: PDNS_DB_HOST
               value: pdns-db-rw.external-dns.svc.cluster.local
@@ -132,4 +144,4 @@ spec:
       volumes:
         - name: apex-records
           configMap:
-            name: pdns-apex-records-885691f30069
+            name: pdns-apex-records-9a9f01a0d2f6
