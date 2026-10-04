@@ -102,21 +102,6 @@ all:
         # ! Keep outgoing addresses reachable via pdns_nameservers_previous_ips until
         # ! the parent delegation cache window expires; only then remove their hosts.
         # node-1 = stacked CP (was control-plane-2)
-        node-1:
-          ansible_host: 65.21.137.111
-          provider: hetzner
-          node_role: control-plane
-          stacked_control_plane: true
-          datacenter: HEL1-DC3
-          region: helsinki
-          country: fi
-          disk_type: nvme
-          cloudflare_dns_records:
-            - hostname: kubernetes-api.yral.com
-              proxied: false
-            - hostname: "*.yral.com"
-              proxied: false
-        # node-2 = stacked CP (was worker-13)
         node-5:
           ansible_host: 65.108.76.154
           provider: hetzner
