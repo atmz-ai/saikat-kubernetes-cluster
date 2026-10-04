@@ -375,6 +375,22 @@ run = '''
 description = "Run an Ansible playbook (usage: mise run ansible-playbook -- ansible/playbooks/operations/<playbook>.yml [-e target_host=...])"
 run = "./.venv/bin/ansible-playbook"
 
+[tasks.kafka-manifests-check]
+description = "Validate Kafka placement and preserve broker count and persistent storage"
+run = '''
+./.venv/bin/python - <<'PY'
+import pathlib, yaml
+documents = list(yaml.safe_load_all(pathlib.Path('kubernetes/infrastructure/kafka/kafka.yaml').read_text()))
+pool = next(document for document in documents if document['kind'] == 'KafkaNodePool')
+affinity = pool['spec']['template']['pod']['affinity']
+assert 'nodeAffinity' not in affinity
+assert affinity['podAntiAffinity']['preferredDuringSchedulingIgnoredDuringExecution'][0]['podAffinityTerm']['topologyKey'] == 'topology.kubernetes.io/zone'
+assert pool['spec']['replicas'] == 3
+assert pool['spec']['storage'] == {'type': 'persistent-claim', 'size': '250Gi', 'class': 'longhorn-1replica', 'deleteClaim': True}
+print('Verified unrestricted regional placement, zone anti-affinity, three brokers, and unchanged persistent storage.')
+PY
+'''
+
 [tasks.rustfs-manifests-check]
 description = "Parse RustFS manifests and verify the pinned chart renders the expected storage claims"
 run = '''

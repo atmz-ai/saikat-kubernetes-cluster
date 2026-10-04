@@ -1,10 +1,4 @@
-# KafkaNodePool — 3 combined broker+controller nodes (KRaft mode)
-#
-# All brokers pinned to falkenstein nodes (topology.kubernetes.io/region=falkenstein)
-# to colocate with the FSN1 S3 data lake bucket (fsn1.your-objectstorage.com).
-#
-# Pod anti-affinity spreads brokers across different FSN1 datacenter zones
-# so a single DC failure never loses quorum.
+# * Combined broker/controller pool; zone anti-affinity permits cross-region placement.
 #
 # Storage: 250Gi Longhorn PVC per node (1 replica via longhorn-1replica StorageClass)
 #   Kafka provides its own replication (3 brokers, replication.factor=3) which is strictly
@@ -38,14 +32,6 @@ spec:
   template:
     pod:
       affinity:
-        nodeAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            nodeSelectorTerms:
-              - matchExpressions:
-                  - key: topology.kubernetes.io/region
-                    operator: In
-                    values:
-                      - falkenstein
         podAntiAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
             - weight: 100
