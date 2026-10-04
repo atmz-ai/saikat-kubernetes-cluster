@@ -43,6 +43,8 @@ spec:
   externalIPs:
     # ns1 — saikat-azure-central-india-1 (glue record + NS record must match this)
     - 20.219.32.205
+  # ! Azure DNAT delivers port 53 to the private interface address, not the public glue IP.
+  - 172.16.0.4
     # ns4 — saikat-azure-central-india-2 (glue record + NS record must match this)
     - 20.198.74.224
     # ns5 — saikat-azure-central-india-3 (glue record + NS record must match this)
