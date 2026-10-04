@@ -206,6 +206,22 @@
     dest: "{{ pdns_zones_output_dir }}/pdns-service-dns.yaml"
     mode: '0644'
 
+- name: Read the generated DNS Service for validation
+  ansible.builtin.slurp:
+    src: "{{ pdns_zones_output_dir }}/pdns-service-dns.yaml"
+  register: pdns_generated_service
+
+- name: Verify private DNS frontends belong to the Service address list
+  ansible.builtin.assert:
+    that:
+      - hostvars[item.host].powerdns_frontend_address in
+        (pdns_generated_service.content | b64decode | from_yaml).spec.externalIPs
+    fail_msg: "Private DNS frontend for {{ item.host }} is missing from spec.externalIPs."
+  loop: "{{ pdns_nameservers }}"
+  loop_control:
+    label: "{{ item.host }}"
+  when: hostvars[item.host].powerdns_frontend_address is defined
+
 # The seed Job reads this ConfigMap's CONTENT, so a zone change does not alter the
 # Job's pod template — which means no immutable-template error (good) but also no
 # restart. A Completed Job never runs again on its own, so a newly added zone is

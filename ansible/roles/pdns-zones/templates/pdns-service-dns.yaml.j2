@@ -43,8 +43,8 @@ spec:
     # {{ ns.prefix }} — {{ ns.host }} (glue record + NS record must match this)
     - {{ ns.ip }}
 {% if hostvars[ns.host].powerdns_frontend_address is defined %}
-  # ! Azure DNAT delivers port 53 to the private interface address, not the public glue IP.
-  - {{ hostvars[ns.host].powerdns_frontend_address }}
+    # ! Azure DNAT delivers port 53 to the private interface address, not the public glue IP.
+    - {{ hostvars[ns.host].powerdns_frontend_address }}
 {% endif %}
 {% endfor %}
 {% if pdns_nameservers_previous_ips | default([]) | length > 0 %}
