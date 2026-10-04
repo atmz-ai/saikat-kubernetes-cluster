@@ -141,7 +141,7 @@ rush = "latest"
 # TODO(unify-yral-web-toolchain): make local and container agree — either
 # pin the container to stable and drop --hot-reload, or have the yral-web
 # tasks set RUSTUP_TOOLCHAIN=nightly explicitly.
-rust = { version = "stable", targets = [
+"core:rust" = { version = "stable", targets = [
   "wasm32-unknown-unknown",
   "x86_64-unknown-linux-musl",
 ], components = [
@@ -384,6 +384,17 @@ directory = pathlib.Path('kubernetes/infrastructure/rustfs')
 for path in directory.glob('*.yaml'):
   list(yaml.safe_load_all(path.read_text()))
   print(f'Parsed {path}')
+import json
+from jinja2.nativetypes import NativeEnvironment
+template_environment = NativeEnvironment()
+template_environment.filters['from_json'] = json.loads
+removal_tasks = yaml.safe_load(pathlib.Path('ansible/roles/node-remove/tasks/main.yml').read_text())
+storage_guard = next(task for task in removal_tasks if task['name'] == 'Refuse removal of a node with bound RustFS local storage')
+for persistent_volumes in [[], [{'metadata': {'name': 'rustfs-azure-1-disk-0'}}]]:
+  rendered_loop = template_environment.from_string(storage_guard['loop']).render(node_remove_persistent_volumes={'stdout': json.dumps({'items': persistent_volumes})})
+  assert rendered_loop == persistent_volumes
+  assert not callable(rendered_loop)
+print('Verified node-removal storage guard reads JSON items, including an empty list.')
 release = list(yaml.safe_load_all((directory / 'helmrelease.yaml').read_text()))[1]
 with tempfile.TemporaryDirectory() as temporary:
   archive = pathlib.Path(temporary) / 'rustfs.tgz'

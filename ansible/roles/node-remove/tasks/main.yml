@@ -27,7 +27,7 @@
         (item.spec.nodeAffinity.required.nodeSelectorTerms | map(attribute='matchExpressions') | flatten
          | selectattr('key', 'equalto', 'kubernetes.io/hostname') | map(attribute='values') | flatten)
     fail_msg: "{{ item.metadata.name }} still owns RustFS data on {{ target_host }}. Decommission its RustFS pool and retire the PVC through GitOps first."
-  loop: "{{ (node_remove_persistent_volumes.stdout | from_json).items }}"
+  loop: "{{ (node_remove_persistent_volumes.stdout | from_json)['items'] }}"
   loop_control:
     label: "{{ item.metadata.name }}"
   when:
