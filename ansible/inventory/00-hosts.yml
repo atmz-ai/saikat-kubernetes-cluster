@@ -162,21 +162,6 @@ all:
             - hostname: "*.yral.com"
               proxied: false
         # node-6 = stacked CP (was control-plane-5)
-        node-6:
-          ansible_host: 37.27.109.138
-          provider: hetzner
-          node_role: control-plane
-          stacked_control_plane: true
-          datacenter: HEL1-DC7
-          region: helsinki
-          country: fi
-          disk_type: nvme
-          cloudflare_dns_records:
-            - hostname: kubernetes-api.yral.com
-              proxied: false
-            - hostname: "*.yral.com"
-              proxied: false
-        # node-7 = stacked CP (was worker-12)
         node-7:
           ansible_host: 94.130.217.94
           provider: hetzner
