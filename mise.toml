@@ -391,7 +391,7 @@ for affinity, topology_key in [
 ]:
   assert 'nodeAffinity' not in affinity
   assert affinity['podAntiAffinity']['preferredDuringSchedulingIgnoredDuringExecution'][0]['podAffinityTerm']['topologyKey'] == topology_key
-assert 'nodeAffinity' not in bridge['spec']['template']['pod']['affinity']
+assert 'nodeAffinity' not in bridge['spec'].get('template', {}).get('pod', {}).get('affinity', {})
 assert pool['spec']['replicas'] == 3
 assert pool['spec']['storage'] == {'type': 'persistent-claim', 'size': '250Gi', 'class': 'longhorn-1replica', 'deleteClaim': True}
 assert connect['spec']['replicas'] == 2

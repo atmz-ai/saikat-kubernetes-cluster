@@ -82,8 +82,3 @@ spec:
   jvmOptions:
     -Xms: "512m"
     -Xmx: "512m"
-
-  # * Pod scheduling — no region pin; the single replica may run on any node.
-  template:
-    pod:
-      affinity: {}
