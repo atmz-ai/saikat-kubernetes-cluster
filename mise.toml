@@ -375,25 +375,6 @@ run = '''
 description = "Run an Ansible playbook (usage: mise run ansible-playbook -- ansible/playbooks/operations/<playbook>.yml [-e target_host=...])"
 run = "./.venv/bin/ansible-playbook"
 
-[tasks.ansible-collections]
-description = "Install the declared Ansible collections"
-run = "./.venv/bin/ansible-galaxy collection install -r ansible/requirements.yml -p ansible/collections"
-
-[tasks.rustfs-credentials]
-description = "Generate and SOPS-encrypt RustFS credentials without plaintext files"
-run = '''
-./.venv/bin/python - <<'PY'
-import pathlib, secrets, subprocess, yaml
-destination = pathlib.Path('kubernetes/infrastructure/rustfs/credentials.sops.yaml')
-if destination.exists():
-  raise SystemExit('Credentials already exist; refusing rotation.')
-document = {'apiVersion': 'v1', 'kind': 'Secret', 'metadata': {'name': 'rustfs-credentials', 'namespace': 'rustfs'}, 'type': 'Opaque', 'stringData': {'RUSTFS_ACCESS_KEY': secrets.token_hex(12), 'RUSTFS_SECRET_KEY': secrets.token_hex(32)}}
-encrypted = subprocess.run(['sops', '--encrypt', '--filename-override', str(destination), '--encrypted-regex', '^(data|stringData)$', '/dev/stdin'], input=yaml.safe_dump(document), text=True, capture_output=True, check=True)
-destination.write_text(encrypted.stdout)
-print(f'Created encrypted credentials: {destination}')
-PY
-'''
-
 [tasks.rustfs-manifests-check]
 description = "Parse RustFS manifests and verify the pinned chart renders the expected storage claims"
 run = '''
@@ -417,9 +398,10 @@ with tempfile.TemporaryDirectory() as temporary:
   assert statefulset['metadata']['name'] == 'rustfs'
   assert statefulset['spec']['replicas'] == 3
   assert [claim['metadata']['name'] for claim in statefulset['spec']['volumeClaimTemplates']] == ['data']
-  route = yaml.safe_load((directory / 'route.yaml').read_text())
-  backend = route['spec']['rules'][0]['backendRefs'][0]['name']
-  assert any(document and document['kind'] == 'Service' and document['metadata']['name'] == backend for document in documents)
+  for route in yaml.safe_load_all((directory / 'route.yaml').read_text()):
+    for rule in route['spec']['rules']:
+      for backend in rule.get('backendRefs', []):
+        assert any(document and document['kind'] == 'Service' and document['metadata']['name'] == backend['name'] and any(port['port'] == backend['port'] for port in document['spec']['ports']) for document in documents)
   print('Verified three replicas and data-only claims.')
 PY
 '''
