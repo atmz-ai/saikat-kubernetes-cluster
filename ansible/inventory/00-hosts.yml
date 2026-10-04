@@ -97,13 +97,10 @@ all:
         # on the annotated node. Verified: the previous worker-based nameservers answered
         # queries while running no PowerDNS pod at all.
         #
-        # ! The prefixes (ns1..ns10) are NOT renumbered. A prefix is a registry identity:
-        # ! reusing it across the move keeps the domain's NS set byte-identical, so the
-        # ! change is a glue-IP update rather than a registrar-level add/remove.
-        #
-        # ! There is no glue-record delete path in the namecheap-dns role, so a prefix that
-        # ! simply disappears from this file would linger at the registrar and in the zone
-        # ! forever. Remove one by re-pointing it, or add a delete task first.
+        # ! The desired delegation is ns1/ns4/ns5 on Azure. Retired glue registrations
+        # ! are not active delegation members after setCustom replaces the parent NS set.
+        # ! Keep outgoing addresses reachable via pdns_nameservers_previous_ips until
+        # ! the parent delegation cache window expires; only then remove their hosts.
         # node-1 = stacked CP (was control-plane-2)
         node-1:
           ansible_host: 65.21.137.111
@@ -114,7 +111,6 @@ all:
           region: helsinki
           country: fi
           disk_type: nvme
-          namecheap_nameserver: "ns1"
           cloudflare_dns_records:
             - hostname: kubernetes-api.yral.com
               proxied: false
@@ -130,7 +126,6 @@ all:
           region: falkenstein
           country: de
           disk_type: nvme
-          namecheap_nameserver: "ns4"
           cloudflare_dns_records:
             - hostname: kubernetes-api.yral.com
               proxied: false
@@ -146,7 +141,6 @@ all:
           region: helsinki
           country: fi
           disk_type: nvme
-          namecheap_nameserver: "ns5"
           cloudflare_dns_records:
             - hostname: kubernetes-api.yral.com
               proxied: false
@@ -162,7 +156,6 @@ all:
           region: helsinki
           country: fi
           disk_type: nvme
-          namecheap_nameserver: "ns8"
           cloudflare_dns_records:
             - hostname: kubernetes-api.yral.com
               proxied: false
@@ -178,7 +171,6 @@ all:
           region: helsinki
           country: fi
           disk_type: nvme
-          namecheap_nameserver: "ns9"
           cloudflare_dns_records:
             - hostname: kubernetes-api.yral.com
               proxied: false
@@ -194,7 +186,6 @@ all:
           region: helsinki
           country: fi
           disk_type: nvme
-          namecheap_nameserver: "ns10"
           cloudflare_dns_records:
             - hostname: kubernetes-api.yral.com
               proxied: false
@@ -245,6 +236,7 @@ all:
         # Enable a node here only after its join succeeded and etcd is healthy with it.
         saikat-azure-central-india-1:
           ansible_host: 20.219.32.205
+          namecheap_nameserver: "ns1"
           ansible_user: saikat-machine-access
           provider: azure
           node_role: control-plane
@@ -253,6 +245,7 @@ all:
           provider_zone: "1"
         saikat-azure-central-india-2:
           ansible_host: 20.198.74.224
+          namecheap_nameserver: "ns4"
           ansible_user: saikat-machine-access
           provider: azure
           node_role: control-plane
@@ -261,6 +254,7 @@ all:
           provider_zone: "2"
         saikat-azure-central-india-3:
           ansible_host: 20.235.109.17
+          namecheap_nameserver: "ns5"
           ansible_user: saikat-machine-access
           provider: azure
           node_role: control-plane

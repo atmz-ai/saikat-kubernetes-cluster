@@ -153,7 +153,15 @@ pdns_zones:
 # ! names those addresses. It is a transition aid, not a permanent second address set: the
 # ! glue records and the zone's NS set must converge on the current nameserver nodes, or the
 # ! delegation re-anchors on nodes being decommissioned.
-pdns_nameservers_previous_ips: []
+# ! Keep these hosts online until both parent delegations have converged and the
+# ! .dev 10800-second / .ai 3600-second cache windows have expired after cutover.
+pdns_nameservers_previous_ips:
+  - 65.21.137.111
+  - 167.235.115.50
+  - 95.216.228.60
+  - 95.217.58.83
+  - 65.108.76.154
+  - 37.27.109.138
 
 # ── NO vSwitch / VLAN / Kilo mesh configuration ──────────────────────────────
 # All of this was removed on 2026-09-29, together with Kilo itself, because CILIUM

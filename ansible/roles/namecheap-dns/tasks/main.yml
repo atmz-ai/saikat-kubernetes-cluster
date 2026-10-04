@@ -12,8 +12,7 @@
 # ! node and are the more stable set — a better home for a nameserver delegation than a
 # ! fleet of workers that is being torn down.
 #
-# The setCustom call (setting the domain's NS records) runs only once — on the
-# first host in the play — to avoid duplicate API calls.
+# ! setCustom runs on the last host after serial glue updates complete.
 #
 # Idempotent: checks existing state before making changes.
 #
@@ -112,15 +111,17 @@
   ansible.builtin.include_tasks: manage_glue_record.yml
   when: namecheap_nameserver is defined
 
-- name: Build desired nameserver list (run once on first host)
+- name: Build desired nameserver list after every host's glue record is reconciled
+  # ! With serial: 1, the first host runs before later hosts update their glue.
+  # ! ansible_play_hosts_all preserves the complete inventory-selected delegation.
   ansible.builtin.set_fact:
-    namecheap_desired_ns: "{{ ansible_play_hosts | map('extract', hostvars, 'namecheap_nameserver') | select('defined') | list }}"
-  when: inventory_hostname == ansible_play_hosts[0]
+    namecheap_desired_ns: "{{ ansible_play_hosts_all | map('extract', hostvars, 'namecheap_nameserver') | select('defined') | list }}"
+  when: inventory_hostname == ansible_play_hosts_all[-1]
 
-- name: Append domain suffix to nameserver prefixes (run once on first host)
+- name: Append domain suffix to nameserver prefixes
   ansible.builtin.set_fact:
     namecheap_desired_ns: "{{ namecheap_desired_ns | map('regex_replace', '^(.+)$', '\\1.' + namecheap_domain_sld + '.' + namecheap_domain_tld) | list }}"
-  when: inventory_hostname == ansible_play_hosts[0]
+  when: inventory_hostname == ansible_play_hosts_all[-1]
 
 - name: Set custom nameservers (run once, if different from current)
   ansible.builtin.uri:
@@ -134,20 +135,30 @@
   delegate_to: "{{ namecheap_delegate_host }}"
   register: namecheap_set_ns_result
   when:
-    - inventory_hostname == ansible_play_hosts[0]
+    - inventory_hostname == ansible_play_hosts_all[-1]
     - namecheap_existing_ns | sort != namecheap_desired_ns | sort
   changed_when: true
+
+- name: Verify Namecheap accepted the delegation change
+  ansible.builtin.assert:
+    that:
+      - namecheap_set_ns_result.content is search('Status="OK"')
+      - namecheap_set_ns_result.content is search('Updated="true"')
+    fail_msg: "{{ namecheap_set_ns_result.content }}"
+  when:
+    - inventory_hostname == ansible_play_hosts_all[-1]
+    - namecheap_existing_ns | sort != namecheap_desired_ns | sort
 
 - name: Display setCustom result
   ansible.builtin.debug:
     msg: "Nameservers updated to: {{ namecheap_desired_ns | join(', ') }}"
   when:
-    - inventory_hostname == ansible_play_hosts[0]
+    - inventory_hostname == ansible_play_hosts_all[-1]
     - namecheap_existing_ns | sort != namecheap_desired_ns | sort
 
 - name: Confirm nameservers already up to date
   ansible.builtin.debug:
     msg: "Nameservers already up to date: {{ namecheap_existing_ns | join(', ') }}"
   when:
-    - inventory_hostname == ansible_play_hosts[0]
+    - inventory_hostname == ansible_play_hosts_all[-1]
     - namecheap_existing_ns | sort == namecheap_desired_ns | sort

@@ -41,17 +41,23 @@ metadata:
 spec:
   type: LoadBalancer
   externalIPs:
-    # ns1 — node-1 (glue record + NS record must match this)
+    # ns1 — saikat-azure-central-india-1 (glue record + NS record must match this)
+    - 20.219.32.205
+    # ns4 — saikat-azure-central-india-2 (glue record + NS record must match this)
+    - 20.198.74.224
+    # ns5 — saikat-azure-central-india-3 (glue record + NS record must match this)
+    - 20.235.109.17
+    # ── TRANSITION ONLY — addresses from the previous nameserver set ──────────
+    # Kept bound so resolvers still holding the cached delegation reach a live nameserver.
+    # Nothing else references these (not the glue records, not the zone's NS set), so the
+    # delegation converges to the current set above and these can be dropped once the
+    # delegation TTL has expired everywhere. See pdns_nameservers_previous_ips for the
+    # removal condition and why an early removal fails silently.
     - 65.21.137.111
-    # ns4 — node-2 (glue record + NS record must match this)
     - 167.235.115.50
-    # ns5 — node-3 (glue record + NS record must match this)
     - 95.216.228.60
-    # ns8 — node-4 (glue record + NS record must match this)
     - 95.217.58.83
-    # ns9 — node-5 (glue record + NS record must match this)
     - 65.108.76.154
-    # ns10 — node-6 (glue record + NS record must match this)
     - 37.27.109.138
   ports:
     - name: dns-udp
