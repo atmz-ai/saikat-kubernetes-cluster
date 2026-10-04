@@ -47,6 +47,8 @@ spec:
     - 172.16.0.4
     # ns4 — saikat-azure-central-india-2 (glue record + NS record must match this)
     - 20.198.74.224
+    # ! Azure DNAT delivers port 53 to the private interface address, not the public glue IP.
+    - 172.16.0.5
     # ns5 — saikat-azure-central-india-3 (glue record + NS record must match this)
     - 20.235.109.17
     # ── TRANSITION ONLY — addresses from the previous nameserver set ──────────
