@@ -1,0 +1,98 @@
+---
+- name: Inspect the declared disk and its children
+  ansible.builtin.command:
+    argv: [lsblk, --json, --paths, --output, "NAME,TYPE,FSTYPE,MOUNTPOINTS", "{{ rustfs_data_disk.device }}"]
+  register: rustfs_disk_inspection
+  changed_when: false
+
+- name: Refuse partitioned disks or disks mounted for other workloads
+  ansible.builtin.assert:
+    that:
+      - rustfs_disk.type == 'disk'
+      - rustfs_disk.children | default([]) | length == 0
+      - rustfs_disk.fstype is none or rustfs_disk.fstype == 'xfs'
+      - rustfs_disk.mountpoints | reject('equalto', none) | reject('equalto', rustfs_data_disk.mount_path) | list | length == 0
+    fail_msg: "Refusing RustFS preparation on an occupied or unexpected disk: {{ rustfs_disk }}"
+  vars:
+    rustfs_disk: "{{ (rustfs_disk_inspection.stdout | from_json).blockdevices[0] }}"
+
+- name: Inspect disk signatures without modifying them
+  ansible.builtin.command:
+    argv: [wipefs, --no-act, --json, "{{ rustfs_data_disk.device }}"]
+  register: rustfs_disk_signatures
+  changed_when: false
+
+- name: Refuse unknown or non-XFS signatures
+  ansible.builtin.assert:
+    that:
+      - (rustfs_disk_signatures.stdout | from_json).signatures | rejectattr('type', 'equalto', 'xfs') | list | length == 0
+    fail_msg: "Disk contains non-XFS signatures; no formatting will be performed."
+
+- name: Inspect the mount directory before mounting over it
+  ansible.builtin.stat:
+    path: "{{ rustfs_data_disk.mount_path }}"
+  register: rustfs_mount_directory
+
+- name: Refuse to hide files in an unmounted directory
+  when:
+    - rustfs_mount_directory.stat.exists
+    - rustfs_data_disk.mount_path not in (rustfs_disk_inspection.stdout | from_json).blockdevices[0].mountpoints
+  block:
+    - name: Check mount directory contents
+      ansible.builtin.command:
+        argv: [ls, -A, "{{ rustfs_data_disk.mount_path }}"]
+      register: rustfs_unmounted_contents
+      changed_when: false
+
+    - name: Require an empty mount directory
+      ansible.builtin.assert:
+        that: rustfs_unmounted_contents.stdout | length == 0
+        fail_msg: "Refusing to mount over existing files at {{ rustfs_data_disk.mount_path }}."
+
+- name: Ensure XFS tooling is installed declaratively
+  ansible.builtin.package:
+    name: xfsprogs
+    state: present
+
+- name: Create XFS only if no filesystem exists
+  community.general.filesystem:
+    dev: "{{ rustfs_data_disk.device }}"
+    fstype: xfs
+
+- name: Read the persistent filesystem identity
+  ansible.builtin.command:
+    argv: [blkid, -s, UUID, -o, value, "{{ rustfs_data_disk.device }}"]
+  register: rustfs_filesystem_identity
+  changed_when: false
+
+- name: Require a filesystem UUID
+  ansible.builtin.assert:
+    that: rustfs_filesystem_identity.stdout | trim | length > 0
+
+- name: Mount the dedicated disk persistently by UUID
+  ansible.posix.mount:
+    path: "{{ rustfs_data_disk.mount_path }}"
+    src: "UUID={{ rustfs_filesystem_identity.stdout | trim }}"
+    fstype: xfs
+    opts: defaults,noatime
+    state: mounted
+
+- name: Grant the RustFS container ownership of its data mount
+  ansible.builtin.file:
+    path: "{{ rustfs_data_disk.mount_path }}"
+    state: directory
+    owner: "10001"
+    group: "10001"
+    mode: "0750"
+
+- name: Verify the exact mount and filesystem
+  ansible.builtin.command:
+    argv: [findmnt, --json, --mountpoint, "{{ rustfs_data_disk.mount_path }}", --output, "TARGET,FSTYPE,UUID"]
+  register: rustfs_verified_mount
+  changed_when: false
+
+- name: Require the expected XFS filesystem identity
+  ansible.builtin.assert:
+    that:
+      - (rustfs_verified_mount.stdout | from_json).filesystems[0].fstype == 'xfs'
+      - (rustfs_verified_mount.stdout | from_json).filesystems[0].uuid == rustfs_filesystem_identity.stdout | trim

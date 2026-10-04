@@ -1,0 +1,59 @@
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: rustfs
+  namespace: rustfs
+spec:
+  interval: 1h
+  url: https://charts.rustfs.com
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: rustfs
+  namespace: rustfs
+spec:
+  interval: 30m
+  timeout: 10m
+  chart:
+    spec:
+      chart: rustfs
+      version: "1.0.1"
+      sourceRef:
+        kind: HelmRepository
+        name: rustfs
+        namespace: rustfs
+  values:
+    fullnameOverride: rustfs
+    replicaCount: 3
+    drivesPerNode: 1
+    image:
+      rustfs:
+        tag: "1.0.1"
+    ingress:
+      enabled: false
+    secret:
+      existingSecret: rustfs-credentials
+    localEndpointHost:
+      autoInject: true
+    config:
+      rustfs:
+        # ! No log PVC: dedicated data claims must not be consumed by log volumes.
+        obs_log_directory: ""
+        obs_environment: production
+    storageclass:
+      name: rustfs-local
+      dataStorageSize: 31Ti
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - key: kubernetes.io/hostname
+                  operator: In
+                  values:
+                    - saikat-azure-central-india-1
+                    - saikat-azure-central-india-2
+                    - saikat-azure-central-india-3
+    pdb:
+      create: true

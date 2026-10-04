@@ -43,6 +43,7 @@
     - role: provision
       when: provider | default('hetzner') == 'hetzner'
     - role: storage-longhorn
+    - role: storage-rustfs
     # Skipped on a cloud VM: the image already satisfies this role's entire intent, and
     # its one real effect there would be flipping UsePAM yes -> no, which buys nothing
     # (password auth is already off) and carries the documented risk of breaking

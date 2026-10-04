@@ -73,7 +73,9 @@
          else 'Only one drive detected. Skipping btrfs expansion.' }}
 
 - name: Expand btrfs when multiple drives and root is btrfs
-  when: has_multiple_drives
+  when:
+    - has_multiple_drives
+    - provider | default('hetzner') == 'hetzner'
   block:
     - name: Check if root filesystem is btrfs
       ansible.builtin.shell: |

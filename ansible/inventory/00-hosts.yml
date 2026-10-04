@@ -191,6 +191,9 @@ all:
         # Enable a node here only after its join succeeded and etcd is healthy with it.
         saikat-azure-central-india-1:
           ansible_host: 20.219.32.205
+          rustfs_data_disks:
+            - device: /dev/disk/azure/data/by-lun/0
+              mount_path: /var/lib/rustfs/data/disk-0
           namecheap_nameserver: "ns1"
           powerdns_frontend_address: 172.16.0.4
           ansible_user: saikat-machine-access
@@ -201,6 +204,9 @@ all:
           provider_zone: "1"
         saikat-azure-central-india-2:
           ansible_host: 20.198.74.224
+          rustfs_data_disks:
+            - device: /dev/disk/azure/data/by-lun/0
+              mount_path: /var/lib/rustfs/data/disk-0
           namecheap_nameserver: "ns4"
           powerdns_frontend_address: 172.16.0.5
           ansible_user: saikat-machine-access
@@ -211,6 +217,9 @@ all:
           provider_zone: "2"
         saikat-azure-central-india-3:
           ansible_host: 20.235.109.17
+          rustfs_data_disks:
+            - device: /dev/disk/azure/data/by-lun/0
+              mount_path: /var/lib/rustfs/data/disk-0
           namecheap_nameserver: "ns5"
           powerdns_frontend_address: 172.16.0.6
           ansible_user: saikat-machine-access

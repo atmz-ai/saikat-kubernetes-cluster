@@ -13,7 +13,29 @@
     success_msg: "Host {{ target_host }} found in inventory"
   run_once: true
 
-- name: Determine node type
+- name: Inspect persistent volumes before node removal
+  # ! RustFS local disks cannot be evacuated through Longhorn replica eviction.
+  ansible.builtin.command: kubectl get persistentvolumes -o json
+  delegate_to: localhost
+  register: node_remove_persistent_volumes
+  changed_when: false
+
+- name: Refuse removal of a node with bound RustFS local storage
+  ansible.builtin.assert:
+    that:
+      - hostvars[target_host].k8s_node_name | default(target_host) not in
+        (item.spec.nodeAffinity.required.nodeSelectorTerms | map(attribute='matchExpressions') | flatten
+         | selectattr('key', 'equalto', 'kubernetes.io/hostname') | map(attribute='values') | flatten)
+    fail_msg: "{{ item.metadata.name }} still owns RustFS data on {{ target_host }}. Decommission its RustFS pool and retire the PVC through GitOps first."
+  loop: "{{ (node_remove_persistent_volumes.stdout | from_json).items }}"
+  loop_control:
+    label: "{{ item.metadata.name }}"
+  when:
+    - item.spec.local is defined
+    - item.status.phase == 'Bound'
+    - item.spec.claimRef.namespace | default('') == 'rustfs'
+
+- name: Determine node type for removal
   ansible.builtin.set_fact:
     is_control_plane: "{{ target_host in groups['control_plane'] }}"
   run_once: true

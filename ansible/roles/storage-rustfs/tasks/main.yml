@@ -1,0 +1,14 @@
+---
+- name: Require unique RustFS disk devices and mount paths
+  ansible.builtin.assert:
+    that:
+      - rustfs_data_disks | map(attribute='device') | unique | list | length == rustfs_data_disks | length
+      - rustfs_data_disks | map(attribute='mount_path') | unique | list | length == rustfs_data_disks | length
+  when: rustfs_data_disks is defined
+
+- name: Prepare declared RustFS disks one at a time
+  ansible.builtin.include_tasks: prepare-disk.yml
+  loop: "{{ rustfs_data_disks | default([]) }}"
+  loop_control:
+    loop_var: rustfs_data_disk
+    label: "{{ rustfs_data_disk.device }} -> {{ rustfs_data_disk.mount_path }}"

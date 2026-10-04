@@ -41,6 +41,7 @@ resources:
   - infrastructure-nginx.yaml
   - infrastructure-oauth2-proxy.yaml
   - infrastructure-reloader.yaml
+  - infrastructure-rustfs.yaml
   - infrastructure-shipwright.yaml
   - infrastructure-snowplow.yaml
   - infrastructure-strimzi.yaml
