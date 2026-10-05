@@ -1,11 +1,4 @@
-# off-chain-agent HTTPRoute
-#
-# Exposes the off-chain-agent REST API service at offchain.yral.com.
-#
-# TLS is terminated by the Cilium Gateway (web-gateway in kube-system)
-# using the wildcard *.yral.com certificate.
-# The ReferenceGrant in the off-chain-agent namespace allows this HTTPRoute
-# to reference off-chain-agent:50051 as a backend.
+# * Cross-namespace backend access is granted by off-chain-agent/reference-grant.yaml.
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -18,7 +11,7 @@ spec:
       namespace: kube-system
       sectionName: http
   hostnames:
-    - offchain.yral.com
+    - offchain.saikat.oleole.ai
   rules:
     - filters:
         - type: RequestRedirect
@@ -35,9 +28,9 @@ spec:
   parentRefs:
     - name: web-gateway
       namespace: kube-system
-      sectionName: https
+      sectionName: https-off-chain-agent
   hostnames:
-    - offchain.yral.com
+    - offchain.saikat.oleole.ai
   rules:
     - backendRefs:
         - name: off-chain-agent

@@ -1,80 +1,18 @@
-#![recursion_limit = "256"]
-
 use anyhow::Result;
-use axum::extract::DefaultBodyLimit;
 use axum::http::StatusCode;
 use axum::{routing::get, Router};
-use std::net::SocketAddr;
-use std::sync::Arc;
-use tower::make::Shared;
-use tower_http::cors::CorsLayer;
-use tracing::instrument;
-use utoipa::OpenApi;
-use utoipa_axum::router::OpenApiRouter;
-use utoipa_swagger_ui::SwaggerUi;
 
-mod app_state;
-mod auth;
-mod middleware;
-mod posts;
-mod spacetime;
-mod types;
-pub mod user;
-pub mod utils;
-
-use app_state::AppState;
-
-async fn main_impl() -> Result<()> {
-    #[derive(OpenApi)]
-    #[openapi(
-        tags(
-            (name = "OFF_CHAIN", description = "Off Chain Agent API"),
-        )
-    )]
-    struct ApiDoc;
-
-    let shared_state = Arc::new(AppState::new().await);
-
-    let router = OpenApiRouter::with_openapi(ApiDoc::openapi())
-        .nest("/api/v1/posts", posts::posts_router(shared_state.clone()))
-        .nest("/api/v1/user", user::user_router(shared_state.clone()))
-        .nest(
-            "/api/v2/posts",
-            posts::posts_router_v2(shared_state.clone()),
-        );
-
-    let (router, api) = router.split_for_parts();
-
-    let router =
-        router.merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", api.clone()));
-
-    // build our application with a route
-    let http = Router::new()
-        .route("/healthz", get(health_handler))
-        .fallback_service(router)
-        .layer(DefaultBodyLimit::max(50 * 1024 * 1024)) // 50MB limit
-        .layer(CorsLayer::permissive())
-        .layer(axum::middleware::from_fn(
-            crate::middleware::http_logging_middleware,
-        ))
-        .with_state(shared_state.clone());
-
-    // run it
-    let addr = SocketAddr::from(([0, 0, 0, 0, 0, 0, 0, 0], 50051));
-    let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
-    log::info!("listening on {addr}");
-
-    axum::serve(listener, Shared::new(http)).await.unwrap();
-
+async fn main_impl(listener: tokio::net::TcpListener) -> Result<()> {
+    tracing::info!(address = %listener.local_addr()?, "listening");
+    axum::serve(
+        listener,
+        Router::new().route("/healthz", get(health_handler)),
+    )
+    .await?;
     Ok(())
 }
 
 fn main() {
-    // Initialize the rustls crypto provider
-    rustls::crypto::ring::default_provider()
-        .install_default()
-        .expect("Failed to install rustls crypto provider");
-
     setup_tracing_subscriber();
 
     tokio::runtime::Builder::new_multi_thread()
@@ -82,7 +20,8 @@ fn main() {
         .build()
         .unwrap()
         .block_on(async {
-            main_impl().await.unwrap();
+            let listener = tokio::net::TcpListener::bind("[::]:50051").await.unwrap();
+            main_impl(listener).await.unwrap();
         });
 }
 
@@ -100,7 +39,44 @@ fn setup_tracing_subscriber() {
         .init();
 }
 
-#[instrument]
 async fn health_handler() -> (StatusCode, &'static str) {
     (StatusCode::OK, "OK")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn health_is_available_and_legacy_endpoints_return_not_found() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(main_impl(listener));
+        let client = reqwest::Client::new();
+        let response = client
+            .get(format!("http://{address}/healthz"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.text().await.unwrap(), "OK");
+        for (method, path) in [
+            (reqwest::Method::DELETE, "/api/v1/posts"),
+            (reqwest::Method::DELETE, "/api/v2/posts"),
+            (reqwest::Method::DELETE, "/api/v1/user"),
+            (reqwest::Method::POST, "/api/v1/user/follow"),
+            (reqwest::Method::POST, "/api/v1/user/follow-notification"),
+            (reqwest::Method::GET, "/api-docs/openapi.json"),
+            (reqwest::Method::GET, "/swagger-ui"),
+        ] {
+            let response = client
+                .request(method, format!("http://{address}{path}"))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
+        }
+        server.abort();
+        assert!(server.await.unwrap_err().is_cancelled());
+    }
 }

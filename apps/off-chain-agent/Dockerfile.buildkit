@@ -14,6 +14,6 @@ RUN cargo build --release --target x86_64-unknown-linux-musl -p off-chain-agent
 FROM scratch
 WORKDIR /app
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
-COPY --from=builder /app/target/x86_64-unknown-linux-musl/release/icp-off-chain-agent .
+COPY --from=builder /app/target/x86_64-unknown-linux-musl/release/off-chain-agent .
 EXPOSE 50051
-CMD ["./icp-off-chain-agent"]
+CMD ["./off-chain-agent"]

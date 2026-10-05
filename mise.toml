@@ -2008,9 +2008,9 @@ fi
 [daemons.off-chain-agent]
 run = '''
 if [[ "$(uname)" == "Darwin" ]]; then
-  exec fnox exec -- ../../target/release/icp-off-chain-agent
+  exec ../../target/release/off-chain-agent
 else
-  exec fnox exec -- ../../target/x86_64-unknown-linux-musl/release/icp-off-chain-agent
+  exec ../../target/x86_64-unknown-linux-musl/release/off-chain-agent
 fi
 '''
 dir = "apps/off-chain-agent"
@@ -2021,16 +2021,12 @@ stop_signal = "SIGINT"
 # Build first with: mise run off-chain-agent-image
 
 [daemons.off-chain-agent-container]
-depends = ["container-system-start"]
 run = '''
-exec fnox exec -- podman run --rm \
-  -e APP_ENV -e RUST_LOG \
-  -e OFF_CHAIN_AGENT_URL \
-  -e SPACETIMEDB_URL -e SPACETIMEDB_DB_NAME -e SPACETIMEDB_ADMIN_TOKEN \
-  -e JWT_PUB_EC_PEM \
-  -e GRPC_AUTH_TOKEN \
-  -e NAITIK_MULTI_SERVICE_API_JWT_TOKEN \
-  -p 50051:50051 test/off-chain-agent
+if [[ "$(uname)" == "Darwin" ]]; then
+  exec container run --rm --platform linux/amd64 -p 50051:50051 test/off-chain-agent
+else
+  exec podman run --rm -p 50051:50051 test/off-chain-agent
+fi
 '''
 dir = "apps/off-chain-agent"
 ready_http = "http://localhost:50051/healthz"
