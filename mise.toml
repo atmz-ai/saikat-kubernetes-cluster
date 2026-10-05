@@ -375,6 +375,25 @@ run = '''
 description = "Run an Ansible playbook (usage: mise run ansible-playbook -- ansible/playbooks/operations/<playbook>.yml [-e target_host=...])"
 run = "./.venv/bin/ansible-playbook"
 
+[tasks.trino-retirement-check]
+description = "Build the Trino retirement manifests and reject storage declarations"
+run = '''
+./.venv/bin/python - <<'PY'
+import subprocess, yaml
+rendered = subprocess.run(['kubectl', 'kustomize', 'kubernetes/infrastructure/trino'], check=True, capture_output=True, text=True)
+print(rendered.stdout)
+documents = [document for document in yaml.safe_load_all(rendered.stdout) if document]
+assert all(document['kind'] in ['Namespace', 'HelmRelease'] for document in documents)
+for document in documents:
+  assert document['metadata']['name'] == 'trino'
+  if document['kind'] == 'HelmRelease':
+    assert document['spec']['suspend'] is True
+    assert document['spec']['chart']['spec']['version'] == '1.42.1'
+subprocess.run(['kubectl', 'kustomize', 'kubernetes/clusters/yral-k8s'], check=True)
+print('Verified suspended adoption or retirement without storage declarations.')
+PY
+'''
+
 [tasks.kafka-manifests-check]
 description = "Validate Kafka, Connect, and Bridge placement and preserve replica counts and persistent storage"
 run = '''
