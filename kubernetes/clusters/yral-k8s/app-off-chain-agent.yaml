@@ -4,6 +4,7 @@ metadata:
   name: app-off-chain-agent
   namespace: flux-system
 spec:
+  suspend: true
   interval: 1h
   path: ./kubernetes/apps/off-chain-agent
   prune: true
