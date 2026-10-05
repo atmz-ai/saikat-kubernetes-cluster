@@ -1,0 +1,44 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: off-chain-agent
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageRepository
+metadata:
+  name: off-chain-agent
+  namespace: flux-system
+  annotations:
+    kustomize.toolkit.fluxcd.io/ssa: Merge
+spec:
+  suspend: true
+  image: harbor.yral.com/off-chain-agent/off-chain-agent
+  interval: 1m
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImagePolicy
+metadata:
+  name: off-chain-agent
+  namespace: flux-system
+  annotations:
+    kustomize.toolkit.fluxcd.io/ssa: Merge
+spec:
+  imageRepositoryRef:
+    name: off-chain-agent
+  policy:
+    alphabetical:
+      order: asc
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageUpdateAutomation
+metadata:
+  name: off-chain-agent
+  namespace: flux-system
+  annotations:
+    kustomize.toolkit.fluxcd.io/ssa: Merge
+spec:
+  suspend: true
+  interval: 1m
+  sourceRef:
+    kind: GitRepository
+    name: flux-system

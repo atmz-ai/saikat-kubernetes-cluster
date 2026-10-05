@@ -51,4 +51,4 @@ resources:
   - infrastructure-uptime-kuma.yaml
   - infrastructure-velero.yaml
   - networking.yaml
-
+  - offchain-retirement.yaml
