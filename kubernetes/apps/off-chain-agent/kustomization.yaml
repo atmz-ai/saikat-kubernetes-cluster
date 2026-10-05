@@ -14,5 +14,4 @@ resources:
   - image-repository.yaml
   - image-policy.yaml
   - image-update-automation.yaml
-  - tekton-trigger.yaml
   # harbor-scan-secret is NOT included — defined once in yral-auth, shared across apps

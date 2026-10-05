@@ -19,8 +19,6 @@ resources:
   - yral-web-build.yaml
   - yral-metadata.yaml
   - yral-metadata-build.yaml
-  - off-chain-agent.yaml
-  - off-chain-agent-build.yaml
   - my-website.yaml
   - my-website-build.yaml
   - uptime-kuma.yaml

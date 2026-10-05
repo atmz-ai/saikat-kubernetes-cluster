@@ -4,6 +4,7 @@ metadata:
   name: off-chain-agent
   namespace: flux-system
 spec:
+  suspend: true
   interval: 1m
   sourceRef:
     kind: GitRepository
