@@ -102,21 +102,6 @@ all:
         # ! Keep outgoing addresses reachable via pdns_nameservers_previous_ips until
         # ! the parent delegation cache window expires; only then remove their hosts.
         # node-1 = stacked CP (was control-plane-2)
-        node-5:
-          ansible_host: 65.108.76.154
-          provider: hetzner
-          node_role: control-plane
-          stacked_control_plane: true
-          datacenter: HEL1-DC6
-          region: helsinki
-          country: fi
-          disk_type: nvme
-          cloudflare_dns_records:
-            - hostname: kubernetes-api.yral.com
-              proxied: false
-            - hostname: "*.yral.com"
-              proxied: false
-        # node-6 = stacked CP (was control-plane-5)
 
         # ── Azure control plane ───────────────────────────────────────
         #
@@ -133,7 +118,9 @@ all:
         # Azure nodes are reached as `saikat-machine-access`, NOT root: Azure
         # reserves the root account on its Ubuntu images and sshd refuses root
         # connections outright ("Please login as the user ... rather than the user
-        # root"). The account has passwordless sudo.
+        # root"). The account has passwordless sudo, so `ansible_become: true` is
+        # set per host — delegated cluster administration (kubectl, ctr) then runs
+        # as root and finds /etc/kubernetes/admin.conf.
         #
         # There is no `private_address`: the NAT'd eth0 address is not routable by
         # peers, so `ansible_host` (public) is this node's cluster identity — the
@@ -153,6 +140,7 @@ all:
           namecheap_nameserver: "ns1"
           powerdns_frontend_address: 172.16.0.4
           ansible_user: saikat-machine-access
+          ansible_become: true
           provider: azure
           node_role: control-plane
           stacked_control_plane: true
@@ -166,6 +154,7 @@ all:
           namecheap_nameserver: "ns4"
           powerdns_frontend_address: 172.16.0.5
           ansible_user: saikat-machine-access
+          ansible_become: true
           provider: azure
           node_role: control-plane
           stacked_control_plane: true
@@ -179,6 +168,7 @@ all:
           namecheap_nameserver: "ns5"
           powerdns_frontend_address: 172.16.0.6
           ansible_user: saikat-machine-access
+          ansible_become: true
           provider: azure
           node_role: control-plane
           stacked_control_plane: true

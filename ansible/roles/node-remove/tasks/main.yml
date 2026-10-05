@@ -393,6 +393,7 @@
       --key=/etc/kubernetes/pki/etcd/server.key 2>/dev/null \
       | grep "{{ node_remove_k8s_name }}" | cut -d, -f1
   delegate_to: "{{ etcd_delegate | default(groups['control_plane'][0]) }}"
+  become: true
   register: etcd_member_id
   when: is_control_plane
   failed_when: false
@@ -414,6 +415,7 @@
       --cert=/etc/kubernetes/pki/etcd/server.crt \
       --key=/etc/kubernetes/pki/etcd/server.key
   delegate_to: "{{ etcd_delegate | default(groups['control_plane'][0]) }}"
+  become: true
   when:
     - is_control_plane
     - etcd_member_id.stdout | trim != ""
@@ -674,6 +676,7 @@
       --key=/etc/kubernetes/pki/etcd/server.key \
       --cluster
   delegate_to: "{{ etcd_delegate | default(groups['control_plane'][0]) }}"
+  become: true
   register: etcd_health
   when: is_control_plane
   changed_when: false
