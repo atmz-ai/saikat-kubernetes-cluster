@@ -2,7 +2,6 @@
 resolver = "3"
 members = [
   "apps/my-website",
-  "apps/off-chain-agent",
   "apps/yral-auth",
   "apps/yral-database-spacetime",
   "apps/yral-database-spacetime/bindings",

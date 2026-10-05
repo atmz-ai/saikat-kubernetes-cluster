@@ -51,5 +51,4 @@ git submodule update --init --recursive
 | `apps/yral-auth/`               | `auth.yral.com`                                             |
 | `apps/yral-web/`             | `legacy.yral.com`                                           |
 | `apps/yral-metadata/`           | `metadata.yral.com`                                         |
-| `apps/off-chain-agent/`         | `offchain.yral.com`                                         |
 | `apps/yral-database-spacetime/` | Workspace member (root Cargo.toml)                          || `apps/yral-ios/`                | App Store / TestFlight (`com.yral.iosApp`)                  |

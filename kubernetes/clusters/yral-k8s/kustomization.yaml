@@ -12,7 +12,6 @@ resources:
   - flux-system/
   - app-dashboard.yaml
   - app-my-website.yaml
-  - app-off-chain-agent.yaml
   - app-yral-auth.yaml
   - app-yral-metadata.yaml
   - app-yral-web.yaml
