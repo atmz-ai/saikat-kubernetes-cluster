@@ -1,0 +1,190 @@
+---
+- name: Require a locally supplied PocketBase administrative password
+  ansible.builtin.assert:
+    that:
+      - lookup('ansible.builtin.env', 'BESZEL_SUPERUSER_PASSWORD') | length > 0
+    fail_msg: Set BESZEL_SUPERUSER_PASSWORD privately in the terminal before running this playbook.
+  no_log: true
+
+- name: Read the shared Google OAuth credentials
+  ansible.builtin.command:
+    cmd: kubectl get secret rustfs-google-oauth -n rustfs -o json
+  register: beszel_auth_google_secret
+  changed_when: false
+  no_log: true
+
+- name: Discover the Beszel service address
+  ansible.builtin.command:
+    cmd: kubectl get service beszel -n beszel -o json
+  register: beszel_auth_service
+  changed_when: false
+
+- name: Authenticate the existing PocketBase administrator
+  ansible.builtin.uri:
+    url: "{{ beszel_auth_service_url }}/api/collections/_superusers/auth-with-password"
+    method: POST
+    body_format: json
+    body:
+      identity: "{{ beszel_auth_superuser_email }}"
+      password: "{{ lookup('ansible.builtin.env', 'BESZEL_SUPERUSER_PASSWORD') }}"
+    return_content: true
+  delegate_to: "{{ beszel_auth_delegate }}"
+  register: beszel_auth_session
+  no_log: true
+
+- name: Read the current users collection configuration
+  ansible.builtin.uri:
+    url: "{{ beszel_auth_service_url }}/api/collections/users"
+    headers:
+      Authorization: "{{ beszel_auth_session.json.token }}"
+    return_content: true
+  delegate_to: "{{ beszel_auth_delegate }}"
+  register: beszel_auth_collection
+  no_log: true
+
+- name: Find the intended Google administrator account
+  ansible.builtin.uri:
+    url: "{{ beszel_auth_service_url }}/api/collections/users/records?filter={{ ('email=' ~ (beszel_auth_admin_email | to_json)) | urlencode }}"
+    headers:
+      Authorization: "{{ beszel_auth_session.json.token }}"
+    return_content: true
+  delegate_to: "{{ beszel_auth_delegate }}"
+  register: beszel_auth_users
+  no_log: true
+
+- name: Reject ambiguous administrator records
+  ansible.builtin.assert:
+    that:
+      - beszel_auth_users.json.totalItems <= 1
+  no_log: true
+
+- name: Generate an inaccessible password for the Google-only account
+  ansible.builtin.set_fact:
+    beszel_auth_generated_password: "{{ lookup('ansible.builtin.password', '/dev/null', length=64) }}"
+  when: beszel_auth_users.json.totalItems == 0
+  no_log: true
+
+- name: Create the Google administrator when absent
+  ansible.builtin.uri:
+    url: "{{ beszel_auth_service_url }}/api/collections/users/records"
+    method: POST
+    headers:
+      Authorization: "{{ beszel_auth_session.json.token }}"
+    body_format: json
+    body:
+      email: "{{ beszel_auth_admin_email }}"
+      verified: true
+      role: admin
+      password: "{{ beszel_auth_generated_password }}"
+      passwordConfirm: "{{ beszel_auth_generated_password }}"
+    status_code: 200
+  delegate_to: "{{ beszel_auth_delegate }}"
+  when: beszel_auth_users.json.totalItems == 0
+  no_log: true
+
+- name: Grant the existing Google account the administrator role
+  ansible.builtin.uri:
+    url: "{{ beszel_auth_service_url }}/api/collections/users/records/{{ beszel_auth_users.json['items'][0].id }}"
+    method: PATCH
+    headers:
+      Authorization: "{{ beszel_auth_session.json.token }}"
+    body_format: json
+    body:
+      role: admin
+      verified: true
+  delegate_to: "{{ beszel_auth_delegate }}"
+  when:
+    - beszel_auth_users.json.totalItems == 1
+    - beszel_auth_users.json['items'][0].role != 'admin' or not beszel_auth_users.json['items'][0].verified
+  no_log: true
+
+- name: Configure native Google authentication without self-registration or passwords
+  ansible.builtin.uri:
+    url: "{{ beszel_auth_service_url }}/api/collections/users"
+    method: PATCH
+    headers:
+      Authorization: "{{ beszel_auth_session.json.token }}"
+    body_format: json
+    body:
+      createRule: null
+      authRule: "verified = true"
+      passwordAuth:
+        enabled: false
+      oauth2:
+        enabled: true
+        providers:
+          - name: google
+            clientId: "{{ (beszel_auth_google_secret.stdout | from_json).data['client-id'] | b64decode }}"
+            clientSecret: "{{ (beszel_auth_google_secret.stdout | from_json).data['client-secret'] | b64decode }}"
+  delegate_to: "{{ beszel_auth_delegate }}"
+  no_log: true
+
+- name: Read back native authentication configuration
+  ansible.builtin.uri:
+    url: "{{ beszel_auth_service_url }}/api/collections/users"
+    headers:
+      Authorization: "{{ beszel_auth_session.json.token }}"
+    return_content: true
+  delegate_to: "{{ beszel_auth_delegate }}"
+  register: beszel_auth_verified_collection
+  no_log: true
+
+- name: Verify Google-only login and disabled self-registration
+  ansible.builtin.assert:
+    that:
+      - beszel_auth_verified_collection.json.oauth2.enabled
+      - not beszel_auth_verified_collection.json.passwordAuth.enabled
+      - beszel_auth_verified_collection.json.createRule == None
+      - beszel_auth_verified_collection.json.oauth2.providers | map(attribute='name') | list == ['google']
+  no_log: true
+
+- name: Read back the Google administrator account
+  ansible.builtin.uri:
+    url: "{{ beszel_auth_service_url }}/api/collections/users/records?filter={{ ('email=' ~ (beszel_auth_admin_email | to_json)) | urlencode }}"
+    headers:
+      Authorization: "{{ beszel_auth_session.json.token }}"
+    return_content: true
+  delegate_to: "{{ beszel_auth_delegate }}"
+  register: beszel_auth_verified_users
+  no_log: true
+
+- name: Verify the intended Google administrator
+  ansible.builtin.assert:
+    that:
+      - beszel_auth_verified_users.json.totalItems == 1
+      - beszel_auth_verified_users.json['items'][0].email == beszel_auth_admin_email
+      - beszel_auth_verified_users.json['items'][0].role == 'admin'
+      - beszel_auth_verified_users.json['items'][0].verified
+  no_log: true
+
+- name: Write the complete dashboard OAuth Secret declaration
+  ansible.builtin.copy:
+    dest: "{{ beszel_auth_dashboard_secret_path }}"
+    mode: '0600'
+    content: "{{ beszel_auth_dashboard_secret | to_nice_yaml }}"
+  vars:
+    beszel_auth_dashboard_secret:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: dashboard-google-oauth
+        namespace: oauth2-proxy
+      type: Opaque
+      stringData:
+        client-id: "{{ (beszel_auth_google_secret.stdout | from_json).data['client-id'] | b64decode }}"
+        client-secret: "{{ (beszel_auth_google_secret.stdout | from_json).data['client-secret'] | b64decode }}"
+  no_log: true
+
+- name: Encrypt the dashboard Secret declaration before deployment
+  ansible.builtin.command:
+    argv:
+      - sops
+      - --encrypt
+      - --in-place
+      - --encrypted-regex
+      - ^(data|stringData)$
+      - "{{ beszel_auth_dashboard_secret_path }}"
+  environment:
+    SOPS_AGE_KEY: "{{ vault_age_private_key }}"
+  changed_when: true
+  no_log: true

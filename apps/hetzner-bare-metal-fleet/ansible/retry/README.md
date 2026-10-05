@@ -10,7 +10,6 @@ When a playbook fails on one or more hosts, Ansible creates a `.retry` file cont
 
 Retry files contain one hostname per line:
 ```
-offchain-agent-1
 vault-2
 ```
 

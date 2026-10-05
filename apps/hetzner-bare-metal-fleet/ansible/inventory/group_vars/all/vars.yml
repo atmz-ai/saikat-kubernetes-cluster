@@ -12,7 +12,7 @@ hetzner_robot_password: "{{ vault_hetzner_robot_password }}"
 saikat_machine_access_ssh_private_key: "{{ vault_saikat_machine_access_ssh_private_key }}"
 
 # Beszel monitoring configuration
-beszel_hub_url: "https://beszel.yral.com"
+beszel_hub_url: "https://beszel.saikat.oleole.ai"
 beszel_listen_port: 45876
 beszel_ssh_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINkmr8wZEhKAk3UALLB+3AnQsSgkgGjxoiqJ5Zv8glh9"
 # Universal token (from /settings/tokens on the Beszel hub) — allows agents to

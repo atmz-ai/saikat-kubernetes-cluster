@@ -67,6 +67,12 @@ all:
 
   # TODO: Rename all the "worker-*" hosts to "node-*" by removing with the current name, renaming in inventory, and reprovisioning with the new name.
   children:
+    controller:
+      hosts:
+        localhost:
+          ansible_connection: local
+          ansible_become: false
+          ansible_python_interpreter: "{{ ansible_playbook_python }}"
     nodes:
       # ! `node_role` is what decides which derived group a host lands in, so a new
       # ! CONTROL PLANE MUST SET `node_role: control-plane` (and `stacked_control_plane:

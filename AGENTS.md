@@ -513,7 +513,7 @@ There are **two distinct age keys** in this repo. Do not confuse them:
 - fnox uses the infra SSH ed25519 private key, which it internally converts to an age identity.
 - Private key: `vault_saikat_machine_access_ssh_private_key` from Ansible vault, extracted to `./.saikat-machine-access-ed25519` (repo-root, gitignored) by `mise run bootstrap`. **Not** `~/.ssh/id_ed25519` — that's the user's personal key.
 - `FNOX_AGE_KEY_FILE = './.saikat-machine-access-ed25519'` is set in `mise.toml [env]` — fnox picks it up automatically. No manual `export` needed.
-- `fnox.toml` at repo root defines all encrypted secret definitions (no per-app `fnox.toml` files). Secrets that had the same name but different values across apps (e.g. `BACKEND_ADMIN_IDENTITY`) are prefixed with the app name (e.g. `OFF_CHAIN_AGENT_BACKEND_ADMIN_IDENTITY`, `YRAL_LEGACY_BACKEND_ADMIN_IDENTITY`, `YRAL_METADATA_BACKEND_ADMIN_IDENTITY`). The encrypted ciphertext is safe to commit to git.
+- `fnox.toml` at repo root defines all encrypted secret definitions (no per-app `fnox.toml` files). Secrets that had the same name but different values across apps (e.g. `BACKEND_ADMIN_IDENTITY`) are prefixed with the app name (e.g. `YRAL_LEGACY_BACKEND_ADMIN_IDENTITY`, `YRAL_METADATA_BACKEND_ADMIN_IDENTITY`). The encrypted ciphertext is safe to commit to git.
 - Rotating a secret: `fnox set <KEY> --provider age` (re-encrypts in `fnox.toml`, commit the change). For multi-line values (PEM keys/certs), pipe via stdin: `printf '%s' "$VALUE" | fnox set <KEY> --provider age`.
 - Running commands with secrets: `fnox exec -- <command>`, or `fnox export -f env -o .env` for tools that need a file (e.g. `podman --env-file`).
 - `fnox.local.toml` is gitignored for machine-specific overrides.

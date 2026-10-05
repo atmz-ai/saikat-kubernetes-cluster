@@ -25,6 +25,42 @@ metadata:
 spec:
   gatewayClassName: cilium
   listeners:
+    - name: https-dashboard
+      port: 443
+      protocol: HTTPS
+      hostname: dashboard.saikat.oleole.ai
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: dashboard-tls
+            kind: Secret
+      allowedRoutes:
+        namespaces:
+          from: All
+    - name: https-uptime-kuma
+      port: 443
+      protocol: HTTPS
+      hostname: status.saikat.oleole.ai
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: uptime-kuma-tls
+            kind: Secret
+      allowedRoutes:
+        namespaces:
+          from: All
+    - name: https-beszel
+      port: 443
+      protocol: HTTPS
+      hostname: beszel.saikat.oleole.ai
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: beszel-tls
+            kind: Secret
+      allowedRoutes:
+        namespaces:
+          from: All
     - name: https-rustfs-console
       port: 443
       protocol: HTTPS

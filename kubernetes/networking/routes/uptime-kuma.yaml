@@ -1,10 +1,10 @@
 # Uptime Kuma HTTPRoute
 #
-# Exposes Uptime Kuma at https://status.yral.com via the Cilium Gateway.
+# * Exposes Uptime Kuma at https://status.saikat.oleole.ai via the Cilium Gateway.
 # Direct-to-Service (no oauth2-proxy) — Uptime Kuma has its own built-in login
 # for the admin dashboard. Public status pages are accessible without auth.
 #
-# TLS is terminated by the Cilium Gateway using the wildcard *.yral.com certificate.
+# * TLS uses the uptime-kuma-tls certificate on the shared Gateway.
 # The ReferenceGrant in the uptime-kuma namespace allows this HTTPRoute to
 # reference the uptime-kuma Service as a backend.
 ---
@@ -19,7 +19,7 @@ spec:
       namespace: kube-system
       sectionName: http
   hostnames:
-    - status.yral.com
+    - status.saikat.oleole.ai
   rules:
     - filters:
         - type: RequestRedirect
@@ -36,9 +36,9 @@ spec:
   parentRefs:
     - name: web-gateway
       namespace: kube-system
-      sectionName: https
+      sectionName: https-uptime-kuma
   hostnames:
-    - status.yral.com
+    - status.saikat.oleole.ai
   rules:
     - backendRefs:
         - name: uptime-kuma

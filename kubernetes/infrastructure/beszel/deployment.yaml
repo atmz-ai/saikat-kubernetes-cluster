@@ -6,9 +6,7 @@
 #
 # Image: henrygd/beszel (Docker Hub, multi-arch amd64/arm64)
 # Port: 8090  |  Data dir: /beszel_data (SQLite, PVC-backed)
-# Exposed at https://beszel.yral.com via oauth2-proxy (Google Workspace SSO,
-# @gobazzinga.io email domain, developer-admin group). Beszel's own login is
-# disabled via TRUSTED_AUTH_HEADER=X-Forwarded-Email.
+# * Exposed at https://beszel.saikat.oleole.ai with Beszel's built-in authentication.
 #
 # Upgrades: bump the image tag below, push, Flux reconciles with Recreate
 # strategy (brief downtime — single replica + PVC). No image automation for
@@ -20,8 +18,6 @@ metadata:
   name: beszel
   namespace: beszel
   annotations:
-    # Reloader restarts the pod when the beszel-config ConfigMap changes
-    # (e.g. TRUSTED_AUTH_HEADER, USER_EMAIL updates).
     configmap.reloader.stakater.com/reload: "beszel-config"
 spec:
   replicas: 1
@@ -35,8 +31,6 @@ spec:
       labels:
         app: beszel
       annotations:
-        # Force pod restart to pick up ConfigMap changes (TRUSTED_AUTH_HEADER, USER_EMAIL).
-        # Reloader handles future ConfigMap changes automatically via the Deployment annotation above.
         reloaded-at: "2026-08-25T07:00:00Z"
     spec:
       containers:

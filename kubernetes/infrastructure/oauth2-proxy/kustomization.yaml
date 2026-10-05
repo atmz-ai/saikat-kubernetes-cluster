@@ -12,13 +12,13 @@ resources:
   - deployment-headlamp.yaml
   - service-headlamp.yaml
   - deployment-dashboard.yaml
+  - dashboard-allowed-emails.yaml
+  - dashboard-google-oauth.sops.yaml
   - service-dashboard.yaml
   - deployment-kafka-console.yaml
   - service-kafka-console.yaml
   - deployment-dbx.yaml
   - service-dbx.yaml
-  - deployment-beszel.yaml
-  - service-beszel.yaml
   - deployment-longhorn-ui.yaml
   - service-longhorn-ui.yaml
   - reference-grant.yaml

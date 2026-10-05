@@ -14,6 +14,12 @@
 # ! once would put a thundering herd on the hub and make a partial failure hard to read.
 # ! Serial also matches the repo rule for multi-node operations: complete and verify one
 # ! host before touching the next.
+- name: Configure native Google login for the Beszel hub
+  hosts: localhost
+  gather_facts: false
+  roles:
+    - role: beszel-auth
+
 - name: Install the Beszel agent on the fleet
   hosts: "{{ target_host | default('nodes') }}"
   become: true

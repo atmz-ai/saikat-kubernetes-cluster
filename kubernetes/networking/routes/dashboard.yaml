@@ -1,6 +1,4 @@
-# dashboard HTTPRoute
-#
-# Exposes the internal service dashboard at https://dashboard.yral.com via oauth2-proxy (Google Workspace SSO).
+# * Dashboard access is restricted to the explicit oauth2-proxy email allowlist.
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -13,7 +11,7 @@ spec:
       namespace: kube-system
       sectionName: http
   hostnames:
-    - dashboard.yral.com
+    - dashboard.saikat.oleole.ai
   rules:
     - filters:
         - type: RequestRedirect
@@ -30,9 +28,9 @@ spec:
   parentRefs:
     - name: web-gateway
       namespace: kube-system
-      sectionName: https
+      sectionName: https-dashboard
   hostnames:
-    - dashboard.yral.com
+    - dashboard.saikat.oleole.ai
   rules:
     - backendRefs:
         - name: oauth2-proxy-dashboard

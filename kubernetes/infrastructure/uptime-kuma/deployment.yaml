@@ -5,7 +5,7 @@
 #
 # Image: louislam/uptime-kuma (Docker Hub, multi-arch amd64/arm64)
 # Port: 3001  |  Data dir: /app/data (SQLite, PVC-backed)
-# Exposed at https://status.yral.com via Cilium Gateway (direct, no oauth2-proxy —
+# * Exposed at https://status.saikat.oleole.ai via Cilium Gateway (direct, no oauth2-proxy —
 # Uptime Kuma has its own built-in login for the admin dashboard; status pages
 # are public by design).
 #
