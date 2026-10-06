@@ -7,6 +7,8 @@ metadata:
   name: stirling-pdf-config
   namespace: stirling-pdf
 data:
+  # ! One-startup ownership recovery; remove after the promotion is confirmed.
+  STIRLING_ORG_OWNER_BREAK_GLASS: saikat@atmz.ai
   SECURITY_LOGINMETHOD: oauth2
   SECURITY_INITIALLOGIN_USERNAME: bootstrap-administrator
   SECURITY_OAUTH2_ENABLED: "true"
