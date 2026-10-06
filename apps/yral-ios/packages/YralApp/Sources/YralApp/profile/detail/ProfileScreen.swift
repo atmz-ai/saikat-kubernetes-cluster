@@ -1,55 +1,264 @@
 import SwiftUI
 
-/// Profile — the CURRENT account's details (avatar, username, bio,
-/// subject). Phase 4 builds the real profile surface (posts grid,
-/// stats, edit); this placeholder is the tab's anchor until then,
-/// showing live session data.
 struct ProfileScreen: View {
-
   let sessionStore: SessionStore
+  let dataSource: SpacetimeDBRemoteDataSource?
+  @State private var state: ProfileMachine.State
+
+  init(
+    sessionStore: SessionStore,
+    dataSource: SpacetimeDBRemoteDataSource? = nil,
+    initialState: ProfileMachine.State = .idle
+  ) {
+    self.sessionStore = sessionStore
+    self.dataSource = dataSource
+    _state = State(initialValue: initialState)
+  }
 
   var body: some View {
-    VStack(spacing: 12) {
-      if let profilePicURL = sessionStore.profilePic,
-        let url = URL(string: profilePicURL)
-      {
-        AsyncImage(url: url) { image in
-          image.resizable().scaledToFill()
-        } placeholder: {
-          Color.gray.opacity(0.25)
+    NavigationStack {
+      ScrollView {
+        VStack(alignment: .leading, spacing: 24) {
+          header
+          switch state {
+          case .idle, .loading:
+            ProgressView("Loading profile")
+              .frame(maxWidth: .infinity)
+          case .failed(let error):
+            ContentUnavailableView {
+              Label("Profile unavailable", systemImage: "exclamationmark.triangle")
+            } description: {
+              Text(error)
+            } actions: {
+              Button("Retry", systemImage: "arrow.clockwise") { send(.load) }
+            }
+          case .ready(let details):
+            profileDetails(details)
+          case .editing(_, let draft, let error):
+            editor(draft, error: error, saving: false)
+          case .saving(_, let draft):
+            editor(draft, error: nil, saving: true)
+          }
         }
-        .frame(width: 88, height: 88)
-        .clipShape(Circle())
+        .padding(24)
       }
-      Text(sessionStore.username ?? "Anonymous")
-        .font(.title3.weight(.semibold))
-      if let subject = sessionStore.userSubject {
-        // The auth identifier — the JWT `sub` (== subject in
-        // our tokens), labeled so it reads as an ID, not a name.
-        Text("ID: \(subject)")
-          .font(.caption)
-          .foregroundStyle(.tertiary)
-          .lineLimit(1)
-          .truncationMode(.middle)
-          .padding(.horizontal, 32)
+      .navigationTitle("Profile")
+      .toolbar {
+        switch state {
+        case .ready:
+          ToolbarItem(placement: .primaryAction) {
+            Button("Edit profile", systemImage: "pencil") { send(.edit) }
+              .accessibilityIdentifier("profile.edit")
+          }
+        case .editing:
+          ToolbarItem(placement: .cancellationAction) {
+            Button("Cancel") { send(.cancel) }
+              .accessibilityIdentifier("profile.cancel")
+          }
+          ToolbarItem(placement: .confirmationAction) {
+            Button("Save", systemImage: "checkmark") { send(.save) }
+              .accessibilityIdentifier("profile.save")
+          }
+        default:
+          ToolbarItem(placement: .primaryAction) { EmptyView() }
+        }
       }
-      if sessionStore.isBotSession == true {
-        Text("AI account")
-          .font(.caption.weight(.semibold))
-          .padding(.horizontal, 10)
-          .padding(.vertical, 4)
-          .background(.pink.opacity(0.2), in: Capsule())
-          .foregroundStyle(.pink)
-      }
-      Text("Full profile arrives in Phase 4")
-        .font(.subheadline)
-        .foregroundStyle(.secondary)
     }
-    .frame(maxWidth: .infinity, maxHeight: .infinity)
-    .background(Color.black)
+    .task(id: sessionStore.userSubject) {
+      guard dataSource != nil else { return }
+      send(.load)
+    }
+    .task(id: state == .loading ? sessionStore.userSubject : nil) {
+      guard state == .loading else { return }
+      await loadProfile()
+    }
+    .task(id: state.saveRequest) {
+      guard let draft = state.saveRequest else { return }
+      await saveProfile(draft)
+    }
+  }
+
+  private var header: some View {
+    HStack(spacing: 16) {
+      AsyncImage(url: sessionStore.profilePic.flatMap(URL.init(string:))) { image in
+        image.resizable().scaledToFill()
+      } placeholder: {
+        Image(systemName: "person.crop.circle.fill")
+          .resizable()
+          .foregroundStyle(.secondary)
+      }
+      .frame(width: 80, height: 80)
+      .clipShape(Circle())
+
+      VStack(alignment: .leading, spacing: 6) {
+        Text(sessionStore.username ?? "Anonymous")
+          .font(.title2.bold())
+        Text(sessionStore.isBotSession == true ? "AI account" : "Personal account")
+          .font(.subheadline)
+          .foregroundStyle(.secondary)
+        if let subject = sessionStore.userSubject {
+          Text(subject)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .truncationMode(.middle)
+            .textSelection(.enabled)
+        }
+      }
+    }
+  }
+
+  private func profileDetails(_ details: ProfileMachine.Details) -> some View {
+    VStack(alignment: .leading, spacing: 24) {
+      HStack(spacing: 32) {
+        VStack(alignment: .leading) {
+          Text(details.followers.formatted()).font(.headline)
+          Text("Followers").foregroundStyle(.secondary)
+        }
+        VStack(alignment: .leading) {
+          Text(details.following.formatted()).font(.headline)
+          Text("Following").foregroundStyle(.secondary)
+        }
+      }
+      Divider()
+      VStack(alignment: .leading, spacing: 8) {
+        Text("Bio").font(.headline)
+        Text(details.bio.isEmpty ? "No bio yet" : details.bio)
+          .foregroundStyle(details.bio.isEmpty ? .secondary : .primary)
+          .textSelection(.enabled)
+          .accessibilityIdentifier("profile.bio")
+      }
+      if !details.website.isEmpty {
+        VStack(alignment: .leading, spacing: 8) {
+          Text("Website").font(.headline)
+          if ProfileMachine.Draft(bio: details.bio, website: details.website).validationError
+            == nil,
+            let websiteURL = URL(string: details.website)
+          {
+            Link(destination: websiteURL) {
+              Label(details.website, systemImage: "link")
+                .multilineTextAlignment(.leading)
+            }
+          } else {
+            Text(details.website).textSelection(.enabled)
+          }
+        }
+      }
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+  }
+
+  private func editor(_ draft: ProfileMachine.Draft, error: String?, saving: Bool) -> some View {
+    VStack(alignment: .leading, spacing: 20) {
+      VStack(alignment: .leading, spacing: 8) {
+        Text("Bio").font(.headline)
+        TextEditor(
+          text: Binding(get: { draft.bio }, set: { send(.changeBio($0)) })
+        )
+        .frame(height: 160)
+        .padding(8)
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+        .accessibilityLabel("Bio")
+        .accessibilityIdentifier("profile.bioEditor")
+      }
+      VStack(alignment: .leading, spacing: 8) {
+        Text("Website").font(.headline)
+        TextField(
+          "https://example.com",
+          text: Binding(get: { draft.website }, set: { send(.changeWebsite($0)) })
+        )
+        .textFieldStyle(.roundedBorder)
+        #if canImport(UIKit)
+          .keyboardType(.URL)
+          .textInputAutocapitalization(.never)
+        #endif
+        .autocorrectionDisabled()
+        .accessibilityLabel("Website")
+        .accessibilityIdentifier("profile.websiteEditor")
+      }
+      if let error {
+        Text(error)
+          .foregroundStyle(.red)
+          .accessibilityIdentifier("profile.error")
+      }
+      if saving { ProgressView("Saving profile") }
+    }
+    .disabled(saving)
+  }
+
+  private func send(_ event: ProfileMachine.Event) {
+    state = ProfileMachine.transition(state, event)
+  }
+
+  private func loadProfile() async {
+    guard let dataSource, let subject = sessionStore.userSubject else {
+      send(.loadFailed("No active account."))
+      return
+    }
+    do {
+      let profile = try await dataSource.getUserProfileDetails(oauthSubject: subject)
+      guard !Task.isCancelled, subject == sessionStore.userSubject else { return }
+      let details = profile.map(ProfileMachine.Details.init(profile:)) ?? ProfileMachine.Details()
+      send(.loaded(details))
+    } catch {
+      guard !Task.isCancelled, subject == sessionStore.userSubject else { return }
+      CrashReporter.record(error, context: "profile-load")
+      send(.loadFailed(error.localizedDescription))
+    }
+  }
+
+  private func saveProfile(_ draft: ProfileMachine.Draft) async {
+    guard let dataSource, let subject = sessionStore.userSubject else {
+      send(.saveFailed("No active account."))
+      return
+    }
+    let targetAIAccount = sessionStore.isBotSession == true ? subject : nil
+    do {
+      try await dataSource.updateProfileDetails(
+        bio: draft.bio,
+        websiteURL: draft.website,
+        profilePictureURL: nil,
+        updateAsAIAccountID: targetAIAccount
+      )
+      let profile = try await dataSource.getUserProfileDetails(oauthSubject: subject)
+      guard !Task.isCancelled, subject == sessionStore.userSubject else { return }
+      guard let profile else {
+        send(.saveFailed("Saved profile could not be read back."))
+        return
+      }
+      send(.saved(ProfileMachine.Details(profile: profile)))
+    } catch {
+      guard !Task.isCancelled, subject == sessionStore.userSubject else { return }
+      CrashReporter.record(error, context: "profile-save")
+      send(.saveFailed(error.localizedDescription))
+    }
   }
 }
 
-#Preview {
-  ProfileScreen(sessionStore: SessionStore())
+#Preview("Populated") {
+  ProfileScreen(
+    sessionStore: SessionStore(),
+    initialState: .ready(
+      ProfileMachine.Details(
+        bio: "Stories, music, and small discoveries.", website: "https://example.com",
+        followers: 128, following: 42)
+    )
+  )
+}
+
+#Preview("Empty") {
+  ProfileScreen(sessionStore: SessionStore(), initialState: .ready(ProfileMachine.Details()))
+}
+
+#Preview("Error") {
+  ProfileScreen(
+    sessionStore: SessionStore(), initialState: .failed("HTTP 503: service unavailable"))
+}
+
+#Preview("Editing") {
+  ProfileScreen(
+    sessionStore: SessionStore(),
+    initialState: .editing(
+      ProfileMachine.Details(), ProfileMachine.Draft(bio: "My bio", website: ""), error: nil)
+  )
 }

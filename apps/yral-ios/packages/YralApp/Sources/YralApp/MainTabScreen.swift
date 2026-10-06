@@ -42,7 +42,7 @@ struct MainTabScreen: View {
         .tabItem { Label("Create", systemImage: "plus") }
         .tag(Tab.create)
 
-      ProfileScreen(sessionStore: sessionStore)
+      ProfileScreen(sessionStore: sessionStore, dataSource: authClient.spacetimeDataSource)
         .tabItem { Label("Profile", systemImage: "person.fill") }
         .tag(Tab.profile)
 
