@@ -134,7 +134,7 @@ public final class AnalyticsClient {
     }
 
     let structured = Structured(category: event.featureName, action: event.eventName)
-    let _ = structured.property(Self.encodeProperty(event.properties))
+    structured.property(Self.encodeProperty(event.properties))
     _ = tracker.track(structured)
   }
 
