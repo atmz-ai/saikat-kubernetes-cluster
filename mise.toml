@@ -59,7 +59,6 @@ helm = "latest"
 # `spacetimedb-standalone` stays untouched: `spacetime start` execs it.
 "github:clockworklabs/SpacetimeDB" = { version = "latest", rename_exe = { "spacetimedb-cli" = "spacetime" } }
 kubectl = "latest"
-maestro = { version = "latest", os = ["macos"] }
 node = "latest"
 pitchfork = "latest"
 # ── Container runtime for local image builds ────────────────────────────────
@@ -1466,6 +1465,20 @@ dir = "apps/yral-ios/packages/YralApp"
 depends = ["yral-ios-sync-rishi-openapi"]
 run = "swift test"
 
+[tasks.yral-ios-ui-test]
+description = "Run Apple-native Swift XCTest/XCUIAutomation UI tests on an iOS Simulator. Override YRAL_IOS_UI_TEST_DESTINATION to select a device."
+dir = "apps/yral-ios"
+depends = ["yral-ios-build"]
+run = '''
+xcodebuild test \
+  -project iosApp.xcodeproj \
+  -scheme iosApp \
+  -destination "${YRAL_IOS_UI_TEST_DESTINATION:-platform=iOS Simulator,name=iPhone 18 Pro}" \
+  -configuration Debug \
+  CODE_SIGNING_ALLOWED=NO \
+  -skipPackagePluginValidation
+'''
+
 [tasks.yral-ios-lint]
 description = "Lint the YralApp SPM package with swift-format (Apple's first-party formatter and linter, shipped in the Xcode toolchain)."
 dir = "apps/yral-ios"
@@ -1488,7 +1501,7 @@ set -euo pipefail
 # they are never traversed (their warnings are fixed upstream — see the Zero
 # Warnings rule, not suppressed here).
 swift format lint --strict --recursive \
-  packages/YralApp/Sources packages/YralApp/Tests
+  packages/YralApp/Sources packages/YralApp/Tests iosAppUITests
 '''
 
 [tasks.yral-ios-checks]

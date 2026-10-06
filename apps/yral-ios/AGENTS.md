@@ -13,6 +13,13 @@ documentation.
 
 ## Architecture rules
 
+- **Apple-native UI testing only.** UI tests are Swift XCTest cases using
+  XCUIAutomation in `iosAppUITests/`, mirroring feature folders. Run them with
+  `mise run yral-ios-ui-test`; select a simulator with
+  `YRAL_IOS_UI_TEST_DESTINATION`. Keep unit tests in Swift Testing. Do not add
+  third-party UI drivers. Tests must not delete accounts or mutate production
+  data without explicit authorization.
+
 - **Kotlin is reference material, never a spec (Hard Rule).** The legacy
   Kotlin app is consulted ONLY to learn which backend endpoints a flow
   calls, with what payloads, and in what order — that wire behavior is worth

@@ -11,6 +11,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+	A10000000000000000000001 = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; path = iosAppUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		11D9260E3045F61B008548D5 /* iosApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = iosApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -25,6 +26,7 @@
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+	A10000000000000000000002 = {isa = PBXFileSystemSynchronizedRootGroup; path = iosAppUITests; sourceTree = "<group>"; };
 		11D926103045F61B008548D5 /* iosApp */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
@@ -36,6 +38,7 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+	A10000000000000000000003 = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 		11D9260B3045F61B008548D5 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -51,6 +54,7 @@
 			isa = PBXGroup;
 			children = (
 				11D926103045F61B008548D5 /* iosApp */,
+                A10000000000000000000002,
 				11D9260F3045F61B008548D5 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -59,6 +63,7 @@
 			isa = PBXGroup;
 			children = (
 				11D9260E3045F61B008548D5 /* iosApp.app */,
+                A10000000000000000000001,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -66,6 +71,18 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		A10000000000000000000004 = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A10000000000000000000008;
+			buildPhases = (A10000000000000000000005, A10000000000000000000003, A10000000000000000000006);
+			buildRules = ();
+			dependencies = ();
+			fileSystemSynchronizedGroups = (A10000000000000000000002);
+			name = iosAppUITests;
+			productName = iosAppUITests;
+			productReference = A10000000000000000000001;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 		11D9260D3045F61B008548D5 /* iosApp */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 11D926193045F61B008548D5 /* Build configuration list for PBXNativeTarget "iosApp" */;
@@ -123,11 +140,13 @@
 			projectRoot = "";
 			targets = (
 				11D9260D3045F61B008548D5 /* iosApp */,
+                A10000000000000000000004,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+	A10000000000000000000006 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 		11D9260C3045F61B008548D5 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -158,6 +177,7 @@
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+	A10000000000000000000005 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 		11D9260A3045F61B008548D5 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -168,6 +188,30 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin XCBuildConfiguration section */
+		A10000000000000000000009 = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				GENERATE_INFOPLIST_FILE = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.yral.iosAppUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_TARGET_NAME = iosApp;
+			};
+			name = Debug;
+		};
+		A1000000000000000000000A = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				GENERATE_INFOPLIST_FILE = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.yral.iosAppUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_TARGET_NAME = iosApp;
+			};
+			name = Release;
+		};
 		11D926173045F61B008548D5 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -372,6 +416,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+	A10000000000000000000008 = {isa = XCConfigurationList; buildConfigurations = (A10000000000000000000009, A1000000000000000000000A); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
 		11D926093045F61B008548D5 /* Build configuration list for PBXProject "iosApp" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
