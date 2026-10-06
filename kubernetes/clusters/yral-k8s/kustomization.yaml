@@ -44,6 +44,7 @@ resources:
   - infrastructure-shipwright.yaml
   - infrastructure-snowplow.yaml
   - infrastructure-strimzi.yaml
+  - infrastructure-stirling-pdf.yaml
   - infrastructure-tekton-pipelines.yaml
   - infrastructure-tekton-triggers.yaml
   - infrastructure-trino.yaml

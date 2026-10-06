@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: stirling-pdf
+  namespace: stirling-pdf
+  annotations:
+    configmap.reloader.stakater.com/reload: stirling-pdf-config
+    secret.reloader.stakater.com/reload: stirling-pdf-credentials
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: stirling-pdf
+  template:
+    metadata:
+      labels:
+        app: stirling-pdf
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: stirling-pdf
+          image: docker.stirlingpdf.com/stirlingtools/stirling-pdf:3.1.0
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: stirling-pdf-config
+            - secretRef:
+                name: stirling-pdf-credentials
+          volumeMounts:
+            - name: data
+              mountPath: /configs
+          startupProbe:
+            httpGet:
+              path: /api/v1/info/status
+              port: http
+            periodSeconds: 10
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /api/v1/info/status
+              port: http
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: stirling-pdf-data
