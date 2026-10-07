@@ -1,27 +1,15 @@
+# Trino retirement — stage 2a.
+#
+# The HelmRelease was RESUMED (suspend: false) in the previous commit so that
+# deleting it runs the Helm uninstall; a suspended release's delete skips the
+# uninstall and orphans its resources (helm-controller reconcileDelete guards
+# reconcileReleaseDeletion behind !spec.suspend).
+#
+# This commit removes ONLY the HelmRelease, keeping the Namespace so the
+# release's Helm storage secret (which lives in this namespace) still exists
+# when the uninstall runs. The Namespace is removed in stage 2b, after the
+# uninstall has deleted the Deployment/Services/ConfigMaps.
 apiVersion: v1
 kind: Namespace
 metadata:
   name: trino
----
-apiVersion: helm.toolkit.fluxcd.io/v2
-kind: HelmRelease
-metadata:
-  name: trino
-  namespace: trino
-  annotations:
-    kustomize.toolkit.fluxcd.io/ssa: Merge
-spec:
-  # ! MUST be false for the retirement to complete: a suspended HelmRelease
-  # ! is not reconciled, so deleting it would NOT run the Helm uninstall and
-  # ! the release's resources would be orphaned in the cluster. Resumed, Flux
-  # ! owns the release and the delete in the next step uninstalls it cleanly.
-  suspend: false
-  interval: 1h
-  chart:
-    spec:
-      chart: trino
-      version: "1.42.1"
-      sourceRef:
-        kind: HelmRepository
-        name: trino
-        namespace: trino
