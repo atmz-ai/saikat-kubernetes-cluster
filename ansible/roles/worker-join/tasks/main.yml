@@ -90,11 +90,3 @@
     msg: >-
       Added A record: {{ cloudflare_app_wildcard_hostname }} → {{ hostvars[inventory_hostname]['ansible_host'] }}
       {% if worker_join_cf_result.status == 200 %}(record id: {{ worker_join_cf_result.json.result.id }}){% else %}(already exists){% endif %}
-
-- name: Delete stale Rook OSD prepare job for this node (cleanup from Ceph→Longhorn migration)
-  ansible.builtin.command: >
-    kubectl delete job rook-ceph-osd-prepare-{{ inventory_hostname }}
-    -n rook-ceph --ignore-not-found
-  delegate_to: localhost
-  changed_when: true
-  failed_when: false

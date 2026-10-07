@@ -10,7 +10,6 @@
 #   installimage installs a 50 GB btrfs root on one NVMe drive. This role:
 #     • Joins the second NVMe drive into the btrfs RAID0 pool (~950 GB total).
 #     • Creates /var/lib/longhorn with nodatacow (prevents double-CoW on btrfs).
-#     • Wipes stale bluestore labels from former Ceph OSD drives.
 #
 # CONTROL PLANES:
 #   Same as workers — btrfs expansion + Longhorn data directory. Control planes
@@ -162,12 +161,8 @@
         - name: Wipe filesystem signatures from second drive
           ansible.builtin.shell: |
             wipefs -af /dev/{{ second_drive }}
-            # Zero first 40 MB — clears stale bluestore labels from former Ceph OSDs
+            # Zero first 40 MB — clears any stale partition table or superblock
             dd if=/dev/zero of=/dev/{{ second_drive }} bs=4M count=10 conv=fsync
-            # Zero capacity-based bluestore label positions (1 GiB, 10 GiB, 100 GiB)
-            dd if=/dev/zero of=/dev/{{ second_drive }} bs=4096 count=2 seek=$(( 1073741824   / 4096 )) conv=fsync
-            dd if=/dev/zero of=/dev/{{ second_drive }} bs=4096 count=2 seek=$(( 10737418240  / 4096 )) conv=fsync
-            dd if=/dev/zero of=/dev/{{ second_drive }} bs=4096 count=2 seek=$(( 107374182400 / 4096 )) conv=fsync
             # Zero last 40 MB — clears any label at disk tail
             SECTORS=$(blockdev --getsz /dev/{{ second_drive }})
             dd if=/dev/zero of=/dev/{{ second_drive }} bs=512 count=81920 seek=$(( SECTORS - 81920 )) conv=fsync
@@ -236,14 +231,6 @@
 - name: Display Longhorn data directory state
   ansible.builtin.debug:
     msg: "Longhorn data directory: /var/lib/longhorn ({{ longhorn_nodatacow_check.stdout }})"
-
-# ---------------------------------------------------------------------------
-# Clean up stale Rook artifacts (for nodes repurposed from Ceph)
-
-- name: Remove stale Rook data directory if present
-  ansible.builtin.file:
-    path: /var/lib/rook
-    state: absent
 
 - name: Display storage setup summary
   ansible.builtin.debug:
