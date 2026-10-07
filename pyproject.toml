@@ -28,7 +28,7 @@ dependencies = [
 # Declaring the backend (together with the empty `packages` list below) makes
 # setuptools build a metadata-only distribution instead of hunting for packages.
 # Verified: `pip install -e .` at the repo root succeeds against this file.
-requires = ["setuptools>=77"]
+requires = ["setuptools>=84.0.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
