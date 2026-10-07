@@ -11,9 +11,19 @@ import OpenAPIURLSession
 public struct HomeDiscoveryDataSource: Sendable {
   private let serverURL: URL
   private let session: URLSession
+  private let sessionID: String
 
-  public init(session: URLSession = .shared) {
+  /// Per-app-launch session id. The feed's seen-set dedup keys on this,
+  /// so a STABLE id within a launch keeps pagination deterministic and
+  /// non-repeating, while a fresh id each launch gives the user a clean
+  /// rotation. Without it the server derives a stable id from the user
+  /// (or IP) and the seen-set eventually filters the ENTIRE catalog to
+  /// zero until its 24h TTL — an empty feed that looks like an outage.
+  public static let defaultSessionID = "ios-\(UUID().uuidString)"
+
+  public init(session: URLSession = .shared, sessionID: String = defaultSessionID) {
     self.session = session
+    self.sessionID = sessionID
     self.serverURL = URL(string: "https://\(AppConfiguration.chatBaseURL)")!
   }
 
@@ -31,7 +41,8 @@ public struct HomeDiscoveryDataSource: Sendable {
         query: .init(
           offset: offset,
           limit: limit,
-          with_metadata: true
+          with_metadata: true,
+          session_id: sessionID
         )
       )
     switch response {
