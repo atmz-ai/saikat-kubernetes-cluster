@@ -47,7 +47,6 @@ resources:
   - infrastructure-stirling-pdf.yaml
   - infrastructure-tekton-pipelines.yaml
   - infrastructure-tekton-triggers.yaml
-  - infrastructure-trino.yaml
   - infrastructure-trivy-operator.yaml
   - infrastructure-uptime-kuma.yaml
   - infrastructure-velero.yaml
