@@ -11,7 +11,11 @@ metadata:
   annotations:
     kustomize.toolkit.fluxcd.io/ssa: Merge
 spec:
-  suspend: true
+  # ! MUST be false for the retirement to complete: a suspended HelmRelease
+  # ! is not reconciled, so deleting it would NOT run the Helm uninstall and
+  # ! the release's resources would be orphaned in the cluster. Resumed, Flux
+  # ! owns the release and the delete in the next step uninstalls it cleanly.
+  suspend: false
   interval: 1h
   chart:
     spec:

@@ -384,10 +384,10 @@ assert all(document['kind'] in ['Namespace', 'HelmRelease'] for document in docu
 for document in documents:
   assert document['metadata']['name'] == 'trino'
   if document['kind'] == 'HelmRelease':
-    assert document['spec']['suspend'] is True
+    assert document['spec']['suspend'] is False
     assert document['spec']['chart']['spec']['version'] == '1.42.1'
 subprocess.run(['kubectl', 'kustomize', 'kubernetes/clusters/yral-k8s'], check=True)
-print('Verified suspended adoption or retirement without storage declarations.')
+print('Verified resumed retirement without storage declarations.')
 PY
 '''
 
