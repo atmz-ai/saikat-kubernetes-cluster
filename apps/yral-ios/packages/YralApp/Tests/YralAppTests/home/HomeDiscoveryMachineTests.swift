@@ -41,9 +41,9 @@ struct HomeDiscoveryMachineTests {
     state = HomeDiscoveryMachine.transition(state, .refreshLoaded([influencer("a")], generation: 1))
     state = HomeDiscoveryMachine.transition(state, .matchCurrent)
     #expect(state.pendingMatch?.id == "a")
-    // A match does NOT advance the cursor on its own — the screen starts
-    // the chat first, then consumes the match.
-    #expect(state.currentInfluencer?.id == "a")
+    // A match advances the deck (the card has already flown off-screen) —
+    // the conversation opens from pendingMatch.
+    #expect(state.isDeckExhausted)
     state = HomeDiscoveryMachine.transition(state, .matchConsumed)
     #expect(state.pendingMatch == nil)
   }

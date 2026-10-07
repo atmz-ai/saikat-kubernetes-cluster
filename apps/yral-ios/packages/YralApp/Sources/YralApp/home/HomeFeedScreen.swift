@@ -90,16 +90,6 @@ struct HomeFeedScreen: View {
       actionBar
     }
     .ignoresSafeArea()
-    .gesture(
-      // Swipe-down undo works anywhere on the deck (not just the card),
-      // so a user who swiped too far can recover without aiming.
-      DragGesture(minimumDistance: 40)
-        .onEnded { value in
-          if value.translation.height > 80, abs(value.translation.width) < 60 {
-            send(.previous)
-          }
-        }
-    )
   }
 
   private var actionBar: some View {

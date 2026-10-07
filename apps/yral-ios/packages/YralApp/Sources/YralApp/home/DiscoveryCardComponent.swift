@@ -12,6 +12,9 @@ struct DiscoveryCardComponent: View {
   let onSwipe: (SwipeDirection) -> Void
 
   @State private var dragOffset: CGSize = .zero
+  /// True while the card is throwing itself off-screen. Guards against a
+  /// second swipe landing mid-animation.
+  @State private var isDismissing = false
 
   enum SwipeDirection {
     case left  // reject
@@ -30,10 +33,20 @@ struct DiscoveryCardComponent: View {
       card
         .offset(dragOffset)
         .rotationEffect(.degrees(Double(dragOffset.width / geometry.size.width) * 6))
+        .opacity(dismissOpacity(in: geometry.size))
         .gesture(dragGesture(in: geometry.size))
-        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: dragOffset)
+        .animation(.spring(response: 0.35, dampingFraction: 0.68), value: dragOffset)
         .accessibilityIdentifier("home.card.\(influencer.id)")
     }
+  }
+
+  /// Fades the card slightly as it leaves the frame, so a committed swipe
+  /// reads as “gone” rather than sliding under the next card.
+  private func dismissOpacity(in size: CGSize) -> Double {
+    guard size.width > 0, size.height > 0 else { return 1 }
+    let dx = abs(dragOffset.width) / size.width
+    let dy = abs(dragOffset.height) / size.height
+    return Double(max(0.2, 1 - max(dx, dy)))
   }
 
   private var card: some View {
@@ -123,9 +136,11 @@ struct DiscoveryCardComponent: View {
   private func dragGesture(in size: CGSize) -> some Gesture {
     DragGesture()
       .onChanged { value in
+        guard !isDismissing else { return }
         dragOffset = value.translation
       }
       .onEnded { value in
+        guard !isDismissing else { return }
         let horizontal = value.translation.width
         let vertical = value.translation.height
         let commitX = size.width * commitFraction
@@ -134,15 +149,38 @@ struct DiscoveryCardComponent: View {
         // Horizontal intent wins when it dominates the vertical — a
         // diagonal gesture should read as left/right, not up/down.
         if abs(horizontal) > abs(vertical), abs(horizontal) > commitX {
-          reset()
-          onSwipe(horizontal > 0 ? .right : .left)
+          dismiss(horizontal > 0 ? .right : .left, in: size)
         } else if abs(vertical) > commitY {
-          reset()
-          onSwipe(vertical < 0 ? .up : .down)
+          dismiss(vertical < 0 ? .up : .down, in: size)
         } else {
           reset()
         }
       }
+  }
+
+  /// Throw the card off-screen in `direction`, THEN report the swipe —
+  /// the parent advances only once the card has visibly left, which is
+  /// what makes the interaction feel like a physical flick rather than an
+  /// instant swap.
+  private func dismiss(_ direction: SwipeDirection, in size: CGSize) {
+    isDismissing = true
+    let travel: CGFloat = 1.6
+    withAnimation(.easeOut(duration: 0.22)) {
+      switch direction {
+      case .left:
+        dragOffset = CGSize(width: -size.width * travel, height: dragOffset.height)
+      case .right:
+        dragOffset = CGSize(width: size.width * travel, height: dragOffset.height)
+      case .up:
+        dragOffset = CGSize(width: dragOffset.width, height: -size.height * travel)
+      case .down:
+        dragOffset = CGSize(width: dragOffset.width, height: size.height * travel)
+      }
+    }
+    Task {
+      try? await Task.sleep(for: .milliseconds(220))
+      onSwipe(direction)
+    }
   }
 
   private func reset() {

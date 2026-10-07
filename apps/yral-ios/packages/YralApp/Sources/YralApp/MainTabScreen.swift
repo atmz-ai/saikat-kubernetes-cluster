@@ -33,7 +33,10 @@ struct MainTabScreen: View {
         dataSource: HomeDiscoveryDataSource(),
         detailDataSource: InfluencerDetailDataSource(),
         idToken: { authClient.idToken },
-        onOpenChat: { _ in selectedTab = .chat }
+        // A match opens the CONVERSATION with that influencer (the same
+        // sheet the Chat list uses). The old handler switched to the Chat
+        // tab but discarded the conversation, so the match was lost.
+        onOpenChat: { conversation in activeConversation = conversation }
       )
       .tabItem { Label("Home", systemImage: "house.fill") }
       .tag(Tab.home)

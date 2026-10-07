@@ -257,6 +257,11 @@ enum HomeDiscoveryMachine {
     case .matchCurrent:
       guard let current = next.currentInfluencer else { return state }
       next.pendingMatch = current
+      // A match advances the deck too (Tinder behaviour): the card has
+      // already flown off-screen, and the conversation opens on the
+      // pendingMatch. Without this the matched card would be stranded
+      // off-screen with no way back.
+      next.deckIndex += 1
 
     case .matchConsumed:
       next.pendingMatch = nil
