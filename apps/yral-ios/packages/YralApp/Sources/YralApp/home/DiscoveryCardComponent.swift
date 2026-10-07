@@ -58,23 +58,32 @@ struct DiscoveryCardComponent: View {
   }
 
   private var coverImage: some View {
-    AsyncImage(url: influencer.avatarURL.flatMap(URL.init(string:))) { phase in
-      switch phase {
-      case .success(let image):
-        image.resizable().scaledToFill()
-      default:
-        ZStack {
-          Color.gray.opacity(0.25)
-          Image(systemName: "person.crop.circle.fill")
+    // A GeometryReader gives the image an EXPLICIT frame equal to the
+    // card. Without it, `scaledToFill` inside the .bottomLeading ZStack
+    // positions the oversized image by that alignment, so it reads as
+    // anchored to one edge instead of centered. With a fixed frame the
+    // fill crops symmetrically around the image's center.
+    GeometryReader { proxy in
+      AsyncImage(url: influencer.avatarURL.flatMap(URL.init(string:))) { phase in
+        switch phase {
+        case .success(let image):
+          image
             .resizable()
-            .scaledToFit()
-            .padding(80)
-            .foregroundStyle(.secondary)
+            .scaledToFill()
+        default:
+          ZStack {
+            Color.gray.opacity(0.25)
+            Image(systemName: "person.crop.circle.fill")
+              .resizable()
+              .scaledToFit()
+              .padding(80)
+              .foregroundStyle(.secondary)
+          }
         }
       }
+      .frame(width: proxy.size.width, height: proxy.size.height)
+      .clipped()
     }
-    .frame(maxWidth: .infinity, maxHeight: .infinity)
-    .clipped()
   }
 
   private var details: some View {
