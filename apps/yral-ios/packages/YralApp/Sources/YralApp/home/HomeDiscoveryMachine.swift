@@ -128,11 +128,13 @@ enum HomeDiscoveryMachine {
     case .refreshLoaded(let items, let generation):
       guard generation == next.generation, next.mode == .feed else { return state }
       next.feed = mergePage(next.feed, items, replacing: true)
+      next.isLoading = false
       next.isRefreshing = false
       next.error = nil
 
     case .refreshFailed(let message, let generation):
       guard generation == next.generation, next.mode == .feed else { return state }
+      next.isLoading = false
       next.isRefreshing = false
       next.error = message
 

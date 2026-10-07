@@ -6,14 +6,23 @@ import SwiftUI
 /// sends events and performs the resulting network work.
 struct HomeFeedScreen: View {
   let dataSource: HomeDiscoveryDataSource?
+  let detailDataSource: InfluencerDetailDataSource?
+  let idToken: () -> String?
+  let onOpenChat: (ChatConversation) -> Void
   @State private var state: HomeDiscoveryMachine.State
   @State private var searchTask: Task<Void, Never>?
 
   init(
     dataSource: HomeDiscoveryDataSource? = nil,
+    detailDataSource: InfluencerDetailDataSource? = nil,
+    idToken: @escaping () -> String? = { nil },
+    onOpenChat: @escaping (ChatConversation) -> Void = { _ in },
     initialState: HomeDiscoveryMachine.State = HomeDiscoveryMachine.State()
   ) {
     self.dataSource = dataSource
+    self.detailDataSource = detailDataSource
+    self.idToken = idToken
+    self.onOpenChat = onOpenChat
     _state = State(initialValue: initialState)
   }
 
@@ -21,9 +30,18 @@ struct HomeFeedScreen: View {
     NavigationStack {
       List {
         ForEach(state.visibleItems) { influencer in
-          influencerRow(influencer)
-            .accessibilityIdentifier("home.influencer.\(influencer.id)")
-            .onAppear { loadMoreIfNeeded(influencer) }
+          NavigationLink {
+            InfluencerDetailScreen(
+              influencerID: influencer.id,
+              dataSource: detailDataSource,
+              idToken: idToken,
+              onOpenChat: onOpenChat
+            )
+          } label: {
+            influencerRow(influencer)
+          }
+          .accessibilityIdentifier("home.influencer.\(influencer.id)")
+          .onAppear { loadMoreIfNeeded(influencer) }
         }
 
         if state.isLoadingMore {

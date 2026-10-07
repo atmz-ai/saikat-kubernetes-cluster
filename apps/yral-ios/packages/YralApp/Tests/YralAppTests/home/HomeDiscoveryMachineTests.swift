@@ -8,6 +8,31 @@ struct HomeDiscoveryMachineTests {
   }
 
   @Test
+  func initialLoadClearsLoadingFlag() {
+    // Regression: the first page arrives via a refresh-style result, so
+    // it MUST clear isLoading or the screen shows an endless spinner.
+    var state = HomeDiscoveryMachine.State()
+    state = HomeDiscoveryMachine.transition(state, .loadInitial)
+    #expect(state.isLoading)
+    state = HomeDiscoveryMachine.transition(
+      state,
+      .refreshLoaded([influencer("a")], generation: 1)
+    )
+    #expect(!state.isLoading)
+    #expect(!state.isRefreshing)
+    #expect(state.visibleItems.map(\.id) == ["a"])
+  }
+
+  @Test
+  func initialLoadFailureClearsLoadingFlag() {
+    var state = HomeDiscoveryMachine.State()
+    state = HomeDiscoveryMachine.transition(state, .loadInitial)
+    state = HomeDiscoveryMachine.transition(state, .refreshFailed("HTTP 503", generation: 1))
+    #expect(!state.isLoading)
+    #expect(state.error == "HTTP 503")
+  }
+
+  @Test
   func initialLoadAndPaginationDeduplicate() {
     var state = HomeDiscoveryMachine.State()
     state = HomeDiscoveryMachine.transition(state, .loadInitial)

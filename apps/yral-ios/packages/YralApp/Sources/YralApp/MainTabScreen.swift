@@ -21,6 +21,7 @@ struct MainTabScreen: View {
   /// resumes exactly where the user left off (operator request
   /// 2026-09-01). Reset inside the sheet is the explicit clear.
   @State private var creationDraft = AICreationDraft()
+  @State private var activeConversation: ChatConversation?
 
   enum Tab: Hashable {
     case home, chat, create, profile, menu
@@ -28,13 +29,24 @@ struct MainTabScreen: View {
 
   var body: some View {
     TabView(selection: $selectedTab) {
-      HomeFeedScreen(dataSource: HomeDiscoveryDataSource())
-        .tabItem { Label("Home", systemImage: "house.fill") }
-        .tag(Tab.home)
+      HomeFeedScreen(
+        dataSource: HomeDiscoveryDataSource(),
+        detailDataSource: InfluencerDetailDataSource(),
+        idToken: { authClient.idToken },
+        onOpenChat: { _ in selectedTab = .chat }
+      )
+      .tabItem { Label("Home", systemImage: "house.fill") }
+      .tag(Tab.home)
 
-      ChatScreen()
-        .tabItem { Label("Chat", systemImage: "bubble.left.and.bubble.right.fill") }
-        .tag(Tab.chat)
+      ChatScreen(
+        dataSource: ChatDataSource(),
+        idToken: { authClient.idToken },
+        onOpenConversation: { conversation in
+          activeConversation = conversation
+        }
+      )
+      .tabItem { Label("Chat", systemImage: "bubble.left.and.bubble.right.fill") }
+      .tag(Tab.chat)
 
       // The create tab is a button, not a destination: tapping it
       // pushes the creation flow as a sheet from anywhere.
@@ -71,6 +83,15 @@ struct MainTabScreen: View {
       // MainTabView (outside the sheet) and resumes on the next
       // Create tap. Reset inside the sheet is the explicit clear.
       .presentationDragIndicator(.visible)
+    }
+    .sheet(item: $activeConversation) { conversation in
+      NavigationStack {
+        ChatConversationScreen(
+          conversation: conversation,
+          dataSource: ChatDataSource(),
+          idToken: { authClient.idToken }
+        )
+      }
     }
   }
 }
