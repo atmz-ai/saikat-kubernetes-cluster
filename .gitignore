@@ -5,8 +5,6 @@
 .venv/
 ansible/.vault_pass
 ansible/collections/
-apps/hetzner-bare-metal-fleet/*.egg-info/
-apps/hetzner-bare-metal-fleet/.venv/
 apps/yral-ios/.build/
 apps/yral-ios/build/
 apps/yral-ios/DerivedData/

@@ -2,7 +2,7 @@
 #
 # The hub is a PocketBase web application that provides a dashboard for viewing
 # and managing connected systems (agents). Agents run on each monitored host in
-# the hetzner-bare-metal-fleet and connect to the hub via WebSocket.
+# the cluster and connect to the hub via WebSocket.
 #
 # Image: henrygd/beszel (Docker Hub, multi-arch amd64/arm64)
 # Port: 8090  |  Data dir: /beszel_data (SQLite, PVC-backed)

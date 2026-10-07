@@ -14,9 +14,9 @@ name: API Version Audit
 # CRDs (Gateway API, Tekton, Strimzi, Cilium, Longhorn, ...) are out of its
 # scope entirely.
 #
-# Runs on the same footing as fleet-maintenance: the runner holds only mise plus
-# the Ansible vault password, and `mise run bootstrap` extracts the kubeconfig
-# from the vault. Read-only against the cluster (kubectl get/api-resources).
+# Runs standalone: the runner holds only mise plus the Ansible vault password,
+# and `mise run bootstrap` extracts the kubeconfig from the vault. Read-only
+# against the cluster (kubectl get/api-resources).
 on:
   schedule:
     - cron: "0 4 * * 1"  # Mondays 09:30 IST (04:00 UTC)
@@ -44,9 +44,8 @@ jobs:
         run: |
           set -e
 
-          # Same vault-password bootstrap as fleet-maintenance: the runner only
-          # has mise + this one secret. `mise run bootstrap` uses it to extract
-          # the kubeconfig from the vault to ~/.kube/config.
+          # The runner only has mise + this one secret. `mise run bootstrap` uses
+          # it to extract the kubeconfig from the vault to ~/.kube/config.
           echo "$ANSIBLE_VAULT_PASSWORD" > ansible/.vault_pass
           chmod 600 ansible/.vault_pass
           [ -s ansible/.vault_pass ] || {

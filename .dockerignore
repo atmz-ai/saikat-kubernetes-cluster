@@ -2,7 +2,6 @@
 .git/
 .venv/
 ansible/collections/
-apps/hetzner-bare-metal-fleet/.venv/
 apps/yral-ios/build/
 apps/yral-ios/packages/YralApp/.build/
 apps/yral-rishi-agent/.venv/

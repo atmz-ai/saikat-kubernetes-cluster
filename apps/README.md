@@ -46,7 +46,6 @@ git submodule update --init --recursive
 
 | App                             | Deployed at                                                 |
 | ------------------------------- | ----------------------------------------------------------- |
-| `apps/hetzner-bare-metal-fleet/` | Standalone Hetzner servers (Ansible fleet automation)      |
 | `apps/my-website/`             | `saikat.dev`                                                |
 | `apps/yral-auth/`               | `auth.yral.com`                                             |
 | `apps/yral-web/`             | `legacy.yral.com`                                           |

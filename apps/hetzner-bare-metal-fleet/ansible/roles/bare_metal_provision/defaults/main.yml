@@ -1,5 +1,0 @@
----
-# Role-private knobs: provisioning marker + destructive re-provision override.
-# Re-provisioning wipes the server; force with -e bare_metal_provision_force_provision=true
-bare_metal_provision_provision_marker: "/root/.provisioned"
-bare_metal_provision_force_provision: false
