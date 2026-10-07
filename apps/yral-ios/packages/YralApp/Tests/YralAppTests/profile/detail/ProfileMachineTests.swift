@@ -65,3 +65,56 @@ struct ProfileMachineTests {
     #expect(ProfileMachine.transition(state, .cancel) == state)
   }
 }
+
+struct ProfilePostsMachineTests {
+  private func post(_ id: String) -> SpacetimePostDetails {
+    SpacetimePostDetails(
+      id: id,
+      description: "",
+      hashtags: [],
+      videoUID: id,
+      creatorOauthSubject: "me",
+      createdAtMicros: 0,
+      totalViewCount: 0,
+      likeCount: 0,
+      likedByMe: false,
+      status: .readyToView
+    )
+  }
+
+  @Test
+  func loadAndPaginateDeduplicate() {
+    var state = ProfilePostsMachine.State()
+    state = ProfilePostsMachine.transition(state, .load)
+    #expect(state.isLoading)
+    let page = (0..<ProfilePostsMachine.pageSize).map { post("p\($0)") }
+    state = ProfilePostsMachine.transition(state, .loaded(page, hasMore: true))
+    #expect(state.posts.count == ProfilePostsMachine.pageSize)
+    #expect(!state.isExhausted)
+
+    state = ProfilePostsMachine.transition(state, .loadMore)
+    let next = (0..<ProfilePostsMachine.pageSize).map { post("q\($0)") }
+    state = ProfilePostsMachine.transition(state, .moreLoaded([page[0]] + next, hasMore: true))
+    #expect(state.posts.count == ProfilePostsMachine.pageSize * 2)
+    #expect(Set(state.posts.map(\.id)).count == state.posts.count)
+  }
+
+  @Test
+  func shortPageOrNoMoreMarksExhausted() {
+    var state = ProfilePostsMachine.State()
+    state = ProfilePostsMachine.transition(state, .load)
+    state = ProfilePostsMachine.transition(state, .loaded([post("only")], hasMore: false))
+    #expect(state.isExhausted)
+    #expect(ProfilePostsMachine.transition(state, .loadMore) == state)
+  }
+
+  @Test
+  func failurePreservesPosts() {
+    var state = ProfilePostsMachine.State()
+    state = ProfilePostsMachine.transition(state, .load)
+    state = ProfilePostsMachine.transition(state, .loaded([post("a")], hasMore: false))
+    state = ProfilePostsMachine.transition(state, .loadFailed("HTTP 503"))
+    #expect(state.posts.map(\.id) == ["a"])
+    #expect(state.error == "HTTP 503")
+  }
+}

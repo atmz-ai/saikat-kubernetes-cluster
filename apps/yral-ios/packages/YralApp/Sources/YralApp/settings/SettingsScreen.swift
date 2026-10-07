@@ -16,8 +16,6 @@ struct SettingsScreen: View {
   let sessionStore: SessionStore
 
   @State private var isAlertsEnabled = false
-  @State private var isDeleteSheetShown = false
-  @State private var isDeletingAccount = false
   @State private var isAccountSwitcherShown = false
   @State private var actionError: String?
   @Environment(\.openURL) private var openURL
@@ -43,6 +41,7 @@ struct SettingsScreen: View {
       List {
         accountSection
         togglesSection
+        helpSection
         dangerSection
       }
       #if canImport(UIKit)
@@ -56,22 +55,6 @@ struct SettingsScreen: View {
     #if canImport(UIKit)
       .toolbar(.hidden, for: .navigationBar)
     #endif
-    // Native CENTERED alert (not confirmationDialog — that renders
-    // as a bottom action sheet on iPhone and a source-anchored
-    // popover on iPad; the user asked for the standard centered
-    // modal). One destructive decision → alert is the canonical
-    // presentation.
-    .alert(
-      "Delete your account?",
-      isPresented: $isDeleteSheetShown
-    ) {
-      Button("Yes, delete", role: .destructive) {
-        Task { await deleteAccount() }
-      }
-      Button("No, take me back", role: .cancel) {}
-    } message: {
-      Text("This permanently removes your account, posts, and data. This cannot be undone.")
-    }
   }
 
   // MARK: - Header (Kotlin AccountsTitle)
@@ -132,14 +115,28 @@ struct SettingsScreen: View {
     }
   }
 
-  // MARK: - Logout + delete (Kotlin HelpLinks logout row + delete sheet)
+  // MARK: - Help, legal, and version
 
-  // TODO(bury-delete-account): "Delete account" is far too exposed as
-  // a top-level row here — one mistaken tap on the most destructive
-  // action in the app. Restructure: Menu gets a "Settings" top-level
-  // entry, and Delete account moves into a submenu under it (e.g.
-  // Menu → Settings → Account → Delete account) so it takes
-  // deliberate navigation to reach. Sign out stays a top-level row.
+  private var helpSection: some View {
+    Section {
+      Link("Help & support", destination: URL(string: "https://www.yral.com/support")!)
+      Link("Terms of Service", destination: URL(string: "https://www.yral.com/terms")!)
+      Link("Privacy Policy", destination: URL(string: "https://www.yral.com/privacy")!)
+      LabeledContent("Version", value: Self.appVersion)
+        .accessibilityIdentifier("settings.version")
+    }
+  }
+
+  /// Marketing version + build, straight from the bundle.
+  static var appVersion: String {
+    let info = Bundle.main.infoDictionary
+    let version = info?["CFBundleShortVersionString"] as? String ?? "—"
+    let build = info?["CFBundleVersion"] as? String ?? "—"
+    return "\(version) (\(build))"
+  }
+
+  // MARK: - Logout (top-level) + account management submenu
+
   private var dangerSection: some View {
     Section {
       Button {
@@ -152,18 +149,16 @@ struct SettingsScreen: View {
         AccountSwitcherScreen(authClient: authClient)
       }
 
+      NavigationLink {
+        AccountManagementScreen(authClient: authClient, actionError: $actionError)
+      } label: {
+        Text("Account")
+      }
+
       Button {
         Task { await authClient.logout() }
       } label: {
         Text("Sign out")
-          .frame(maxWidth: .infinity, alignment: .leading)
-      }
-
-      Button {
-        isDeleteSheetShown = true
-      } label: {
-        Text("Delete account")
-          .foregroundStyle(.pink)
           .frame(maxWidth: .infinity, alignment: .leading)
       }
 
@@ -175,23 +170,6 @@ struct SettingsScreen: View {
     }
   }
 
-  /// Kotlin `AccountsViewModel.deleteAccount` (main-account path): call
-  /// the off-chain delete endpoint via the auth client, then logout
-  /// (the client method handles both). AI account accounts need the
-  /// soft-delete-on-AI account-server path — that lands with the AI accounts phase.
-  private func deleteAccount() async {
-    isDeletingAccount = true
-    defer { isDeletingAccount = false }
-    do {
-      try await authClient.deleteAccount()
-    } catch {
-      CrashReporter.record(error, context: "account-deletion")
-      let reason =
-        (error as? LocalizedError)?.errorDescription
-        ?? String(describing: error)
-      actionError = "Failed to delete account: \(reason)"
-    }
-  }
 }
 
 #Preview {

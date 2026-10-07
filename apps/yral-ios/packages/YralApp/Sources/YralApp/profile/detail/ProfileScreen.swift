@@ -34,6 +34,7 @@ struct ProfileScreen: View {
             }
           case .ready(let details):
             profileDetails(details)
+            postsSection
           case .editing(_, let draft, let error):
             editor(draft, error: error, saving: false)
           case .saving(_, let draft):
@@ -106,6 +107,14 @@ struct ProfileScreen: View {
         }
       }
     }
+  }
+
+  private var postsSection: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      Text("Posts").font(.headline)
+      ProfilePostsGrid(subject: sessionStore.userSubject, dataSource: dataSource)
+    }
+    .accessibilityIdentifier("profile.posts")
   }
 
   private func profileDetails(_ details: ProfileMachine.Details) -> some View {

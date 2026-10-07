@@ -50,6 +50,15 @@ enum ProfileMachine {
       if case .saving(_, let draft) = self { return draft }
       return nil
     }
+
+    var details: Details? {
+      switch self {
+      case .ready(let details), .editing(let details, _, _), .saving(let details, _):
+        return details
+      case .idle, .loading, .failed:
+        return nil
+      }
+    }
   }
 
   enum Event {
