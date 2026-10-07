@@ -28,51 +28,10 @@ struct HomeFeedScreen: View {
 
   var body: some View {
     NavigationStack {
-      List {
-        ForEach(state.visibleItems) { influencer in
-          NavigationLink {
-            InfluencerDetailScreen(
-              influencerID: influencer.id,
-              dataSource: detailDataSource,
-              idToken: idToken,
-              onOpenChat: onOpenChat
-            )
-          } label: {
-            influencerRow(influencer)
-          }
-          .accessibilityIdentifier("home.influencer.\(influencer.id)")
-          .onAppear { loadMoreIfNeeded(influencer) }
-        }
-
-        if state.isLoadingMore {
-          ProgressView("Loading more")
-            .frame(maxWidth: .infinity)
-            .listRowSeparator(.hidden)
-        }
-
-        if let error = state.error {
-          ContentUnavailableView {
-            Label("Discovery unavailable", systemImage: "wifi.exclamationmark")
-          } description: {
-            Text(error)
-          } actions: {
-            Button("Retry", systemImage: "arrow.clockwise") { retry() }
-          }
-          .listRowSeparator(.hidden)
-          .accessibilityIdentifier("home.error")
-        } else if !state.isBusy && state.visibleItems.isEmpty {
-          ContentUnavailableView {
-            Label("No influencers yet", systemImage: "person.2")
-          } description: {
-            Text("Pull down to refresh discovery.")
-          }
-          .listRowSeparator(.hidden)
-          .accessibilityIdentifier("home.empty")
-        }
+      ZStack {
+        Color.black.ignoresSafeArea()
+        content
       }
-      .listStyle(.plain)
-      .scrollContentBackground(.hidden)
-      .background(Color.black)
       .navigationTitle("Discover")
       .searchable(
         text: Binding(
@@ -83,25 +42,148 @@ struct HomeFeedScreen: View {
         prompt: "Search AI influencers"
       )
       .accessibilityIdentifier("home.search")
-      .refreshable { await refresh() }
-      .overlay {
-        if state.isLoading && state.visibleItems.isEmpty {
-          ProgressView("Loading discovery")
-            .accessibilityIdentifier("home.loading")
-        }
-      }
-      .overlay(alignment: .top) {
-        if state.isRefreshing {
-          ProgressView()
-            .padding(8)
-            .background(.ultraThinMaterial, in: Capsule())
-            .accessibilityIdentifier("home.refreshing")
-        }
-      }
     }
     .task { await loadInitialIfNeeded() }
     .onChange(of: state.searchQuery) { _, _ in scheduleSearchDebounce() }
+    .onChange(of: state.pendingMatch) { _, match in
+      if let match { Task { await startChat(with: match) } }
+    }
     .onDisappear { searchTask?.cancel() }
+  }
+
+  @ViewBuilder
+  private var content: some View {
+    if state.isLoading && state.visibleItems.isEmpty {
+      ProgressView("Loading discovery")
+        .accessibilityIdentifier("home.loading")
+    } else if let error = state.error, state.visibleItems.isEmpty {
+      ContentUnavailableView {
+        Label("Discovery unavailable", systemImage: "wifi.exclamationmark")
+      } description: {
+        Text(error)
+      } actions: {
+        Button("Retry", systemImage: "arrow.clockwise") { retry() }
+      }
+      .accessibilityIdentifier("home.error")
+    } else if state.isDeckExhausted {
+      if state.isLoadingMore {
+        ProgressView("Loading more")
+      } else {
+        ContentUnavailableView {
+          Label("That's everyone for now", systemImage: "checkmark.circle")
+        } description: {
+          Text("Pull down to refresh, or search for someone specific.")
+        } actions: {
+          Button("Refresh", systemImage: "arrow.clockwise") { Task { await refresh() } }
+        }
+        .accessibilityIdentifier("home.deckExhausted")
+      }
+    } else {
+      deck
+    }
+  }
+
+  /// The stacked card deck. The next card sits behind the current one so
+  /// the surface feels like a pile; only the top card is draggable.
+  private var deck: some View {
+    ZStack {
+      if let next = state.nextInfluencer {
+        DiscoveryCardComponent(influencer: next, onSwipe: { _ in })
+          .scaleEffect(0.95)
+          .opacity(0.5)
+          .allowsHitTesting(false)
+          .accessibilityHidden(true)
+      }
+      if let current = state.currentInfluencer {
+        DiscoveryCardComponent(influencer: current) { direction in
+          handleSwipe(direction)
+        }
+        .id(current.id)
+      }
+      actionBar
+    }
+    .padding(16)
+    .gesture(
+      // Swipe-down undo works anywhere on the deck (not just the card),
+      // so a user who swiped too far can recover without aiming.
+      DragGesture(minimumDistance: 40)
+        .onEnded { value in
+          if value.translation.height > 80, abs(value.translation.width) < 60 {
+            send(.previous)
+          }
+        }
+    )
+  }
+
+  private var actionBar: some View {
+    VStack {
+      Spacer()
+      HStack(spacing: 32) {
+        actionButton("xmark", color: .red) { send(.rejectCurrent) }
+          .accessibilityIdentifier("home.reject")
+          .accessibilityLabel("Reject")
+        actionButton("chevron.up", color: .gray) { send(.nextCurrent) }
+          .accessibilityIdentifier("home.next")
+          .accessibilityLabel("Next")
+        actionButton("heart.fill", color: .green) { send(.matchCurrent) }
+          .accessibilityIdentifier("home.match")
+          .accessibilityLabel("Match")
+      }
+      .padding(.bottom, 8)
+    }
+  }
+
+  private func actionButton(
+    _ systemImage: String, color: Color, action: @escaping () -> Void
+  ) -> some View {
+    Button(action: action) {
+      Image(systemName: systemImage)
+        .font(.system(size: 26, weight: .bold))
+        .foregroundStyle(color)
+        .frame(width: 64, height: 64)
+        .background(.ultraThinMaterial, in: Circle())
+    }
+  }
+
+  private func handleSwipe(_ direction: DiscoveryCardComponent.SwipeDirection) {
+    switch direction {
+    case .left: send(.rejectCurrent)
+    case .right: send(.matchCurrent)
+    case .up: send(.nextCurrent)
+    case .down: send(.previous)
+    }
+    prefetchIfNeeded()
+  }
+
+  /// Loads the next page when the deck nears the end of what's loaded, so
+  /// swiping stays uninterrupted.
+  private func prefetchIfNeeded() {
+    guard state.mode == .feed,
+      !state.feed.isExhausted,
+      state.visibleItems.count - state.deckIndex <= 3
+    else { return }
+    send(.loadMore)
+    Task {
+      await loadFeed(offset: state.feed.nextOffset, generation: state.generation, replacing: false)
+    }
+  }
+
+  /// A right-swipe starts (or resumes) a conversation and hands off to chat.
+  private func startChat(with influencer: DiscoveryInfluencer) async {
+    guard let detailDataSource, let token = idToken(), !token.isEmpty else {
+      send(.matchConsumed)
+      return
+    }
+    do {
+      let conversation = try await detailDataSource.startConversation(
+        influencerID: influencer.id, idToken: token
+      )
+      send(.matchConsumed)
+      onOpenChat(conversation)
+    } catch {
+      CrashReporter.record(error, context: "home-match-start-chat")
+      send(.matchConsumed)
+    }
   }
 
   #if canImport(UIKit)
@@ -110,36 +192,6 @@ struct HomeFeedScreen: View {
   #else
     private static let searchPlacement: SearchFieldPlacement = .automatic
   #endif
-
-  private func influencerRow(_ influencer: DiscoveryInfluencer) -> some View {
-    HStack(spacing: 12) {
-      AsyncImage(url: influencer.avatarURL.flatMap(URL.init(string:))) { image in
-        image.resizable().scaledToFill()
-      } placeholder: {
-        Image(systemName: "person.crop.circle.fill")
-          .resizable()
-          .foregroundStyle(.secondary)
-      }
-      .frame(width: 52, height: 52)
-      .clipShape(Circle())
-
-      VStack(alignment: .leading, spacing: 4) {
-        Text(influencer.displayName)
-          .font(.headline)
-          .accessibilityIdentifier("home.influencer.\(influencer.id).name")
-        Text("@\(influencer.username)")
-          .font(.subheadline)
-          .foregroundStyle(.secondary)
-        if let description = influencer.description {
-          Text(description)
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .lineLimit(2)
-        }
-      }
-    }
-    .padding(.vertical, 8)
-  }
 
   private func send(_ event: HomeDiscoveryMachine.Event) {
     state = HomeDiscoveryMachine.transition(state, event)
@@ -155,17 +207,6 @@ struct HomeFeedScreen: View {
     guard dataSource != nil else { return }
     send(.refresh)
     await loadFeed(offset: 0, generation: state.generation, replacing: true)
-  }
-
-  private func loadMoreIfNeeded(_ influencer: DiscoveryInfluencer) {
-    guard state.mode == .feed,
-      influencer.id == state.visibleItems.last?.id,
-      !state.feed.isExhausted
-    else { return }
-    send(.loadMore)
-    Task {
-      await loadFeed(offset: state.feed.nextOffset, generation: state.generation, replacing: false)
-    }
   }
 
   private func retry() {

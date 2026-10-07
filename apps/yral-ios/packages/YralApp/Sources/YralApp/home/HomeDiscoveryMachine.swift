@@ -40,6 +40,13 @@ enum HomeDiscoveryMachine {
     var isSearching: Bool
     var error: String?
     var generation: Int
+    /// Cursor into `visibleItems` for the swipe deck. Swipe up / reject /
+    /// match advance it; swipe down walks it back (undo). Reset to the top
+    /// whenever the underlying list is replaced.
+    var deckIndex: Int
+    /// Set by a right-swipe (match); the screen starts the conversation and
+    /// then sends `.matchConsumed`. Nil otherwise.
+    var pendingMatch: DiscoveryInfluencer?
 
     init(
       mode: Mode = .feed,
@@ -51,7 +58,9 @@ enum HomeDiscoveryMachine {
       isLoadingMore: Bool = false,
       isSearching: Bool = false,
       error: String? = nil,
-      generation: Int = 0
+      generation: Int = 0,
+      deckIndex: Int = 0,
+      pendingMatch: DiscoveryInfluencer? = nil
     ) {
       self.mode = mode
       self.feed = feed
@@ -63,11 +72,30 @@ enum HomeDiscoveryMachine {
       self.isSearching = isSearching
       self.error = error
       self.generation = generation
+      self.deckIndex = deckIndex
+      self.pendingMatch = pendingMatch
     }
 
     var visibleItems: [DiscoveryInfluencer] {
       mode == .feed ? feed.items : searchResults
     }
+
+    /// The card currently on top of the deck — nil once the user has
+    /// swiped past the end (or when there is nothing to show yet).
+    var currentInfluencer: DiscoveryInfluencer? {
+      visibleItems.indices.contains(deckIndex) ? visibleItems[deckIndex] : nil
+    }
+
+    /// The card peeking from behind, so the deck feels stacked.
+    var nextInfluencer: DiscoveryInfluencer? {
+      visibleItems.indices.contains(deckIndex + 1) ? visibleItems[deckIndex + 1] : nil
+    }
+
+    var canGoPrevious: Bool { deckIndex > 0 }
+
+    /// True when the cursor has run past every loaded card (the deck is
+    /// exhausted but more pages may still be loading).
+    var isDeckExhausted: Bool { deckIndex >= visibleItems.count }
 
     var isBusy: Bool { isLoading || isRefreshing || isLoadingMore || isSearching }
   }
@@ -87,6 +115,16 @@ enum HomeDiscoveryMachine {
     case searchLoaded([DiscoveryInfluencer], query: String, generation: Int)
     case searchFailed(String, query: String, generation: Int)
     case clearSearch
+    /// Deck interaction: swipe left (reject) or swipe up (next) — pure
+    /// forward navigation; the reason is retained only for analytics/tests.
+    case rejectCurrent
+    case nextCurrent
+    /// Swipe down — walk the cursor back to the previous card.
+    case previous
+    /// Swipe right (match) — records the pending match for the screen to
+    /// act on (start a conversation), then `.matchConsumed` clears it.
+    case matchCurrent
+    case matchConsumed
   }
 
   static func transition(_ state: State, _ event: Event) -> State {
@@ -97,6 +135,8 @@ enum HomeDiscoveryMachine {
       next.feed = FeedPage()
       next.searchQuery = ""
       next.searchResults = []
+      next.deckIndex = 0
+      next.pendingMatch = nil
       next.isLoading = true
       next.isRefreshing = false
       next.isLoadingMore = false
@@ -107,6 +147,7 @@ enum HomeDiscoveryMachine {
     case .feedLoaded(let items, let generation):
       guard generation == next.generation, next.mode == .feed else { return state }
       next.feed = mergePage(next.feed, items, replacing: true)
+      next.deckIndex = 0
       next.isLoading = false
       next.isRefreshing = false
       next.isLoadingMore = false
@@ -128,6 +169,8 @@ enum HomeDiscoveryMachine {
     case .refreshLoaded(let items, let generation):
       guard generation == next.generation, next.mode == .feed else { return state }
       next.feed = mergePage(next.feed, items, replacing: true)
+      next.deckIndex = 0
+      next.pendingMatch = nil
       next.isLoading = false
       next.isRefreshing = false
       next.error = nil
@@ -197,9 +240,26 @@ enum HomeDiscoveryMachine {
       next.mode = .feed
       next.searchQuery = ""
       next.searchResults = []
+      next.deckIndex = 0
+      next.pendingMatch = nil
       next.isSearching = false
       next.error = nil
       next.generation += 1
+
+    case .rejectCurrent, .nextCurrent:
+      guard next.currentInfluencer != nil else { return state }
+      next.deckIndex += 1
+
+    case .previous:
+      guard next.canGoPrevious else { return state }
+      next.deckIndex -= 1
+
+    case .matchCurrent:
+      guard let current = next.currentInfluencer else { return state }
+      next.pendingMatch = current
+
+    case .matchConsumed:
+      next.pendingMatch = nil
     }
     return next
   }

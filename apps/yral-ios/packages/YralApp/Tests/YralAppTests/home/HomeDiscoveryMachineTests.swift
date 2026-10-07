@@ -8,6 +8,67 @@ struct HomeDiscoveryMachineTests {
   }
 
   @Test
+  func deckSwipeNavigationMovesCursor() {
+    var state = HomeDiscoveryMachine.State()
+    state = HomeDiscoveryMachine.transition(state, .loadInitial)
+    state = HomeDiscoveryMachine.transition(
+      state,
+      .refreshLoaded([influencer("a"), influencer("b"), influencer("c")], generation: 1)
+    )
+    #expect(state.currentInfluencer?.id == "a")
+    #expect(state.nextInfluencer?.id == "b")
+    #expect(!state.canGoPrevious)
+
+    state = HomeDiscoveryMachine.transition(state, .nextCurrent)
+    #expect(state.currentInfluencer?.id == "b")
+    state = HomeDiscoveryMachine.transition(state, .rejectCurrent)
+    #expect(state.currentInfluencer?.id == "c")
+
+    #expect(state.canGoPrevious)
+    state = HomeDiscoveryMachine.transition(state, .previous)
+    #expect(state.currentInfluencer?.id == "b")
+
+    state = HomeDiscoveryMachine.transition(state, .nextCurrent)
+    state = HomeDiscoveryMachine.transition(state, .nextCurrent)
+    #expect(state.isDeckExhausted)
+    #expect(state.currentInfluencer == nil)
+  }
+
+  @Test
+  func matchRecordsPendingMatchUntilConsumed() {
+    var state = HomeDiscoveryMachine.State()
+    state = HomeDiscoveryMachine.transition(state, .loadInitial)
+    state = HomeDiscoveryMachine.transition(state, .refreshLoaded([influencer("a")], generation: 1))
+    state = HomeDiscoveryMachine.transition(state, .matchCurrent)
+    #expect(state.pendingMatch?.id == "a")
+    // A match does NOT advance the cursor on its own — the screen starts
+    // the chat first, then consumes the match.
+    #expect(state.currentInfluencer?.id == "a")
+    state = HomeDiscoveryMachine.transition(state, .matchConsumed)
+    #expect(state.pendingMatch == nil)
+  }
+
+  @Test
+  func deckResetsOnRefreshAndSearch() {
+    var state = HomeDiscoveryMachine.State()
+    state = HomeDiscoveryMachine.transition(state, .loadInitial)
+    state = HomeDiscoveryMachine.transition(
+      state, .refreshLoaded([influencer("a"), influencer("b")], generation: 1))
+    state = HomeDiscoveryMachine.transition(state, .nextCurrent)
+    #expect(state.deckIndex == 1)
+
+    state = HomeDiscoveryMachine.transition(state, .refresh)
+    state = HomeDiscoveryMachine.transition(state, .refreshLoaded([influencer("z")], generation: 2))
+    #expect(state.deckIndex == 0)
+
+    state = HomeDiscoveryMachine.transition(state, .searchChanged("aura"))
+    #expect(state.deckIndex == 0)
+    state = HomeDiscoveryMachine.transition(
+      state, .searchLoaded([influencer("s1"), influencer("s2")], query: "aura", generation: 3))
+    #expect(state.currentInfluencer?.id == "s1")
+  }
+
+  @Test
   func initialLoadClearsLoadingFlag() {
     // Regression: the first page arrives via a refresh-style result, so
     // it MUST clear isLoading or the screen shows an endless spinner.
