@@ -1,16 +1,16 @@
 import SwiftUI
 
-/// Home — AI-influencer discovery. Feed pagination, pull-to-refresh,
-/// debounced search, loading/empty/error states, and stale-result
-/// rejection are driven by `HomeDiscoveryMachine`; this view only
-/// sends events and performs the resulting network work.
+/// Home — AI-influencer discovery as a full-bleed swipe deck. Deck
+/// navigation, pagination, and match/stale-result handling are driven by
+/// `HomeDiscoveryMachine`; this view only sends events and performs the
+/// resulting network work. There is deliberately no nav bar or search
+/// chrome — the card fills the screen.
 struct HomeFeedScreen: View {
   let dataSource: HomeDiscoveryDataSource?
   let detailDataSource: InfluencerDetailDataSource?
   let idToken: () -> String?
   let onOpenChat: (ChatConversation) -> Void
   @State private var state: HomeDiscoveryMachine.State
-  @State private var searchTask: Task<Void, Never>?
 
   init(
     dataSource: HomeDiscoveryDataSource? = nil,
@@ -27,28 +27,14 @@ struct HomeFeedScreen: View {
   }
 
   var body: some View {
-    NavigationStack {
-      ZStack {
-        Color.black.ignoresSafeArea()
-        content
-      }
-      .navigationTitle("Discover")
-      .searchable(
-        text: Binding(
-          get: { state.searchQuery },
-          set: { send(.searchChanged($0)) }
-        ),
-        placement: Self.searchPlacement,
-        prompt: "Search AI influencers"
-      )
-      .accessibilityIdentifier("home.search")
+    ZStack {
+      Color.black.ignoresSafeArea()
+      content
     }
     .task { await loadInitialIfNeeded() }
-    .onChange(of: state.searchQuery) { _, _ in scheduleSearchDebounce() }
     .onChange(of: state.pendingMatch) { _, match in
       if let match { Task { await startChat(with: match) } }
     }
-    .onDisappear { searchTask?.cancel() }
   }
 
   @ViewBuilder
@@ -72,7 +58,7 @@ struct HomeFeedScreen: View {
         ContentUnavailableView {
           Label("That's everyone for now", systemImage: "checkmark.circle")
         } description: {
-          Text("Pull down to refresh, or search for someone specific.")
+          Text("You've seen every influencer in this batch.")
         } actions: {
           Button("Refresh", systemImage: "arrow.clockwise") { Task { await refresh() } }
         }
@@ -84,7 +70,8 @@ struct HomeFeedScreen: View {
   }
 
   /// The stacked card deck. The next card sits behind the current one so
-  /// the surface feels like a pile; only the top card is draggable.
+  /// the surface feels like a pile; only the top card is draggable. The
+  /// deck fills the screen — no chrome, no padding — for an immersive read.
   private var deck: some View {
     ZStack {
       if let next = state.nextInfluencer {
@@ -102,7 +89,7 @@ struct HomeFeedScreen: View {
       }
       actionBar
     }
-    .padding(16)
+    .ignoresSafeArea()
     .gesture(
       // Swipe-down undo works anywhere on the deck (not just the card),
       // so a user who swiped too far can recover without aiming.
@@ -129,7 +116,9 @@ struct HomeFeedScreen: View {
           .accessibilityIdentifier("home.match")
           .accessibilityLabel("Match")
       }
-      .padding(.bottom, 8)
+      // Clears the floating tab bar (which overlays the safe area) so the
+      // buttons are always tappable.
+      .padding(.bottom, 96)
     }
   }
 
@@ -186,13 +175,6 @@ struct HomeFeedScreen: View {
     }
   }
 
-  #if canImport(UIKit)
-    private static let searchPlacement: SearchFieldPlacement = .navigationBarDrawer(
-      displayMode: .always)
-  #else
-    private static let searchPlacement: SearchFieldPlacement = .automatic
-  #endif
-
   private func send(_ event: HomeDiscoveryMachine.Event) {
     state = HomeDiscoveryMachine.transition(state, event)
   }
@@ -210,31 +192,12 @@ struct HomeFeedScreen: View {
   }
 
   private func retry() {
-    if state.mode == .feed {
+    Task {
       if state.visibleItems.isEmpty {
-        Task { await loadInitialIfNeeded() }
+        await loadInitialIfNeeded()
       } else {
-        Task { await refresh() }
+        await refresh()
       }
-    } else {
-      scheduleSearchDebounce(immediate: true)
-    }
-  }
-
-  private func scheduleSearchDebounce(immediate: Bool = false) {
-    searchTask?.cancel()
-    let query = state.searchQuery
-    let generation = state.generation
-    guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-    searchTask = Task {
-      if !immediate {
-        try? await Task.sleep(
-          nanoseconds: HomeDiscoveryMachine.searchDebounceNanoseconds
-        )
-      }
-      guard !Task.isCancelled else { return }
-      send(.searchDebounced(query, generation: generation))
-      await search(query: query, generation: generation)
     }
   }
 
@@ -260,22 +223,6 @@ struct HomeFeedScreen: View {
       } else {
         send(.moreFailed(message, generation: generation))
       }
-    }
-  }
-
-  private func search(query: String, generation: Int) async {
-    guard let dataSource else { return }
-    do {
-      let results = try await dataSource.search(
-        query: query,
-        limit: HomeDiscoveryMachine.pageSize
-      )
-      guard !Task.isCancelled else { return }
-      send(.searchLoaded(results, query: query, generation: generation))
-    } catch {
-      guard !Task.isCancelled else { return }
-      CrashReporter.record(error, context: "home-discovery-search")
-      send(.searchFailed(Self.userMessage(for: error), query: query, generation: generation))
     }
   }
 
@@ -333,17 +280,5 @@ struct HomeFeedScreen: View {
 #Preview("Error") {
   HomeFeedScreen(
     initialState: HomeDiscoveryMachine.State(error: "HTTP 503: service unavailable")
-  )
-}
-
-#Preview("Search") {
-  HomeFeedScreen(
-    initialState: HomeDiscoveryMachine.State(
-      mode: .search("aura"),
-      searchQuery: "aura",
-      searchResults: [
-        DiscoveryInfluencer(id: "aura", username: "aura", displayName: "Aura")
-      ]
-    )
   )
 }

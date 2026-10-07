@@ -3,6 +3,10 @@ import SwiftUI
 /// A single draggable influencer card for the discovery deck. The card
 /// owns only the transient drag offset and opacity; committing a swipe is
 /// the parent's decision — it reports the direction and resets itself.
+///
+/// The card is a full-bleed COVER: the avatar fills the whole surface and
+/// the identity details sit on a legibility gradient at the bottom, so
+/// the deck reads as one immersive image rather than a bordered tile.
 struct DiscoveryCardComponent: View {
   let influencer: DiscoveryInfluencer
   let onSwipe: (SwipeDirection) -> Void
@@ -33,46 +37,67 @@ struct DiscoveryCardComponent: View {
   }
 
   private var card: some View {
-    VStack(alignment: .leading, spacing: 16) {
-      Spacer(minLength: 0)
-
-      AsyncImage(url: influencer.avatarURL.flatMap(URL.init(string:))) { image in
-        image.resizable().scaledToFill()
-      } placeholder: {
-        Image(systemName: "person.crop.circle.fill")
-          .resizable()
-          .foregroundStyle(.secondary)
-      }
-      .frame(maxWidth: .infinity)
-      .frame(height: 260)
-      .clipShape(RoundedRectangle(cornerRadius: 20))
-
-      VStack(alignment: .leading, spacing: 6) {
-        Text(influencer.displayName)
-          .font(.title2.bold())
-          .accessibilityIdentifier("home.card.\(influencer.id).name")
-        Text("@\(influencer.username)")
-          .font(.subheadline)
-          .foregroundStyle(.secondary)
-        if let description = influencer.description {
-          Text(description)
-            .font(.body)
-            .foregroundStyle(.secondary)
-            .lineLimit(4)
-            .padding(.top, 4)
-        }
-      }
-
-      Spacer(minLength: 0)
+    ZStack(alignment: .bottomLeading) {
+      coverImage
+      // Bottom-anchored gradient so the white text stays legible over any
+      // image. Clear at the top keeps the image itself unmodified.
+      LinearGradient(
+        colors: [.clear, .clear, .black.opacity(0.85)],
+        startPoint: .top,
+        endPoint: .bottom
+      )
+      details
     }
-    .padding(24)
     .frame(maxWidth: .infinity, maxHeight: .infinity)
-    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 28))
+    .clipShape(RoundedRectangle(cornerRadius: 24))
     .overlay(alignment: .topLeading) { stamp("NOPE", color: .red, visible: dragOffset.width < -40) }
     .overlay(alignment: .topTrailing) {
       stamp("MATCH", color: .green, visible: dragOffset.width > 40)
     }
     .shadow(radius: 12)
+  }
+
+  private var coverImage: some View {
+    AsyncImage(url: influencer.avatarURL.flatMap(URL.init(string:))) { phase in
+      switch phase {
+      case .success(let image):
+        image.resizable().scaledToFill()
+      default:
+        ZStack {
+          Color.gray.opacity(0.25)
+          Image(systemName: "person.crop.circle.fill")
+            .resizable()
+            .scaledToFit()
+            .padding(80)
+            .foregroundStyle(.secondary)
+        }
+      }
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .clipped()
+  }
+
+  private var details: some View {
+    VStack(alignment: .leading, spacing: 6) {
+      Text(influencer.displayName)
+        .font(.largeTitle.bold())
+        .foregroundStyle(.white)
+        .accessibilityIdentifier("home.card.\(influencer.id).name")
+      Text("@\(influencer.username)")
+        .font(.headline)
+        .foregroundStyle(.white.opacity(0.85))
+      if let description = influencer.description {
+        Text(description)
+          .font(.body)
+          .foregroundStyle(.white.opacity(0.9))
+          .lineLimit(3)
+          .padding(.top, 2)
+      }
+    }
+    .padding(28)
+    // Clear the floating action row (buttons sit ~96-160pt from the
+    // bottom) so the name + description never sit behind the buttons.
+    .padding(.bottom, 176)
   }
 
   private func stamp(_ text: String, color: Color, visible: Bool) -> some View {
