@@ -28,7 +28,7 @@ struct MainTabScreen: View {
 
   var body: some View {
     TabView(selection: $selectedTab) {
-      HomeFeedScreen()
+      HomeFeedScreen(dataSource: HomeDiscoveryDataSource())
         .tabItem { Label("Home", systemImage: "house.fill") }
         .tag(Tab.home)
 
