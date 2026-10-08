@@ -133,6 +133,13 @@ spec:
     serviceMonitor:
       enabled: true
       namespace: trivy-system
+      # Prometheus discovers ServiceMonitors by label: its serviceMonitorSelector
+      # is `release: kube-prometheus-stack`, so a ServiceMonitor without that
+      # label is silently ignored (no error, no scrape). The chart's own labels do
+      # not include it, so it must be set here. This is the same requirement every
+      # hand-written ServiceMonitor in monitoring/ meets.
+      labels:
+        release: kube-prometheus-stack
     # Resource limits for the OPERATOR pod (not the scan jobs).
     #
     # The chart ships `resources: {}` (unlimited) and leaves this to the user.
