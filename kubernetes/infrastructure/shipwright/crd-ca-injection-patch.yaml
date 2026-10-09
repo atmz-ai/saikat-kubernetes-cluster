@@ -1,0 +1,46 @@
+# ! The Shipwright CRD conversion webhook's caBundle was never wired, and that
+# ! silently degraded the whole control plane. Measured 2026-10-09: all four CRDs
+# ! serve BOTH v1alpha1 and v1beta1 (storage v1beta1), so the apiserver cached a
+# ! conversion for every ListAndWatch; with an empty caBundle each /convert call
+# ! failed with "x509: certificate signed by unknown authority" (19,898 hits live
+# ! in the apiserver log). The retry storm hung the apiserver long enough for its
+# ! liveness probe (/livez, failureThreshold 8 x timeoutSeconds 15 = 80s) to
+# ! SIGKILL it (exit 137), which restarted every API client in lockstep — CNPG
+# ! 145x, kube-state-metrics 123x, csi-* ~40x, apiserver ~36x — while etcd, which
+# ! needs no API round-trip to restart, sat at 0 restarts.
+# *
+# cert-manager's cainjector reads ca.crt from this Certificate's secret and writes
+# it into each CRD's spec.conversion.webhook.clientConfig.caBundle. The existing
+# selfSigned leaf already verifies against its own ca.crt (ca.crt == tls.crt;
+# `openssl verify -CAfile ca.crt tls.crt` returns OK, and Go's crypto/x509
+# accepts a self-signed cert presented directly as the trusted root), so no cert
+# re-issue or webhook rollout is required — only the annotation. Wire it as an
+# annotation rather than a literal caBundle so it re-injects on any re-issue.
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: builds.shipwright.io
+  annotations:
+    cert-manager.io/inject-ca-from: shipwright-build/shipwright-build-webhook-cert
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: buildruns.shipwright.io
+  annotations:
+    cert-manager.io/inject-ca-from: shipwright-build/shipwright-build-webhook-cert
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: buildstrategies.shipwright.io
+  annotations:
+    cert-manager.io/inject-ca-from: shipwright-build/shipwright-build-webhook-cert
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: clusterbuildstrategies.shipwright.io
+  annotations:
+    cert-manager.io/inject-ca-from: shipwright-build/shipwright-build-webhook-cert

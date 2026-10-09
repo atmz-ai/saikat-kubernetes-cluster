@@ -39,3 +39,9 @@ resources:
   - release.yaml
   - triggers-release.yaml
   - clusterbuildstrategy-buildkit.yaml
+# ! The CRD conversion webhook's caBundle must be injected or the whole control
+# ! plane degrades — see crd-ca-injection-patch.yaml for the measured incident.
+# These are strategic-merge patches over the CRDs in release.yaml, not new
+# resources.
+patches:
+  - path: crd-ca-injection-patch.yaml
