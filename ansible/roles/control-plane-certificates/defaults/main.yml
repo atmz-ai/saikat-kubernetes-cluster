@@ -30,3 +30,19 @@ kubernetes_static_pod_restart_seconds: 20
 # uniquely timestamped copy, so replacing a certificate never destroys the previous
 # one — the node can be rolled back by restoring the files from here.
 kubernetes_backup_directory: /var/backups/kubernetes
+
+# Every control plane's ADVERTISE address and VNet private address, both DERIVED
+# from host vars. These are the same two sets the shared ClusterConfiguration renders
+# into apiServer.certSANs, derived the same way so the required-SAN assertion and the
+# rendered config cannot drift.
+#
+# ! Both are needed, by different clients: kubelet dials the public address from
+# ! /etc/kubernetes/kubelet.conf, and `kubeadm init phase upload-config` dials the
+# ! node's private address. Dropping either breaks one of them.
+#
+# `map('extract', hostvars, ...)` is the idiom already used by pdns-zones and
+# namecheap-dns for the same purpose (reading one host var across a group).
+control_plane_public_addresses: >-
+  {{ groups['control_plane'] | map('extract', hostvars, 'ansible_host') | list }}
+control_plane_private_addresses: >-
+  {{ groups['control_plane'] | map('extract', hostvars, 'powerdns_frontend_address') | list }}

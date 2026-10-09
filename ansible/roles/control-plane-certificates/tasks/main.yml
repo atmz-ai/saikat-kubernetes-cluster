@@ -108,11 +108,28 @@
   # controlPlaneEndpoint, but asserting it alongside the declared extras turns "the
   # endpoint name was dropped" from a silent outage into a loud failure.
   #
-  # `unique` because the two sources converge: while the endpoint is also listed in
+  # The control planes' ADVERTISE and VNet private addresses are included for the same
+  # reason, and both are DERIVED rather than declared in `api_server_cert_sans`: the
+  # values already exist per host, and this role must assert the SAME set the template
+  # renders — otherwise it would report "converged" for a certificate the rendered
+  # config says should carry them. See the certSANs block in
+  # ansible/manifests/kubeadm-cluster-configuration.yaml.j2.
+  #
+  # ! Both are load-bearing and they are DIFFERENT clients. The kubelet dials the
+  # ! public address (`kubelet.conf: server: https://<public-ip>:6443`) so omitting it
+  # ! takes the node NotReady; `upload-config` dials the private one so omitting it
+  # ! breaks future joins. Measured 2026-10-09 — a private-only list caused the first
+  # ! failure mode.
+  #
+  # `unique` because the sources converge: while the endpoint is also listed in
   # api_server_cert_sans (the migration's normal state — old and new names carried
   # together), the same name arrives from both and would otherwise appear twice.
   ansible.builtin.set_fact:
-    required_apiserver_subject_alternative_names: "{{ (api_server_cert_sans + [control_plane_endpoint]) | unique }}"
+    required_apiserver_subject_alternative_names: >-
+      {{ (api_server_cert_sans
+          + [control_plane_endpoint]
+          + control_plane_public_addresses
+          + control_plane_private_addresses) | unique }}
 
 - name: Compute which required Subject Alternative Names the certificate is missing
   ansible.builtin.set_fact:
@@ -133,16 +150,6 @@
         Missing: {{ missing_apiserver_subject_alternative_names | join(', ')
         if missing_apiserver_subject_alternative_names | length > 0
         else '(none — already converged)' }}
-
-- name: Reconcile the kubeadm-config ConfigMap with the declarative ClusterConfiguration
-  # Keeps the cluster's recorded configuration in step with the certificate.
-  # The kubeadm documentation recommends the two not be allowed to disagree, and
-  # the SAN list is now part of that configuration. Idempotent; uses the supported
-  # upload-config phase rather than patching the ConfigMap by hand, which would not
-  # propagate to any static pod manifest.
-  ansible.builtin.command: kubeadm init phase upload-config kubeadm --config {{ kubeadm_cluster_configuration_path }}
-  register: kubeadm_config_upload
-  changed_when: false
 
 - name: Regenerate the certificate and restart the API server
   when: missing_apiserver_subject_alternative_names | length > 0
@@ -319,6 +326,34 @@
               cause reported above, then re-run this playbook. Do NOT proceed to the
               next control plane node.
 
+- name: Reconcile the kubeadm-config ConfigMap with the declarative ClusterConfiguration
+  # Keeps the cluster's recorded configuration in step with the certificate. The
+  # kubeadm documentation recommends the two not be allowed to disagree, and the SAN
+  # list is now part of that configuration. Idempotent; uses the supported
+  # upload-config phase rather than patching the ConfigMap by hand, which would not
+  # propagate to any static pod manifest.
+  #
+  # ! ORDER IS LOAD-BEARING, and this ran BEFORE the regeneration block until it was
+  # ! moved here (measured 2026-10-09). `upload-config kubeadm` does not use the
+  # ! kubeconfig's `server:` URL — it discovers the node's local address and dials
+  # ! `https://<node-ip>:6443` to bootstrap the kubeadm:cluster-admins ClusterRoleBinding.
+  # ! On a NAT'd cloud VM that local address is the node's PRIVATE one, so when the SAN
+  # ! being added IS that address, this task failed with exactly the certificate error
+  # ! the block below exists to repair:
+  # !
+  # !   x509: certificate is valid for 10.96.0.1, 20.219.32.205, not 172.16.0.4
+  # !
+  # ! A deadlock: the step that would be fixed by the regeneration blocked the
+  # ! regeneration. Nothing is lost by moving it later — `kubeadm init phase certs`
+  # ! reads the LOCAL config FILE passed to it and never consults the ConfigMap
+  # ! (verified: it reports "Using existing apiserver certificate and key on disk"
+  # ! with no cluster access), so the upload is not a prerequisite for regeneration.
+  # ! It IS a prerequisite for the next JOIN, which reads this ConfigMap instead of
+  # ! having a config file, so it must still happen — just after the certificate is
+  # ! correct, not before.
+  ansible.builtin.command: kubeadm init phase upload-config kubeadm --config {{ kubeadm_cluster_configuration_path }}
+  register: kubeadm_config_upload
+  changed_when: false
 
 - name: Verify every required Subject Alternative Name is served by the live TLS endpoint
   # Read from the RUNNING server over TLS, not from the file on disk: the file
@@ -397,10 +432,22 @@
   #     SSL_CERT_FILE into the task environment, which leaks into every other call
   #     made under it. No role in this repo shells out to curl either.
   #   - openssl is the strict client we want here anyway: -verify_return_error makes
-  #     a verification failure abort the handshake, and -verify_hostname checks the
-  #     name against the certificate. Verified against a public host — exit 0 for the
-  #     matching name, exit 1 for a mismatch — so a certificate lacking this name
+  #     a verification failure abort the handshake, and the verification flag checks
+  #     the name against the certificate. Verified against a public host — exit 0 for
+  #     the matching name, exit 1 for a mismatch — so a certificate lacking this name
   #     fails this task.
+  #
+  # ! The flag DIFFERS by kind, and using the wrong one fails for a correct
+  # ! certificate. `-verify_hostname` is for DNS names; against a bare IP it looks for
+  # ! a DNS SAN and reports "hostname mismatch" even when the IP SAN is present.
+  # ! `-verify_ip` is the IP equivalent. The required list is now a mix of both — DNS
+  # ! endpoint names plus the control planes' private addresses — so the flag is
+  # ! chosen per item. Measured 2026-10-09: -verify_hostname against 172.16.0.5 gave
+  # ! "hostname mismatch" while -verify_ip succeeded.
+  #
+  # The match test is a plain Jinja regex rather than community.general's ipaddr:
+  # ansible-core alone provides it, so the role stays independently executable without
+  # depending on a collection being installed.
   #
   # The connection targets this node's address directly, with no DNS lookup, which is
   # the point: the certificate is proven correct for a name BEFORE any DNS record for
@@ -408,12 +455,14 @@
   # order, with no window where a client follows the name to a certificate that does
   # not carry it.
   #
-  # This proves TLS (chain + hostname). API reachability is proven separately by the
+  # This proves TLS (chain + name). API reachability is proven separately by the
   # admin kubeconfig check below.
   ansible.builtin.command:
     cmd: >-
       openssl s_client -connect {{ ansible_facts['default_ipv4']['address'] }}:6443
-      -servername {{ item }} -verify_hostname {{ item }}
+      -servername {{ item }}
+      {% if item is match('^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$') %}-verify_ip {{ item }}
+      {% else %}-verify_hostname {{ item }}{% endif %}
       -verify_return_error -CAfile {{ kubernetes_pki_directory }}/ca.crt -brief
     stdin: ""
   loop: "{{ required_apiserver_subject_alternative_names }}"
