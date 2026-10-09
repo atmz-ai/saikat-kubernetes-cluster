@@ -8,16 +8,22 @@
 # healthy, but their metrics endpoints bind to loopback by default and the
 # nodes have no private network (public IPs only).
 #
+# It also converges the etcd SERVER CERTIFICATE's SANs. That is a second, unrelated
+# cause of the SAME etcd alert triad: a NAT'd cloud VM advertises its public address,
+# so kubeadm put the public address in the certificate while Prometheus scrapes the
+# node's private InternalIP, and every etcd target fails with an x509 SAN mismatch.
+# See the serverCertSANs block in ansible/manifests/kubeadm-cluster-configuration.yaml.j2.
+#
 # Usage:
 #   All control planes (one at a time, default):
 #     ansible-playbook ansible/playbooks/operations/reconcile-control-plane-metrics.yml
 #
 #   Canary on a single node first:
-#     ansible-playbook ansible/playbooks/operations/reconcile-control-plane-metrics.yml -e target_host=node-1
+#     ansible-playbook ansible/playbooks/operations/reconcile-control-plane-metrics.yml -e target_host=saikat-azure-central-india-1
 #
 #   Then roll out to the rest:
-#     ansible-playbook ansible/playbooks/operations/reconcile-control-plane-metrics.yml -e target_host=node-2
-#     ... (node-3 through node-7)
+#     ansible-playbook ansible/playbooks/operations/reconcile-control-plane-metrics.yml -e target_host=saikat-azure-central-india-2
+#     ... (then -3)
 
 - name: Reconcile control plane metrics endpoints
   hosts: "{{ target_host | default('control_plane') }}"

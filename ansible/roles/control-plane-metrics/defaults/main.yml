@@ -17,6 +17,18 @@ etcd_client_port: 2379
 # checks during validation.
 etcd_client_cert_secret_name: etcd-client-cert
 
+# kubeadm's PKI and static pod manifest locations, and how long to leave a
+# static pod manifest out to force the kubelet to restart the pod.
+#
+# Held here as well as in the other control-plane roles on purpose: a role must be
+# independently executable, and `reconcile-control-plane-metrics.yml` runs THIS
+# role alone. Inheriting them implicitly from a sibling role would make this role
+# depend on load order rather than on its own defaults. Must exceed kubelet's
+# fileCheckFrequency (kubeadm sets 20s) or no restart happens.
+kubernetes_pki_directory: /etc/kubernetes/pki
+kubernetes_manifests_directory: /etc/kubernetes/manifests
+kubernetes_static_pod_restart_seconds: 20
+
 # Shared kubeadm ClusterConfiguration values. Hosted in
 # ansible/inventory/group_vars/all/vars.yml so every role (cluster-init,
 # control-plane-metrics) resolves the same cluster-wide numbers; these entries

@@ -81,3 +81,53 @@ etcd:
         value: "{{ etcd_heartbeat_interval_milliseconds }}"
       - name: election-timeout
         value: "{{ etcd_election_timeout_milliseconds }}"
+    # Extra Subject Alternative Names for the etcd SERVER certificate.
+    #
+    # WHY: the etcd static pods are hostNetwork, so their client URL binds the NODE's
+    # address — and Prometheus reaches them through a Service whose endpoints are the
+    # nodes' InternalIPs. kubeadm puts the node's ADVERTISE address in the generated
+    # certificate, and a NAT'd cloud VM advertises its ROUTABLE (public) address, so the
+    # private address a scrape actually dials is absent and every target fails
+    # verification:
+    #
+    #   x509: certificate is valid for 20.219.32.205, 127.0.0.1, ::1, not 172.16.0.4
+    #
+    # which surfaces as TargetDown + etcdMembersDown ("members are down (3)") +
+    # etcdInsufficientMembers ("insufficient members (0)") on a cluster whose etcd is
+    # entirely healthy — the alerts describe a broken SCRAPE, not a broken etcd.
+    #
+    # BOTH ADDRESSES PER NODE, AND THAT IS LOAD-BEARING — not belt-and-braces. kubeadm
+    # regenerates the certificate from THIS CONFIG ALONE, and the advertise address is
+    # NOT in it: kubeadm takes it from the join command's --apiserver-advertise-address
+    # flag. So a private-address-only list REPLACES the advertise address rather than
+    # adding to it, and every client that dials the public address breaks:
+    #
+    #   x509: certificate is valid for 172.16.0.4, ..., not 20.219.32.205
+    #
+    # That is not hypothetical — it is exactly what a private-only list did here
+    # (measured 2026-10-09), and it broke the etcd rollout's own
+    # `etcdctl endpoint health --cluster`, which reaches members on their ADVERTISED
+    # public client URLs. Adding a SAN must be ADDITIVE (AGENTS.md): carry the old name
+    # and the new one together.
+    #
+    # `ansible_host` is the advertise address (the address peers and clients dial);
+    # `powerdns_frontend_address` is the VNet private address the scrape dials.
+    #
+    # The list is CLUSTER-WIDE on purpose. kubeadm applies serverCertSANs to every
+    # member's certificate, and a JOINING control plane reads this from the
+    # kubeadm-config ConfigMap rather than from its own facts — so a per-node value would
+    # render the wrong address on the join path, where this template is written on an
+    # existing control plane. Naming every control plane's addresses is correct for every
+    # render site.
+    #
+    # ! Both values are per-host INVENTORY values, not gathered facts: they render
+    # ! identically wherever the template runs.
+    #
+    # WARNING: like every other setting here, this reaches an EXISTING node's certificate
+    # only through the reconcile-control-plane-metrics playbook. kubeadm builds
+    # certificates at init/join time only.
+    serverCertSANs:
+{% for control_plane_node in groups['control_plane'] %}
+      - "{{ hostvars[control_plane_node]['ansible_host'] }}"
+      - "{{ hostvars[control_plane_node]['powerdns_frontend_address'] }}"
+{% endfor %}

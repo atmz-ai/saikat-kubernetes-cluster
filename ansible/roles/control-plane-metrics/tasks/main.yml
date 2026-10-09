@@ -79,9 +79,10 @@
     # Regenerate ONLY the controller-manager and scheduler subphases — minimal
     # blast radius. The apiserver manifest needs no change (its metrics port is
     # already scraped via the kubernetes service endpoint) and regenerating it
-    # would restart the API server needlessly. The etcd manifest needs no change
-    # either (we scrape the already-listening mTLS client port :2379; its args
-    # are untouched by this role).
+    # would restart the API server needlessly. The etcd manifest's ARGS need no
+    # change either (we scrape the already-listening mTLS client port :2379), so
+    # its regeneration is handled in its own block below — which covers both the
+    # args and the SERVER CERTIFICATE's SANs.
     - name: Regenerate kube-controller-manager static pod manifest
       ansible.builtin.command: kubeadm init phase control-plane controller-manager --config /etc/kubernetes/kubeadm-control-plane-metrics.yaml
       register: kubeadm_phase_controller_manager
@@ -133,11 +134,26 @@
   when: control_plane_metrics_etcd_manifest_stale
   block:
     - name: Assert the etcd cluster is healthy before touching this member
-      # Health is checked from THIS node's local etcdctl against the whole cluster,
-      # immediately before its manifest is rewritten. A member is never restarted
-      # while the cluster is already degraded — in that state a restart turns a
-      # partial outage into a full one, which is the single worst outcome available
-      # here.
+      # Health is checked from THIS node's local etcdctl, immediately before its
+      # manifest is rewritten. A member is never restarted while the cluster is
+      # already degraded — in that state a restart turns a partial outage into a full
+      # one, which is the single worst outcome available here.
+      #
+      # ! LOCAL endpoint, deliberately NOT `--cluster`. `--cluster` makes etcdctl dial
+      # ! every member's ADVERTISED client URL, so the gate silently became "every
+      # ! member's advertised certificate is currently valid for the address it
+      # ! advertises" — a different and much narrower claim than "quorum is healthy".
+      # ! The two diverge exactly when a certificate is being changed, which is when
+      # ! this gate runs: a member whose SANs are mid-update is unreachable on its
+      # ! advertised URL while its raft state is perfectly fine, and the gate then
+      # ! refuses forever. That is a deadlock, not a safety check — measured on
+      # ! 2026-10-09, when a certificate missing its advertise SAN made this task
+      # ! retry out and block the very run that would have repaired it.
+      #
+      # A local `endpoint health` commits a proposal through raft, and a proposal
+      # cannot commit without a quorum of members. So this still proves quorum — the
+      # property the restart actually depends on — without depending on every
+      # member's advertised URL being reachable at this instant.
       ansible.builtin.command: >
         kubectl --kubeconfig /etc/kubernetes/admin.conf exec -n kube-system etcd-{{ ansible_facts['hostname'] }} --
         etcdctl
@@ -145,7 +161,7 @@
         --cacert=/etc/kubernetes/pki/etcd/ca.crt
         --cert=/etc/kubernetes/pki/etcd/server.crt
         --key=/etc/kubernetes/pki/etcd/server.key
-        endpoint health --cluster
+        endpoint health
       register: etcd_health_before
       changed_when: false
       retries: 3
@@ -215,8 +231,14 @@
     - name: Assert the whole etcd cluster is healthy after the restart
       # The rollout's real gate. A single member being Ready does not mean the
       # cluster has quorum — the member could have come back unable to reach its
-      # peers. Checking the cluster, from this node, is what proves the member
-      # rejoined rather than merely started.
+      # peers. A local `endpoint health` is what proves the member rejoined rather
+      # than merely started: it commits a proposal through raft, and a proposal
+      # cannot commit without a quorum.
+      #
+      # ! LOCAL endpoint, NOT `--cluster` — see the pre-restart gate for the full
+      # ! reasoning. In short, `--cluster` dials every member's ADVERTISED URL, so it
+      # ! tests certificate reachability rather than quorum, and deadlocks the run
+      # ! whenever a certificate's SANs are what is being changed.
       ansible.builtin.command: >
         kubectl --kubeconfig /etc/kubernetes/admin.conf exec -n kube-system etcd-{{ ansible_facts['hostname'] }} --
         etcdctl
@@ -224,21 +246,20 @@
         --cacert=/etc/kubernetes/pki/etcd/ca.crt
         --cert=/etc/kubernetes/pki/etcd/server.crt
         --key=/etc/kubernetes/pki/etcd/server.key
-        endpoint health --cluster
+        endpoint health
       register: etcd_health_after
       changed_when: false
       retries: 10
       delay: 6
-      until: etcd_health_after.rc == 0 and 'is unhealthy' not in etcd_health_after.stdout
+      until: etcd_health_after.rc == 0
       failed_when: false
 
     - name: Fail if the etcd cluster did not recover
       ansible.builtin.assert:
         that:
           - etcd_health_after.rc == 0
-          - "'is unhealthy' not in etcd_health_after.stdout"
         fail_msg: >-
-          etcd cluster is NOT healthy after restarting
+          etcd is NOT healthy after restarting
           {{ ansible_facts['hostname'] }}. STOP — do not continue to the next node.
           Cluster health: {{ etcd_health_after.stdout }} {{ etcd_health_after.stderr }}
         success_msg: "etcd cluster healthy after restarting {{ ansible_facts['hostname'] }}."
@@ -266,6 +287,352 @@
           - "  member id before:   {{ etcd_member_id_before.stdout | default('unknown') }}"
           - "  member id after:    {{ etcd_member_id_after.stdout | default('unknown') }}"
           - "  (ids matching confirms the SAME member rejoined, not a new one)"
+
+# ── etcd server certificate: the SAN the metrics scrape verifies ─────────────
+# Separate from the timeout block above because it is a DIFFERENT kind of change
+# with its own failure mode. The block above rewrites a manifest and lets the
+# kubelet restart the pod; this one replaces PKI material, and a member that comes
+# back with a certificate its peers will not accept is a worse outcome than a
+# stale manifest. It gets its own staleness check and its own health gates.
+#
+# WHAT IT FIXES: etcd's static pods are hostNetwork and Prometheus scrapes them at
+# the nodes' InternalIPs (172.16.0.x), but kubeadm put the nodes' ADVERTISE
+# addresses (the NAT'd public 20.x addresses) in the certificate. Every scrape
+# fails TLS verification and reports TargetDown + etcdMembersDown +
+# etcdInsufficientMembers on a perfectly healthy etcd. See the serverCertSANs block
+# in ansible/manifests/kubeadm-cluster-configuration.yaml.j2.
+- name: Read the Subject Alternative Names from this node's live etcd server certificate
+  ansible.builtin.command: >-
+    openssl x509 -in {{ kubernetes_pki_directory }}/etcd/server.crt -noout -ext subjectAltName
+  register: live_etcd_server_certificate
+  changed_when: false
+  # A missing certificate is a finding for the assertions below to report, not a
+  # task failure.
+  failed_when: false
+
+- name: Extract the Subject Alternative Names from the live etcd server certificate
+  # Whitespace stripped entirely, not merely collapsed: `openssl x509 -ext
+  # subjectAltName` wraps at a fixed width, so a long token can be split across
+  # lines. DNS names and IP addresses never contain whitespace, so removing it is
+  # lossless. "IP Address:" also becomes "IPAddress:", hence the pattern.
+  ansible.builtin.set_fact:
+    live_etcd_server_subject_alternative_names: >-
+      {{ (live_etcd_server_certificate.stdout ~ ' ' ~ live_etcd_server_certificate.stderr)
+         | replace('\n', '') | replace(' ', '')
+         | regex_findall('(?:DNS|IPAddress):([^,]+)') }}
+
+- name: Build the set of addresses this node's etcd server certificate must carry
+  # BOTH this node's addresses, and both are required — see the serverCertSANs block
+  # in ansible/manifests/kubeadm-cluster-configuration.yaml.j2 for why.
+  #
+  # The ADVERTISE address (ansible_host) is the one clients and peers dial — it is what
+  # etcdctl targets in a `--cluster` check, and what the apiserver's own etcd client
+  # uses. kubeadm takes it from the join command rather than from the rendered config,
+  # so it is NOT carried over automatically when the certificate is regenerated — it has
+  # to be named here explicitly or it is dropped.
+  #
+  # The VNet private address (powerdns_frontend_address) is the InternalIP the etcd
+  # Service endpoint exposes, which is what Prometheus actually scrapes.
+  ansible.builtin.set_fact:
+    required_etcd_server_subject_alternative_names:
+      - "{{ hostvars[inventory_hostname]['ansible_host'] }}"
+      - "{{ powerdns_frontend_address }}"
+
+- name: Compute which required addresses the etcd server certificate is missing
+  ansible.builtin.set_fact:
+    missing_etcd_server_subject_alternative_names: >-
+      {{ required_etcd_server_subject_alternative_names
+         | difference(live_etcd_server_subject_alternative_names) }}
+
+- name: Display the etcd certificate comparison for this node
+  ansible.builtin.debug:
+    msg:
+      - "Node: {{ ansible_facts['hostname'] }}"
+      - "Required on the etcd server certificate: {{ required_etcd_server_subject_alternative_names | join(', ') }}"
+      - "Present: {{ live_etcd_server_subject_alternative_names | join(', ') }}"
+      - >-
+        Missing: {{ missing_etcd_server_subject_alternative_names | join(', ')
+        if missing_etcd_server_subject_alternative_names | length > 0
+        else '(none — already converged)' }}
+
+- name: Fail if the regeneration would drop the advertise address
+  # ! A guard, not a nicety. kubeadm rebuilds the certificate from the rendered config
+  # ! alone, and the ADVERTISE address is not in that config — kubeadm takes it from the
+  # ! join command's --apiserver-advertise-address. So a required list that omits it does
+  # ! not merely fail to add a name; it REPLACES the certificate with one that will not
+  # ! satisfy the public address, breaking every client that dials it. Measured on
+  # ! 2026-10-09: the etcd rollout's own health gate then could not reach that member and
+  # ! the run stalled.
+  #
+  # Checked BEFORE the certificate is touched, so a bad list stops the run while the node
+  # still has a working certificate.
+  ansible.builtin.assert:
+    that:
+      - hostvars[inventory_hostname]['ansible_host'] in required_etcd_server_subject_alternative_names
+    fail_msg: >-
+      The required etcd server SAN list for {{ ansible_facts['hostname'] }} does not
+      include its ADVERTISE address ({{ hostvars[inventory_hostname]['ansible_host'] }}).
+      Regenerating now would produce a certificate that cannot satisfy the address
+      clients dial, breaking this member's usable client URL. Adding a SAN must be
+      ADDITIVE — carry the advertise address and the scrape address together. Refusing.
+    success_msg: >-
+      Required list carries both the advertise address
+      ({{ hostvars[inventory_hostname]['ansible_host'] }}) and the scrape address
+      ({{ powerdns_frontend_address }}).
+
+- name: Reconcile the etcd server certificate SANs
+  when: missing_etcd_server_subject_alternative_names | length > 0
+  block:
+    - name: Assert the etcd cluster is healthy before replacing this member's certificate
+      # The same precondition the timeout block asserts, for the same reason:
+      # replacing a certificate requires restarting this member, and restarting a
+      # member of an already-degraded cluster turns a partial outage into a full
+      # one.
+      #
+      # ! LOCAL endpoint, NOT `--cluster` — the block this guards is the one that
+      # ! CHANGES a certificate's SANs, so a gate that requires every member's
+      # ! advertised URL to be valid is guaranteed to block its own repair. See the
+      # ! pre-restart gate in the timeout block for the full reasoning.
+      ansible.builtin.command: >
+        kubectl --kubeconfig /etc/kubernetes/admin.conf exec -n kube-system etcd-{{ ansible_facts['hostname'] }} --
+        etcdctl
+        --endpoints=https://127.0.0.1:2379
+        --cacert=/etc/kubernetes/pki/etcd/ca.crt
+        --cert=/etc/kubernetes/pki/etcd/server.crt
+        --key=/etc/kubernetes/pki/etcd/server.key
+        endpoint health
+      register: etcd_certificate_health_before
+      changed_when: false
+      retries: 3
+      delay: 5
+      until: etcd_certificate_health_before.rc == 0
+      failed_when: false
+
+    - name: Fail if the etcd cluster is not fully healthy
+      ansible.builtin.assert:
+        that:
+          - etcd_certificate_health_before.rc == 0
+        fail_msg: >-
+          Refusing to replace the etcd server certificate on
+          {{ ansible_facts['hostname'] }}: quorum is not healthy, so restarting this
+          member could lose it. Cluster health output:
+          {{ etcd_certificate_health_before.stdout }} {{ etcd_certificate_health_before.stderr }}
+        success_msg: "etcd quorum healthy — safe to replace this node's certificate."
+
+    - name: Record this node's etcd member id before the restart
+      ansible.builtin.shell: |
+        set -o pipefail
+        kubectl --kubeconfig /etc/kubernetes/admin.conf exec -n kube-system etcd-{{ ansible_facts['hostname'] }} -- \
+          etcdctl --endpoints=https://127.0.0.1:2379 \
+            --cacert=/etc/kubernetes/pki/etcd/ca.crt \
+            --cert=/etc/kubernetes/pki/etcd/server.crt \
+            --key=/etc/kubernetes/pki/etcd/server.key \
+            endpoint status --write-out=json \
+          | grep -o '"ID":[0-9]*' | cut -d: -f2
+      register: etcd_certificate_member_id_before
+      changed_when: false
+      failed_when: false
+
+    # The replacement is guarded exactly as the apiserver certificate role guards
+    # its own: between moving the old certificate aside and the new one being
+    # loaded there is a window with no usable certificate, and a generation failure
+    # inside that window leaves the member unable to serve its peers. The rescue
+    # path puts the originals back so a failed run ends with a working member and a
+    # loud message, rather than a half-applied change needing hands on the box.
+    - name: Replace the etcd server certificate
+      block:
+        - name: Move the existing etcd server certificate and key aside
+          # BOTH files together, for the same reason as the apiserver role: leaving
+          # the key in place keeps a "cert or key exists" condition true and makes
+          # the generation phase refuse rather than regenerate.
+          ansible.builtin.command: >-
+            mv {{ kubernetes_pki_directory }}/etcd/server.{{ item }}
+            {{ kubernetes_pki_directory }}/etcd/server.{{ item }}.replaced-{{ now(utc=true).strftime('%Y%m%dT%H%M%SZ') }}
+          loop:
+            - crt
+            - key
+          changed_when: true
+
+        - name: Generate the etcd server certificate from the declarative configuration
+          # kubeadm's etcd server certificate phase. It writes server.crt/server.key
+          # (the certificate the CLIENT URL presents, which is the one Prometheus
+          # verifies) and is the supported mechanism — not a manifest edit.
+          ansible.builtin.command: >
+            kubeadm init phase certs etcd-server --config /etc/kubernetes/kubeadm-control-plane-metrics.yaml
+          register: kubeadm_certs_etcd_server
+          changed_when: true
+
+        - name: Display kubeadm etcd certificate generation output
+          ansible.builtin.debug:
+            msg: "{{ kubeadm_certs_etcd_server.stdout_lines + kubeadm_certs_etcd_server.stderr_lines }}"
+
+        - name: Restart this node's etcd so it loads the new certificate
+          # Unlike the apiserver, an etcd member DOES reload its certificate on
+          # restart — and the restart is forced by removing and restoring the
+          # static pod manifest, the kubeadm-documented way to restart a static
+          # pod. The manifest itself is unchanged: a SAN lives in the certificate,
+          # so rewriting it would produce a byte-identical file and the kubelet
+          # would have nothing to react to.
+          ansible.builtin.shell: |
+            set -o pipefail
+            manifest={{ kubernetes_manifests_directory }}/etcd.yaml
+            mv "$manifest" "${manifest}.restarting"
+            sleep {{ kubernetes_static_pod_restart_seconds }}
+            mv "${manifest}.restarting" "$manifest"
+          args:
+            executable: /bin/bash
+          changed_when: true
+
+        - name: Wait for this node's etcd static pod to return
+          ansible.builtin.command: >
+            kubectl --kubeconfig /etc/kubernetes/admin.conf wait --for=condition=ready
+            pod -n kube-system etcd-{{ ansible_facts['hostname'] }} --timeout=300s
+          register: etcd_certificate_pod_ready
+          retries: 6
+          delay: 10
+          changed_when: false
+
+        - name: Assert the whole etcd cluster is healthy after the restart
+          # ! LOCAL endpoint, NOT `--cluster`, for the reason given at the
+          # ! pre-replacement gate: this block changes a certificate's SANs, so a gate
+          # ! that dials every member's advertised URL would block its own repair.
+          ansible.builtin.command: >
+            kubectl --kubeconfig /etc/kubernetes/admin.conf exec -n kube-system etcd-{{ ansible_facts['hostname'] }} --
+            etcdctl
+            --endpoints=https://127.0.0.1:2379
+            --cacert=/etc/kubernetes/pki/etcd/ca.crt
+            --cert=/etc/kubernetes/pki/etcd/server.crt
+            --key=/etc/kubernetes/pki/etcd/server.key
+            endpoint health
+          register: etcd_certificate_health_after
+          changed_when: false
+          retries: 10
+          delay: 6
+          until: etcd_certificate_health_after.rc == 0
+          failed_when: false
+
+        - name: Fail if the etcd cluster did not recover
+          ansible.builtin.assert:
+            that:
+              - etcd_certificate_health_after.rc == 0
+            fail_msg: >-
+              etcd is NOT healthy after replacing the certificate on
+              {{ ansible_facts['hostname'] }}. STOP — do not continue to the next
+              node. Cluster health:
+              {{ etcd_certificate_health_after.stdout }} {{ etcd_certificate_health_after.stderr }}
+            success_msg: "etcd quorum healthy after replacing this node's certificate."
+
+      rescue:
+        - name: Report that etcd certificate regeneration failed
+          ansible.builtin.debug:
+            msg: >-
+              etcd server certificate regeneration FAILED on
+              {{ ansible_facts['hostname'] }}. Restoring the original certificate.
+
+        - name: Restore the original etcd server certificate and key
+          # Newest match wins: the ISO 8601 basic-format timestamp makes the names
+          # sort chronologically, so the LAST glob match is the most recent
+          # certificate. Written with positional parameters rather than array length
+          # tests because Ansible's argument splitter reads "${#" as an unclosed Jinja
+          # comment and refuses the task. nullglob keeps the expansion empty when
+          # nothing was moved.
+          ansible.builtin.shell: |
+            set -o pipefail
+            shopt -s nullglob
+            restored=0
+            for extension in crt key; do
+              set -- {{ kubernetes_pki_directory }}/etcd/server.${extension}.replaced-*
+              if [ "$#" -gt 0 ]; then
+                for candidate in "$@"; do :; done
+                mv "$candidate" {{ kubernetes_pki_directory }}/etcd/server.${extension}
+                restored=$((restored + 1))
+              fi
+            done
+            echo "restored=${restored}"
+          args:
+            executable: /bin/bash
+          register: etcd_certificate_restore
+          changed_when: true
+
+        - name: Restart this node's etcd so it loads the restored certificate
+          ansible.builtin.shell: |
+            set -o pipefail
+            manifest={{ kubernetes_manifests_directory }}/etcd.yaml
+            mv "$manifest" "${manifest}.restarting"
+            sleep {{ kubernetes_static_pod_restart_seconds }}
+            mv "${manifest}.restarting" "$manifest"
+          args:
+            executable: /bin/bash
+          changed_when: true
+
+        - name: Wait for this node's etcd static pod to return on the restored certificate
+          ansible.builtin.command: >
+            kubectl --kubeconfig /etc/kubernetes/admin.conf wait --for=condition=ready
+            pod -n kube-system etcd-{{ ansible_facts['hostname'] }} --timeout=300s
+          register: etcd_certificate_pod_ready_restored
+          retries: 6
+          delay: 10
+          changed_when: false
+
+        - name: Fail with the restore outcome
+          # Fails even though the member is healthy again: the change did NOT
+          # apply, and a green run would say otherwise. The original certificate is
+          # back, so a re-run after fixing the cause is safe.
+          ansible.builtin.fail:
+            msg: >-
+              etcd server certificate regeneration failed on
+              {{ ansible_facts['hostname'] }} but the original certificate was
+              restored and the member is serving again, so this node is healthy.
+              The private-address SAN is NOT in effect here, so the Prometheus etcd
+              scrape remains down on this node. Diagnose the cause above, then
+              re-run. Do NOT proceed to the next control plane node.
+
+- name: Verify this node's etcd server certificate is served over TLS with the required SAN
+  # Read from the RUNNING endpoint over TLS, not from the file on disk: the file
+  # proves what was written, this proves what a client is actually offered. The
+  # address here is the one Prometheus dials, so this is the same verification the
+  # scrape performs.
+  when: missing_etcd_server_subject_alternative_names | length > 0
+  block:
+    - name: Read the certificate the etcd server is serving on this node's private address
+      # `|| true` on the s_client leg, deliberately. `openssl s_client` exits non-zero
+      # once the server closes the connection at EOF, which it always does for a
+      # one-shot read — and under `set -o pipefail` that non-zero status propagates out
+      # of the pipeline and fails the task even though the certificate was read
+      # correctly. Measured 2026-10-09. The assertions below are what actually judge the
+      # result; this task's job is only to capture the text.
+      ansible.builtin.shell: |
+        set -o pipefail
+        (openssl s_client -connect {{ powerdns_frontend_address }}:{{ etcd_client_port }} \
+          -servername {{ powerdns_frontend_address }} < /dev/null 2>/dev/null || true) \
+          | openssl x509 -noout -ext subjectAltName
+      args:
+        executable: /bin/bash
+      register: served_etcd_server_certificate
+      until: served_etcd_server_certificate.stdout is search('Subject Alternative Name')
+      retries: 12
+      delay: 5
+      changed_when: false
+
+    - name: Extract the Subject Alternative Names the etcd server is serving
+      ansible.builtin.set_fact:
+        served_etcd_server_subject_alternative_names: >-
+          {{ served_etcd_server_certificate.stdout
+             | replace('\n', '') | replace(' ', '')
+             | regex_findall('(?:DNS|IPAddress):([^,]+)') }}
+
+    - name: Assert the served etcd certificate carries every required address
+      ansible.builtin.assert:
+        that:
+          - required_etcd_server_subject_alternative_names | difference(served_etcd_server_subject_alternative_names) | length == 0
+        fail_msg: >-
+          The etcd server on {{ ansible_facts['hostname'] }} is serving a certificate
+          missing {{ required_etcd_server_subject_alternative_names | difference(served_etcd_server_subject_alternative_names) | join(', ') }}.
+          Served names: {{ served_etcd_server_subject_alternative_names | join(', ') }}.
+          Do NOT proceed to the next control plane node — investigate this one first.
+        success_msg: >-
+          Served etcd certificate carries all required addresses
+          ({{ served_etcd_server_subject_alternative_names | join(', ') }}).
 
 - name: Verify metrics endpoints are reachable on this node
   block:
