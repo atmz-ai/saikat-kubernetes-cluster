@@ -139,3 +139,20 @@ spec:
       allowedRoutes:
         namespaces:
           from: All
+    # Per-host listener like the others on *.saikat.oleole.ai: DNS is already
+    # covered by the *.oleole.ai wildcard, so no DNSEndpoint is needed. The
+    # longhorn-ui-tls Secret and its Certificate are created by the cert-manager
+    # Gateway API shim (ClusterIssuer letsencrypt-prod via the
+    # cert-manager.io/cluster-issuer annotation above).
+    - name: https-longhorn-ui
+      port: 443
+      protocol: HTTPS
+      hostname: longhorn-ui.saikat.oleole.ai
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: longhorn-ui-tls
+            kind: Secret
+      allowedRoutes:
+        namespaces:
+          from: All

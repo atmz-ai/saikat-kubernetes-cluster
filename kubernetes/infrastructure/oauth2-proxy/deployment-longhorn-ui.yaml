@@ -27,7 +27,11 @@ spec:
             - --cookie-secure=true
             - --cookie-name=_oauth2_proxy_longhorn_ui
             - --cookie-expire=720h
-            - --redirect-url=https://longhorn-ui.yral.com/oauth2/callback
+            # ! Google will reject the login with redirect_uri_mismatch until
+            # ! https://longhorn-ui.saikat.oleole.ai/oauth2/callback is added to the
+            # ! oauth2-proxy-secrets client's authorized redirect URIs in the Google
+            # ! Cloud console. That step cannot be done from git.
+            - --redirect-url=https://longhorn-ui.saikat.oleole.ai/oauth2/callback
             - --skip-provider-button=true
           env:
             - name: OAUTH2_PROXY_CLIENT_ID

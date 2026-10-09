@@ -1,8 +1,17 @@
 # Longhorn UI HTTPRoute
 #
-# Exposes the Longhorn storage UI at https://longhorn-ui.yral.com via oauth2-proxy
-# (Google Workspace SSO). Auth is enforced by oauth2-proxy; the longhorn-frontend
-# Service itself is never exposed directly.
+# Exposes the Longhorn storage UI at https://longhorn-ui.saikat.oleole.ai via
+# oauth2-proxy (Google Workspace SSO). Auth is enforced by oauth2-proxy; the
+# longhorn-frontend Service itself is never exposed directly.
+#
+# ! Longhorn v1.12.1 has NO native authentication (auth-with-kubernetes-secret was
+# ! removed), so the proxy in front is the ONLY thing gating the UI — do not route
+# ! this host straight to longhorn-frontend. The proxy must front only this host:
+# ! Longhorn's manager-url setting requires the manager API to stay unauthenticated
+# ! for longhorn-driver-deployer / longhorn-csi-plugin to follow its response links.
+#
+# Host moved from longhorn-ui.yral.com; the listener is https-longhorn-ui in
+# gateway.yaml and the cert is auto-issued by the cert-manager Gateway shim.
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -15,7 +24,7 @@ spec:
       namespace: kube-system
       sectionName: http
   hostnames:
-    - longhorn-ui.yral.com
+    - longhorn-ui.saikat.oleole.ai
   rules:
     - filters:
         - type: RequestRedirect
@@ -32,9 +41,9 @@ spec:
   parentRefs:
     - name: web-gateway
       namespace: kube-system
-      sectionName: https
+      sectionName: https-longhorn-ui
   hostnames:
-    - longhorn-ui.yral.com
+    - longhorn-ui.saikat.oleole.ai
   rules:
     - backendRefs:
         - name: oauth2-proxy-longhorn-ui
