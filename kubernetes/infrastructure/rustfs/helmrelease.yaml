@@ -44,12 +44,12 @@ spec:
       - name: RUSTFS_IDENTITY_OPENID_CLIENT_ID_google
         valueFrom:
           secretKeyRef:
-            name: rustfs-google-oauth
+            name: atmz-internal-apps-google-oauth
             key: client-id
       - name: RUSTFS_IDENTITY_OPENID_CLIENT_SECRET_google
         valueFrom:
           secretKeyRef:
-            name: rustfs-google-oauth
+            name: atmz-internal-apps-google-oauth
             key: client-secret
       - name: RUSTFS_IDENTITY_OPENID_REDIRECT_URI_google
         value: https://rust-fs.saikat.oleole.ai/rustfs/admin/v3/oidc/callback/google

@@ -13,7 +13,7 @@ resources:
   - service-headlamp.yaml
   - deployment-dashboard.yaml
   - dashboard-allowed-emails.yaml
-  - dashboard-google-oauth.sops.yaml
+  - atmz-internal-apps-google-oauth.sops.yaml
   - service-dashboard.yaml
   - deployment-kafka-console.yaml
   - service-kafka-console.yaml
@@ -21,4 +21,5 @@ resources:
   - service-dbx.yaml
   - deployment-longhorn-ui.yaml
   - service-longhorn-ui.yaml
+  - longhorn-ui-allowed-emails.yaml
   - reference-grant.yaml

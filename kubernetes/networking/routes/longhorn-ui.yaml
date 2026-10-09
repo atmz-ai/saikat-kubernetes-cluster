@@ -1,8 +1,9 @@
 # Longhorn UI HTTPRoute
 #
 # Exposes the Longhorn storage UI at https://longhorn-ui.saikat.oleole.ai via
-# oauth2-proxy (Google Workspace SSO). Auth is enforced by oauth2-proxy; the
-# longhorn-frontend Service itself is never exposed directly.
+# oauth2-proxy (Google SSO, atmz-internal-apps client + email allowlist). Auth is
+# enforced by oauth2-proxy; the longhorn-frontend Service itself is never exposed
+# directly.
 #
 # ! Longhorn v1.12.1 has NO native authentication (auth-with-kubernetes-secret was
 # ! removed), so the proxy in front is the ONLY thing gating the UI — do not route

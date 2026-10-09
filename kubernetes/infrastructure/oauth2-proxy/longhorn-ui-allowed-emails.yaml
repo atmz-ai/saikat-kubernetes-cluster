@@ -1,0 +1,11 @@
+# * Longhorn UI access is restricted to the explicit oauth2-proxy email allowlist.
+# * Longhorn v1.12.1 has no native authentication (auth-with-kubernetes-secret was
+# * removed), so this allowlist — via oauth2-proxy — is the only thing gating the UI.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: longhorn-ui-allowed-emails
+  namespace: oauth2-proxy
+data:
+  allowed-emails: |
+    saikat@atmz.ai

@@ -18,10 +18,9 @@ spec:
           image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.4
           args:
             - --provider=google
-            - --email-domain=gobazzinga.io
-            - --google-group=developer-admin@gobazzinga.io
-            - --google-admin-email=s@gobazzinga.io
-            - --google-service-account-json=/etc/oauth2-proxy/service-account.json
+            # * Client B (atmz internal apps) + email allowlist, matching the dashboard
+            # * pattern. Longhorn v1.12.1 has no native auth, so this proxy is the only gate.
+            - --authenticated-emails-file=/etc/oauth2-proxy/allowed-emails
             - --upstream=http://longhorn-frontend.longhorn-system.svc.cluster.local:80
             - --http-address=0.0.0.0:4180
             - --cookie-secure=true
@@ -29,20 +28,20 @@ spec:
             - --cookie-expire=720h
             # ! Google will reject the login with redirect_uri_mismatch until
             # ! https://longhorn-ui.saikat.oleole.ai/oauth2/callback is added to the
-            # ! oauth2-proxy-secrets client's authorized redirect URIs in the Google
-            # ! Cloud console. That step cannot be done from git.
+            # ! atmz-internal-apps-google-oauth client's authorized redirect URIs in the
+            # ! Google Cloud console. That step cannot be done from git.
             - --redirect-url=https://longhorn-ui.saikat.oleole.ai/oauth2/callback
             - --skip-provider-button=true
           env:
             - name: OAUTH2_PROXY_CLIENT_ID
               valueFrom:
                 secretKeyRef:
-                  name: oauth2-proxy-secrets
+                  name: atmz-internal-apps-google-oauth
                   key: client-id
             - name: OAUTH2_PROXY_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:
-                  name: oauth2-proxy-secrets
+                  name: atmz-internal-apps-google-oauth
                   key: client-secret
             - name: OAUTH2_PROXY_COOKIE_SECRET
               valueFrom:
@@ -59,7 +58,7 @@ spec:
               cpu: 100m
               memory: 64Mi
           volumeMounts:
-            - name: service-account
+            - name: allowed-emails
               mountPath: /etc/oauth2-proxy
               readOnly: true
           readinessProbe:
@@ -75,9 +74,6 @@ spec:
             initialDelaySeconds: 10
             periodSeconds: 30
       volumes:
-        - name: service-account
-          secret:
-            secretName: oauth2-proxy-secrets
-            items:
-              - key: service-account-json
-                path: service-account.json
+        - name: allowed-emails
+          configMap:
+            name: longhorn-ui-allowed-emails

@@ -3,4 +3,4 @@ beszel_auth_admin_email: saikat@atmz.ai
 beszel_auth_superuser_email: s@gobazzinga.io
 beszel_auth_service_url: "http://{{ (beszel_auth_service.stdout | from_json).spec.clusterIP }}:8090"
 beszel_auth_delegate: "{{ groups['control_plane'][0] }}"
-beszel_auth_dashboard_secret_path: "{{ playbook_dir }}/../../../kubernetes/infrastructure/oauth2-proxy/dashboard-google-oauth.sops.yaml"
+beszel_auth_oauth_secret_path: "{{ playbook_dir }}/../../../kubernetes/infrastructure/oauth2-proxy/atmz-internal-apps-google-oauth.sops.yaml"

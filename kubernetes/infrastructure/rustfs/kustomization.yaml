@@ -5,6 +5,6 @@ resources:
   - storage.yaml
   - helmrelease.yaml
   - credentials.sops.yaml
-  - google-oauth.sops.yaml
+  - atmz-internal-apps-google-oauth.sops.yaml
   - google-authorization.yaml
   - route.yaml

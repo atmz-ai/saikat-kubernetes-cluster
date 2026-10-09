@@ -8,7 +8,7 @@
 
 - name: Read the shared Google OAuth credentials
   ansible.builtin.command:
-    cmd: kubectl get secret rustfs-google-oauth -n rustfs -o json
+    cmd: kubectl get secret atmz-internal-apps-google-oauth -n rustfs -o json
   register: beszel_auth_google_secret
   changed_when: false
   no_log: true
@@ -159,15 +159,15 @@
 
 - name: Write the complete dashboard OAuth Secret declaration
   ansible.builtin.copy:
-    dest: "{{ beszel_auth_dashboard_secret_path }}"
+    dest: "{{ beszel_auth_oauth_secret_path }}"
     mode: '0600'
-    content: "{{ beszel_auth_dashboard_secret | to_nice_yaml }}"
+    content: "{{ beszel_auth_oauth_secret | to_nice_yaml }}"
   vars:
-    beszel_auth_dashboard_secret:
+    beszel_auth_oauth_secret:
       apiVersion: v1
       kind: Secret
       metadata:
-        name: dashboard-google-oauth
+        name: atmz-internal-apps-google-oauth
         namespace: oauth2-proxy
       type: Opaque
       stringData:
@@ -183,7 +183,7 @@
       - --in-place
       - --encrypted-regex
       - ^(data|stringData)$
-      - "{{ beszel_auth_dashboard_secret_path }}"
+      - "{{ beszel_auth_oauth_secret_path }}"
   environment:
     SOPS_AGE_KEY: "{{ vault_age_private_key }}"
   changed_when: true
