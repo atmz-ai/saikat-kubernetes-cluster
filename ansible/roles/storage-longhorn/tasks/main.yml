@@ -232,6 +232,76 @@
   ansible.builtin.debug:
     msg: "Longhorn data directory: /var/lib/longhorn ({{ longhorn_nodatacow_check.stdout }})"
 
+# ---------------------------------------------------------------------------
+# Keep multipathd away from Longhorn's own volumes
+#
+# ! This is not optional housekeeping. Without it, multipathd claims each Longhorn
+# ! iSCSI disk as a multipath device and the volume can no longer be encrypted or
+# ! mounted — see the multipath_blacklist_devnode comment in defaults/main.yml for
+# ! the mechanism, the symptom, and the upstream KB.
+#
+# Runs AFTER the data directory is prepared and is independent of the btrfs
+# expansion above, so it applies on cloud VMs too (where the expansion is skipped).
+
+- name: Ensure the multipathd drop-in directory exists
+  ansible.builtin.file:
+    path: "{{ multipath_config_directory }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Blacklist Longhorn volume devices from multipathd
+  # `devnode` matches on the device NAME, which is the right key here: the disks are
+  # recognised as multipath candidates precisely because of their /dev/sdX names, and
+  # it keeps working for a volume whose iSCSI serial has not been seen before.
+  ansible.builtin.copy:
+    dest: "{{ multipath_config_directory }}/99-longhorn-blacklist.conf"
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by Ansible (storage-longhorn role) — do not edit on the node.
+      #
+      # Longhorn attaches its volumes as iSCSI /dev/sdX devices, which multipathd's
+      # default blacklist does not cover. Without this, multipathd claims them and
+      # the volumes fail to mount or encrypt.
+      # https://longhorn.io/kb/troubleshooting-volume-with-multipath/
+      blacklist {
+          devnode "{{ multipath_blacklist_devnode }}"
+      }
+  register: multipath_blacklist_config
+
+- name: Apply the multipath blacklist
+  # Restarting multipathd both reloads the blacklist AND releases any device it has
+  # already claimed under the old config. That release is what lets a volume which is
+  # currently stuck (its disk held by a stale `mpatha`) be opened by Longhorn again —
+  # so this is the step that repairs an affected node, not merely one that prevents
+  # the problem. Restarting is idempotent and cheap; multipathd has no reload that
+  # re-evaluates already-claimed paths.
+  ansible.builtin.systemd_service:
+    name: multipathd.service
+    state: restarted
+
+- name: Wait for multipathd to be active
+  # The restart releases the claimed Longhorn disks; confirming it is running avoids
+  # reporting success while the daemon is still coming back up.
+  ansible.builtin.systemd_service:
+    name: multipathd.service
+  register: multipathd_state
+  until: multipathd_state.status.ActiveState == "active"
+  retries: 6
+  delay: 5
+  changed_when: false
+
+- name: Display multipathd state
+  ansible.builtin.debug:
+    msg:
+      - "multipathd: {{ multipathd_state.status.ActiveState }}"
+      - >-
+        Longhorn device blacklist written: {{ 'changed' if multipath_blacklist_config.changed
+        else 'already current' }}
+
 - name: Display storage setup summary
   ansible.builtin.debug:
     msg: |

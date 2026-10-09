@@ -1,0 +1,37 @@
+---
+# Reconcile the multipath blacklist for Longhorn volume devices on existing nodes.
+#
+# Fixes: encrypted Longhorn volumes failing to mount with
+#
+#   Cannot use device /dev/longhorn/pvc-... which is in use (already mapped or mounted)
+#
+# and the pod stuck in Init. The cause is multipathd claiming the Longhorn iSCSI
+# disk as a multipath device (`mpatha`), which leaves nothing for cryptsetup to
+# open. See the multipath_blacklist_devnode comment in
+# ansible/roles/storage-longhorn/defaults/main.yml for the mechanism and the
+# upstream KB link.
+#
+# The role is the SAME one add-node.yml runs at provisioning time, so a node
+# provisioned later already has the blacklist and this playbook is a no-op on it.
+# It exists for nodes that were provisioned BEFORE the blacklist was added, and it
+# is what releases an already-claimed disk: restarting multipathd drops the stale
+# `mpatha` as well as loading the new config.
+#
+# Usage:
+#   Canary on one node first — always:
+#     ansible-playbook ansible/playbooks/operations/reconcile-storage-multipath.yml -e target_host=saikat-azure-central-india-1
+#
+#   Then the rest, one at a time:
+#     ansible-playbook ansible/playbooks/operations/reconcile-storage-multipath.yml -e target_host=saikat-azure-central-india-2
+#
+# serial: 1 because restarting multipathd momentarily removes the multipath devices
+# it manages on that node. One node at a time keeps the blast radius to a single
+# node's storage, and the other nodes keep serving.
+
+- name: Reconcile the Longhorn multipath blacklist
+  hosts: "{{ target_host | default('nodes') }}"
+  gather_facts: true
+  serial: 1
+
+  roles:
+    - role: storage-longhorn

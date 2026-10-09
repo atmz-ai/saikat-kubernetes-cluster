@@ -1,0 +1,35 @@
+---
+# Directory for multipathd drop-in configuration.
+#
+# A drop-in rather than an edit to /etc/multipath.conf: that file is owned by the
+# multipath-tools package (dpkg conffile), so editing it makes every future package
+# upgrade stop and prompt about the modified config. multipathd merges files from
+# conf.d after the main config, which is the supported way to add to it.
+multipath_config_directory: /etc/multipath/conf.d
+
+# Longhorn volume devices must be invisible to multipathd.
+#
+# ! Longhorn attaches its volumes as iSCSI block devices that the kernel exposes as
+# ! /dev/sdX (vendor IET, model VIRTUAL-DISK). multipathd's DEFAULT blacklist covers
+# ! `^(ram|raw|loop|fd|md|dm-|sr|scd|st|dcssblk)[0-9]` and `^(td|hd|vd)[a-z]` — but
+# ! NOT `sd*`. So with `find_multipaths on` (the default), multipathd claims each
+# ! Longhorn disk as a multipath device on its second sighting and takes it away
+# ! from Longhorn.
+# !
+# ! The visible symptom is an ENCRYPTED volume failing to mount, with the cause a
+# ! long way from the message: cryptsetup refuses because what holds the disk is
+# ! `mpatha`, not a LUKS mapping:
+# !
+# !   Cannot use device /dev/longhorn/pvc-... which is in use (already mapped or
+# !   mounted)
+# !
+# ! Longhorn documents this exact failure and this exact remedy in
+# ! https://longhorn.io/kb/troubleshooting-volume-with-multipath/ — including that
+# ! the fix is a blacklist entry, because disabling multipathd wholesale is only an
+# ! option when nothing else needs it.
+# !
+# ! `sd[a-z0-9]+` is safe on these nodes: the OS disk is an NVMe device (nvme0n1)
+# ! and the only other non-Longhorn SCSI device is the optical drive (sr0), which
+# ! the default blacklist already covers. Every sd* device here is a Longhorn
+# ! volume.
+multipath_blacklist_devnode: "^sd[a-z0-9]+$"
