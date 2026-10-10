@@ -436,6 +436,17 @@ Workloads currently using 1-replica:
 Do NOT use 1-replica for workloads without app-layer replication. Losing the single node that holds the data means permanent data loss.
 - PostgreSQL (CloudNativePG): see `kubernetes/infrastructure/cloudnative-pg/helmrelease.yaml` for the per-service model and conventions.
 
+### etcd and Longhorn Must Not Share a Disk (Hard Rule)
+
+**etcd's WAL must live on a disk Longhorn replica I/O cannot saturate.** On the Azure nodes they share one device — `nvme0n1` (2 TB) carries root ext4, so `/var/lib/etcd` **and** `/var/lib/longhorn` are on the same physical disk. Measured 2026-10-10: a Longhorn snapshot-integrity + replica-rebuild burst drove instance-manager writes to ~300 MiB/s and 52–61 % disk utilisation, which pushed etcd WAL fsync p99 from a **7.5 ms baseline to 6,032 ms**.
+
+The failure mode is a **whole-cluster restart storm, and it looks like a dozen unrelated bugs**. The 6 s etcd stall forced leader elections (`etcdHighNumberOfLeaderChanges` 6.4/15 m), failed 100 % of LeaseGrants, took down the aggregated `metrics.k8s.io` API (`KubeAggregatedAPIDown`), and — because the apiserver's own etcd client retried until it exhausted — restarted *every* long-lived controller in lockstep (CNPG 148, shipwright 128, kube-state-metrics 126, flux, csi-*). The same burst reached 508 ms the day before, killing apiserver-1. **etcd itself restarts 0 times** (it needs no API round-trip), which is the tell: when many unrelated controllers share a restart timeline but etcd does not, suspect disk contention, not their code.
+
+Rules:
+- **Do not raise Longhorn's I/O concurrency or integrity settings while the disks are shared.** `snapshotDataIntegrity` must stay at the default `fast-check` (not `enabled`, which re-hashes every file), and keep `concurrentReplicaRebuildPerNodeLimit` / `snapshotHeavyTaskConcurrentLimit` low — the chart default of 5 allowed five concurrent rebuilds/purges to saturate the device.
+- **Correlate before diagnosing.** `histogram_quantile(0.99, rate(etcd_disk_wal_fsync_duration_seconds_bucket[5m]))` against `rate(container_fs_writes_bytes_total{namespace="longhorn-system"})` — if they spike together, the fix is storage isolation, not the crashing component.
+- The real fix is a dedicated disk for Longhorn (or etcd) — a `storage-longhorn` role + provisioning change. The Azure `nvme1n1`/`nvme2n1` are 440 GB but *local temp* (ephemeral, wiped on deallocate), so they are only suitable with that tradeoff accepted.
+
 ### CNPG Superuser Password Management (Hard Rule)
 
 **Never `ALTER USER postgres PASSWORD ...` on a live CNPG database.** The password is managed declaratively via the CNPG Cluster CR spec:

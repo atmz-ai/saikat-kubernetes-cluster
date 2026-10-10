@@ -55,10 +55,26 @@ spec:
       # for new volume creation defaults.
       disableRevisionCounter: '{"v1":"false"}'
 
-      # * fast-check (the default) hashes a snapshot file only when its mtime changes, so bit-rot in an
-      # * untouched file is never detected. enabled hashes everything and catches it, at a periodic I/O
-      # * cost. Only the per-engine-type JSON form is read (v1.11+), same as disableRevisionCounter above.
-      snapshotDataIntegrity: '{"v1":"enabled","v2":"enabled"}'
+      # * fast-check hashes a snapshot file only when its mtime changes, so bit-rot in an
+      # * untouched file is never detected. enabled hashes everything and catches it, at a
+      # * periodic I/O cost. Only the per-engine-type JSON form is read (v1.11+), same as
+      # * disableRevisionCounter above.
+      # ! enabled was reverted to the default fast-check on 2026-10-10: the periodic
+      # ! full re-hash drove instance-manager writes to ~300 MiB/s, and because
+      # ! /var/lib/longhorn shares nvme0n1 with /var/lib/etcd, etcd's WAL fsync p99 went
+      # ! from ~8 ms to 6,032 ms. That stalled etcd long enough to force leader elections,
+      # ! fail LeaseGrants, take down the aggregated metrics API, and restart every
+      # ! long-lived controller in lockstep (CNPG 148, shipwright 128, kube-state-metrics
+      # ! 126, flux, csi-*). The same burst hit 508 ms yesterday (killing apiserver-1) and
+      # ! 37-75 ms repeatedly. Do NOT set this to enabled again while Longhorn and etcd
+      # ! share a disk — see the disk isolation note in AGENTS.md.
+      snapshotDataIntegrity: '{"v1":"fast-check","v2":"fast-check"}'
+
+      # ! Both limits were left at the chart default of 5, which allowed five concurrent
+      # ! rebuilds/purges per node to saturate the shared nvme0n1. Halved so a single
+      # ! burst cannot monopolise the disk etcd needs for its WAL.
+      concurrentReplicaRebuildPerNodeLimit: 2
+      snapshotHeavyTaskConcurrentLimit: 2
 
       # Allow Longhorn to rebalance replica placement over time. best-effort tries to
       # spread replicas evenly across nodes and zones, and evicts replicas from disks
