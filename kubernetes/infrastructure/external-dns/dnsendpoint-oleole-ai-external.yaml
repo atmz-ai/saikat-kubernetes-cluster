@@ -78,3 +78,31 @@ spec:
       recordTTL: 300
       targets:
         - '"v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAyLh1QWyLAHvGEBItQ+tAcD+f8frA+x4gbc2dsKgpp1qBh91E4eup2hIj9BKyQuY2VF58RtO2Aq3VpSPswZCBRyzi1OooFNm5ARLWy73HkeSp0xl958NxFmplRNTpIgXY5epL8XQlb44p4FxhrtTGRO+edoexD+lq1QH/7tQNhkeVwb9f60bqfclcK2TnZ5FoG5fi4C1er/YYeM3tVfvxVInQiMKr3VaiFPj2b10bGVF5wnOo+2eRnBAIf1LaM/jLi1AmuThIHewdT7kh4uMVS4Zm3gd7icCVDOMsXRscSSiFGYvQDBTAu4BD42tXtx+x3tqizG9W64TfL7slNB2YBQIDAQAB"'
+---
+# www.oleole.ai and api.oleole.ai — the OleOle website and API, served by Rishi's
+# Docker Swarm (3 Azure Central India nodes) like *.rishi.oleole.ai. The apex
+# oleole.ai points at the same nodes via pdns-apex-records.yaml (external-dns
+# cannot own the apex). The swarm's edge Caddy issues its own certificates
+# (HTTP-01), so DNS is all that is needed here. These specific names take
+# precedence over *.oleole.ai.
+apiVersion: externaldns.k8s.io/v1alpha1
+kind: DNSEndpoint
+metadata:
+  name: oleole-ai-website-and-api
+  namespace: external-dns
+spec:
+  endpoints:
+    - dnsName: www.oleole.ai
+      recordType: A
+      recordTTL: 300
+      targets:
+        - 20.219.36.211
+        - 20.219.222.27
+        - 20.235.107.58
+    - dnsName: api.oleole.ai
+      recordType: A
+      recordTTL: 300
+      targets:
+        - 20.219.36.211
+        - 20.219.222.27
+        - 20.235.107.58
