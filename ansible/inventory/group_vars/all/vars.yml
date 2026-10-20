@@ -135,6 +135,10 @@ pdns_zones:
     snapshot: false
     soa_primary_nameserver: ns1.oleole.ai.
     soa_negative_cache_ttl_seconds: 300
+    apex_ipv4_addresses:
+      - 20.219.36.211
+      - 20.219.222.27
+      - 20.235.107.58
 
 # ── Nameserver cutover window — CLOSED, list emptied 2026-10-02 20:20 (+04) ───
 # The nameserver delegation moved from the Hetzner workers to the control planes. While the
