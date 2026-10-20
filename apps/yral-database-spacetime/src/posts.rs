@@ -545,6 +545,14 @@ pub fn migrate_posts_to_3(ctx: &ReducerContext, batch_limit: u32) -> Result<(), 
 // V2 post reducers — creator-callable (JWT-derived principal text)
 // ─────────────────────────────────────────────────────────────────────────
 
+// TODO(video-generation-at-scale, 2026-10-20): coordinate generation through
+// durable SpacetimeDB jobs exposed via typed REST-callable reducers/procedures.
+// Model queued/running/succeeded/failed/cancelled states; bound worker claims
+// with leases, attempt identifiers, concurrency limits and retry/backpressure.
+// Keep provider HTTP calls outside transactions; reject stale completions and
+// persist result metadata/storage references plus the draft post idempotently
+// at this boundary. Enforce account ownership and test retries, worker crashes,
+// cancellation and duplicate results; keep video bytes in object storage.
 /// Add a new post to the `posts_3` table. Admin, or the creator adding
 /// their own post. Rejects duplicate post IDs.
 ///
@@ -665,10 +673,10 @@ pub fn get_post_by_id(
     ctx.with_tx(|tx| {
         // Try posts_3 first (has creator_oauth_subject), with lazy migration
         // from posts_v2. Fall back to V1 posts.
-        if let Some(p) = lazy_get_post_3(tx, &post_id) {
-            if p.status != PostStatus::Deleted {
-                return Some(post_3_to_details(&p));
-            }
+        if let Some(p) = lazy_get_post_3(tx, &post_id)
+            && p.status != PostStatus::Deleted
+        {
+            return Some(post_3_to_details(&p));
         }
         tx.db
             .posts()
@@ -804,10 +812,10 @@ pub fn fetch_posts(
 
         for post in tx.db.posts().iter() {
             // Skip posts with id <= cursor (already processed).
-            if let Some(ref cursor_id) = cursor {
-                if post.id.as_str() <= cursor_id.as_str() {
-                    continue;
-                }
+            if let Some(ref cursor_id) = cursor
+                && post.id.as_str() <= cursor_id.as_str()
+            {
+                continue;
             }
             // Only include non-deleted posts in the scan result.
             if post.status == PostStatus::Deleted {
@@ -841,10 +849,10 @@ pub fn get_individual_post_details_by_id(
     ctx.with_tx(|tx| {
         // Try posts_3 first (has creator_oauth_subject), with lazy migration
         // from posts_v2. Fall back to V1 posts.
-        if let Some(p) = lazy_get_post_3(tx, &post_id) {
-            if p.status != PostStatus::Deleted {
-                return Some(post_3_to_details(&p));
-            }
+        if let Some(p) = lazy_get_post_3(tx, &post_id)
+            && p.status != PostStatus::Deleted
+        {
+            return Some(post_3_to_details(&p));
         }
         tx.db
             .posts()

@@ -37,9 +37,11 @@ fn jwt_header() -> jsonwebtoken::Header {
     header
 }
 
-/// Generates access token and id token JWTs
-/// the first token is the access token
-/// the second token is the id token
+// TODO(self-service-account-tokens, 2026-10-20): let authenticated users export
+// tokens from /account with login-equivalent access to their own accounts only.
+// Reuse login issuance and preserve consumer-required audiences/claims (including
+// the SpacetimeDB ID token); provide expiry/revocation, never elevated privileges.
+/// * Returns the access token followed by the ID token.
 #[allow(clippy::too_many_arguments)]
 pub fn generate_access_token_and_id_token_jwt(
     encoding_key: &jsonwebtoken::EncodingKey,
