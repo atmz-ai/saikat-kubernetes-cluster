@@ -65,7 +65,6 @@ all:
     hetzner_s3_endpoint: "https://hel1.your-objectstorage.com"
     hetzner_s3_region: "hel1"
 
-  # TODO: Rename all the "worker-*" hosts to "node-*" by removing with the current name, renaming in inventory, and reprovisioning with the new name.
   children:
     controller:
       hosts:
