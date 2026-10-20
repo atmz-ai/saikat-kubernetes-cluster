@@ -150,6 +150,53 @@ immutable nodes, per-component verification) are in the root `AGENTS.md` under
 "Core Architecture Principles" and "Deployment / Upgrade Workflow". They are not
 repeated here.
 
+### Current lifecycle entry points and limits
+
+Run from the repository root with
+`mise run ansible-playbook -- ansible/playbooks/operations/<operation>.yml -e target_host=<node>`.
+Use `init-control-plane.yml` for bootstrap, `add-node.yml` for joining either node role,
+`remove-node.yml` for retirement, and `upgrade-node.yml` for the existing upgrade path.
+Bootstrap runs provisioning and base setup too; it is not merely an idempotent
+`kubeadm init` wrapper to rerun against an established control plane.
+
+**Pass an explicit target.** Add and upgrade default to all `nodes`, serially;
+bootstrap defaults to `control_plane`. Removal's initial Beszel cleanup play also
+defaults to all `nodes`, before the localhost removal role validates `target_host`.
+Do not rely on a later validation task to protect an earlier play.
+
+**Existing upgrade behavior is not the immutable provisioning policy.** The active
+roles are `upgrade-control-plane` and `upgrade-worker`, not `node-upgrade`. They run
+in-place package upgrades and handle their own reboots. Workers retain their Node
+registration; control planes reset and rejoin when rebooting. The playbook runs in
+inventory order, with no separate control-plane-first phase or inter-node pauses.
+These are implementation limitations, not exceptions authorizing new in-place
+maintenance or reboot logic outside `base-system`.
+
+**Serial execution and confirmation do not prove quorum safety.** The control-plane
+upgrade check counts Kubernetes Ready nodes, including the target; removal has no
+pre-removal live-quorum assertion. Before disrupting a voter, verify healthy
+surviving etcd voters against the quorum required for that membership. Do not infer
+etcd health from Node readiness or assume the roles enforce every safety requirement.
+
+### Retiring temporary operations
+
+Remove fleet-backfill entry points once their configuration belongs to the normal
+node lifecycle; retain the roles used by that lifecycle. Do not delete an operation
+solely because its header says "one-time" or has a removal TODO: check migration
+completion conditions and whether it is the only caller of another capability.
+Bootstrap, declarative configuration generation, and read-only diagnostics remain
+valid entry points in day-2 management.
+
+RustFS disk preparation runs in `add-node.yml`. RustFS pool membership and local
+PV/PVC declarations remain GitOps-managed: `remove-node.yml` refuses a node with
+bound RustFS local storage, so decommission its pool and retire its PVCs before
+node removal. The node lifecycle does not automatically resize the RustFS cluster.
+
+Beszel agents register through `add-node.yml` and are removed from the hub through
+`remove-node.yml`. The historical installation/authentication backfill entry point
+is retired; hub authentication setup is not a per-node lifecycle action. Its role
+remains available for a separately reviewed hub recovery or configuration change.
+
 ## Inventory: one node list, derived role groups
 
 Every node is declared **once** in `ansible/inventory/00-hosts.yml` under a single
@@ -193,3 +240,20 @@ Attributes, and what each is actually for:
   tasks but cannot select hosts for a play or produce a set for a cluster-wide aggregate
   (`groups['control_plane'][0]` as the kubectl delegate, `loop: groups['worker_nodes']`,
   the etcd quorum count).
+
+### Inventory changes within an operation
+
+Normal `remove-node.yml` runs `node-remove`, then `node-inventory-remove`, then
+`pdns-zones`. Inventory deletion is automated, not a manual post-removal step.
+The cleanup-only path skips inventory removal and DNS generation.
+
+After changing inventory on disk, use `ansible.builtin.meta: refresh_inventory` and
+assert the resulting in-memory host set before rendering downstream artifacts.
+A successful file edit alone does not prove `groups` and `hostvars` are current.
+Constructed groups disappear when their last matching host is removed; use
+`groups['worker_nodes'] | default([])` where an empty group is valid.
+
+Add and normal removal regenerate DNS declarations locally; they do not deploy
+them. Commit and push the resulting inventory and generated DNS changes, then
+verify authoritative DNS convergence through the root GitOps workflow. Registrar
+glue changes and returning provider hardware are separate operations.

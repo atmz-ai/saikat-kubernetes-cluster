@@ -9,7 +9,7 @@ kind: ClusterConfiguration
 # WARNING: kubeadm writes static pod manifests from this config only at
 # init/join/upgrade time, so a change here does NOT reach an existing node — a
 # ConfigMap edit reaches no running pod. Existing nodes converge only via the
-# reconcile playbooks (see AGENTS.md). Never edit the ConfigMap directly.
+# ! serial node replacement (see AGENTS.md). Never edit the ConfigMap directly.
 kubernetesVersion: v{{ kubernetes_version }}
 controlPlaneEndpoint: "{{ control_plane_endpoint }}:6443"
 networking:
@@ -30,7 +30,7 @@ apiServer:
   # WARNING: the certificate is written only at init/join time, so adding a name
   # here does not add it to an existing certificate — and a name absent from the
   # certificate fails TLS verification, losing control-plane access while the API
-  # stays healthy. Existing nodes need reconcile-control-plane-certificates.yml.
+  # ! stays healthy. Existing nodes need serial replacement to adopt new SANs.
   # Adding a SAN must be ADDITIVE: carry old and new names together.
   #
   # Emitted as an empty list rather than omitted when the variable is unset, so this
@@ -117,7 +117,7 @@ etcd:
     # defaults. Cost: up to 2.5s to detect a dead leader.
     #
     # WARNING: existing members do NOT pick this up (manifests are written only at
-    # init/join time) — they need reconcile-control-plane-metrics.yml. The upload to
+    # ! init/join time); converge through serial node replacement. The upload to
     # the kubeadm-config ConfigMap must happen BEFORE a join.
     extraArgs:
       - name: listen-peer-urls
@@ -171,7 +171,7 @@ etcd:
     # ! identically wherever the template runs.
     #
     # WARNING: like every other setting here, this reaches an EXISTING node's certificate
-    # only through the reconcile-control-plane-metrics playbook. kubeadm builds
+    # ! only through serial node replacement. kubeadm builds
     # certificates at init/join time only.
     serverCertSANs:
 {% for control_plane_node in groups['control_plane'] %}
