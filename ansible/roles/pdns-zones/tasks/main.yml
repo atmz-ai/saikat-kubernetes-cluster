@@ -160,8 +160,8 @@
 #            reaches the wildcard must reach the apex too
 #   apex NS  the custom nameservers, and a removed node can be one
 #
-# Driven from the same pdns_all_node_ips / pdns_nameservers as the DNSEndpoint, so the
-# apex and the wildcard cannot disagree about which nodes exist.
+# * Zones with an external apex declare apex_ipv4_addresses in pdns_zones; the
+# * wildcard and nameservers remain on the cluster. Otherwise the apex uses all nodes.
 #
 # ! Each rrset's contents are SPACE-separated on ONE line because rrset replace is
 # ! called once per line with every value: `rrset replace ZONE NAME TYPE TTL CONTENT
@@ -170,7 +170,7 @@
   ansible.builtin.set_fact:
     pdns_apex_record_lines: >-
       {{ pdns_apex_record_lines | default([])
-         + [zone.name ~ '|' ~ zone.name ~ '|A|300|' ~ (pdns_all_node_ips | join(' ')),
+         + [zone.name ~ '|' ~ zone.name ~ '|A|300|' ~ (zone.apex_ipv4_addresses | default(pdns_all_node_ips) | join(' ')),
             zone.name ~ '|' ~ zone.name ~ '|NS|300|' ~ (pdns_nameservers | map(attribute='prefix') | map('regex_replace', '$', '.' ~ zone.name) | join(' '))] }}
   loop: "{{ pdns_zones }}"
   loop_control:
