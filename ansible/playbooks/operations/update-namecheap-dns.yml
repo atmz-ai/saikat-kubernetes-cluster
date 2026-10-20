@@ -13,10 +13,6 @@
 # deliberately (changing it would break the working setup until the new node's IP
 # is whitelisted).
 #
-# TODO(namecheap-delegate): switch to `node-1` (first entry in groups['control_plane'])
-# once node-1's IP is added to the Namecheap allowlist, so the delegate follows the
-# inventory's first control plane instead of a hardcoded node.
-#
 # Whitelisting is UI-only — Namecheap exposes no API for it. If a delegate's IP
 # drops off the allowlist (e.g. the node was reprovisioned and got a new IP), the
 # role's preflight in ansible/roles/namecheap-dns/tasks/main.yml fails with the
