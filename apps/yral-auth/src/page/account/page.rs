@@ -331,7 +331,7 @@ pub fn AccountPage() -> impl IntoView {
                                 None => Either::Right(view! {
                                     <div class="flex flex-col items-center gap-6 w-full">
                                         <div class="text-center">
-                                            <h1 class="text-2xl font-bold text-white mb-2">"Yral Account"</h1>
+                                            <h1 class="text-2xl font-bold text-white mb-2">"OleOle Account"</h1>
                                             <p class="text-sm text-neutral-400">"Sign in to manage your account"</p>
                                         </div>
                                         <GoogleLoginButton />
