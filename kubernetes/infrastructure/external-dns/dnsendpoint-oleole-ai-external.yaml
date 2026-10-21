@@ -103,3 +103,27 @@ spec:
         - 20.219.36.211
         - 20.219.222.27
         - 20.235.107.58
+---
+# *.rishi.oleole.ai — Rishi's Docker Swarm (3 Azure Central India nodes), the same
+# pattern as *.rishi.yral.com. Each node runs the swarm's edge Caddy, which issues
+# its own certificates (HTTP-01) for the hostnames it serves, so all this zone has
+# to provide is the round-robin A records. A specific name such as
+# agent.rishi.oleole.ai resolves through this wildcard; the more specific
+# *.rishi.oleole.ai takes precedence over *.oleole.ai for every name under it.
+#
+# The three addresses are the nodes' public IPs (rishi-azure-central-india-1/2/3).
+# If a node is added or replaced, update this list.
+apiVersion: externaldns.k8s.io/v1alpha1
+kind: DNSEndpoint
+metadata:
+  name: oleole-ai-rishi-swarm
+  namespace: external-dns
+spec:
+  endpoints:
+    - dnsName: "*.rishi.oleole.ai"
+      recordType: A
+      recordTTL: 300
+      targets:
+        - 20.219.36.211
+        - 20.219.222.27
+        - 20.235.107.58
