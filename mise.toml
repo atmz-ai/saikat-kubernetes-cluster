@@ -83,7 +83,7 @@ pitchfork = "latest"
 # Linux/WSL → podman (native, no VM layer). WSL containers are the Windows plan;
 #   no action needed there yet.
 podman = { version = "latest", os = ["linux"] }
-python = "latest"
+python = "3.14.8"
 # rclone — third S3 client, for the operations neither of the others covers:
 # `purge` (remove a prefix AND the bucket in one step), `backend
 # list-multipart-uploads` / `backend cleanup` (orphaned upload parts, which are
