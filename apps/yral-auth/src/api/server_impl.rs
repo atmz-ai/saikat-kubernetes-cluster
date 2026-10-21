@@ -6,17 +6,19 @@
 //! and returning the token grant response.
 
 use axum::{
-    http::HeaderMap,
+    http::{header::CONTENT_TYPE, HeaderMap, HeaderValue, Method},
     response::{IntoResponse, Response},
     Extension, Form, Json,
 };
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
+use tower_http::cors::{AllowOrigin, CorsLayer};
 use url::Url;
 use web_time::Duration;
 
 use crate::{
     api::ai_accounts::get_ai_account_ids_for_user,
+    consts::TOKEN_ENDPOINT_BROWSER_ORIGINS,
     context::server::ServerCtx,
     kv::KVStore,
     oauth::{
@@ -154,6 +156,20 @@ pub async fn handle_oidc_configuration(headers: HeaderMap) -> Response {
 
 pub async fn healthz() -> Response {
     Json(serde_json::json!({"status": "ok"})).into_response()
+}
+
+/// CORS for /oauth/token, so browser apps on an allowed origin can exchange a
+/// code and refresh tokens themselves. Exact origins only, never a wildcard: a
+/// wildcard would let any site drive the token endpoint from a user's browser.
+pub fn token_endpoint_cors() -> CorsLayer {
+    CorsLayer::new()
+        .allow_origin(AllowOrigin::list(
+            TOKEN_ENDPOINT_BROWSER_ORIGINS
+                .iter()
+                .map(|origin| HeaderValue::from_static(origin)),
+        ))
+        .allow_methods([Method::POST])
+        .allow_headers([CONTENT_TYPE])
 }
 
 pub async fn handle_oauth_token_grant(
@@ -454,4 +470,65 @@ async fn handle_client_credentials_grant(
         Vec::new(),
         server_url,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::token_endpoint_cors;
+    use axum::{
+        body::Body,
+        http::{header, Request, Response},
+        routing::post,
+        Router,
+    };
+    use tower::ServiceExt;
+
+    async fn send(method: &str, origin: &str) -> Response<Body> {
+        let app = Router::new().route(
+            "/oauth/token",
+            post(|| async { "ok" }).layer(token_endpoint_cors()),
+        );
+        let req = Request::builder()
+            .method(method)
+            .uri("/oauth/token")
+            .header(header::ORIGIN, origin)
+            .header(header::ACCESS_CONTROL_REQUEST_METHOD, "POST")
+            .header(header::ACCESS_CONTROL_REQUEST_HEADERS, "content-type")
+            .body(Body::empty())
+            .unwrap();
+        app.oneshot(req).await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn allowed_origin_passes_preflight_and_reads_the_response() {
+        for method in ["OPTIONS", "POST"] {
+            let res = send(method, "https://oleole.ai").await;
+            assert!(res.status().is_success(), "{method}");
+            assert_eq!(
+                res.headers()[header::ACCESS_CONTROL_ALLOW_ORIGIN],
+                "https://oleole.ai",
+                "{method}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn other_origins_get_no_cors_grant() {
+        for origin in [
+            "https://example.com",
+            "http://oleole.ai",
+            "https://www.oleole.ai",
+            "https://oleole.ai.example.com",
+        ] {
+            for method in ["OPTIONS", "POST"] {
+                let res = send(method, origin).await;
+                assert!(
+                    res.headers()
+                        .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+                        .is_none(),
+                    "{method} {origin}"
+                );
+            }
+        }
+    }
 }
