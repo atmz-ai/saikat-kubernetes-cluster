@@ -49,7 +49,7 @@ pub fn App() -> impl IntoView {
 
     view! {
         // sets the document title
-        <Title text="Yral Authentication" />
+        <Title text="OleOle Authentication" />
 
         // content for this welcome page
         <Router>
