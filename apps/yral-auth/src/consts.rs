@@ -25,7 +25,3 @@ pub const BACKEND_ACCESS_TOKEN_MAX_AGE: Duration = Duration::from_secs(60 * 60 *
 pub const BACKEND_REFRESH_TOKEN_MAX_AGE: Duration = Duration::from_secs(60 * 60 * 24 * 30 * 6);
 
 pub const AUTH_TOKEN_KID: &str = "default";
-
-/// Browser origins allowed to call /oauth/token directly. Only public (PKCE)
-/// clients that run in a browser belong here; server-side clients need no CORS.
-pub const TOKEN_ENDPOINT_BROWSER_ORIGINS: &[&str] = &["https://oleole.ai"];

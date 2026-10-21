@@ -90,14 +90,6 @@ pub fn default_oauth_clients() -> HashMap<String, OAuthClient> {
             ],
             OAuthClientType::Web
         },
-        // OleOle web app (oleole.ai). Native, not Web: it runs in the browser,
-        // which cannot keep a client secret, and Web clients must present one at
-        // /oauth/token. PKCE S256 protects the code exchange instead.
-        {
-            "8ae4e310-e4c5-4a8e-b0cc-09dc0be396bb",
-            ["https://oleole.ai/app/", "https://oleole.ai/u/"],
-            OAuthClientType::Native
-        },
     };
 
     oauth_clients
