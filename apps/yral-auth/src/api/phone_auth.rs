@@ -103,7 +103,6 @@ pub(crate) async fn send_authorization_code_for_phone_number(
     let token =
         serde_json::to_string(&otp_claim).map_err(|e| AuthErrorKind::Unexpected(e.to_string()))?;
 
-    //TODO: send OTP to user via SMS gateway
     delivery_service
         .send_message(&phone_number, &one_time_passcode.to_string())
         .await
