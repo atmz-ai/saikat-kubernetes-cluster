@@ -127,3 +127,43 @@ spec:
         - 20.219.36.211
         - 20.219.222.27
         - 20.235.107.58
+---
+# * Resend — the transactional sender for @oleole.ai (applicant emails from
+# * api.oleole.ai: "your video is ready", "please fix a photo"). Values are issued
+# * per-domain by the Resend dashboard (domain oleole.ai, region us-east-1); they
+# * are not derivable, so they are recorded here verbatim as supplied.
+# *
+# * All four are SUBDOMAINS, so external-dns owns them normally; none touches the
+# * apex SPF or MX, which stay Google Workspace's. send/rsend are the bounce
+# * (Return-Path) domain, which carries Resend's own SPF, so the apex SPF needs no
+# * include. Specific names take precedence over *.oleole.ai.
+# *
+# * _dmarc starts at p=none: report-only, so nothing Google Workspace already sends
+# * can be rejected by it.
+apiVersion: externaldns.k8s.io/v1alpha1
+kind: DNSEndpoint
+metadata:
+  name: oleole-ai-resend
+  namespace: external-dns
+spec:
+  endpoints:
+    - dnsName: resend._domainkey.oleole.ai
+      recordType: TXT
+      recordTTL: 300
+      targets:
+        - '"p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDBl6ME75afA38MwPRwxIkfU26WnmvmS/3zE8KVUuBveNAXTCRNLxXQtheEjr/97Zk4D1Lx3OaTD2A+jJbcUu4Xu0GpJf/X57DviAd8rvk4SwPD3CsLiBp8aaFtuoqQvSLtIsxz5gWRiJWUXCZSst5ZMcOOzBDGVJ68maOTg7URuQIDAQAB"'
+    - dnsName: send.oleole.ai
+      recordType: CNAME
+      recordTTL: 300
+      targets:
+        - send.forge.rmta.net
+    - dnsName: rsend.oleole.ai
+      recordType: CNAME
+      recordTTL: 300
+      targets:
+        - rsend.forge.rmta.net
+    - dnsName: _dmarc.oleole.ai
+      recordType: TXT
+      recordTTL: 300
+      targets:
+        - '"v=DMARC1; p=none;"'
