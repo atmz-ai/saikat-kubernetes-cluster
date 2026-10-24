@@ -14,7 +14,6 @@ resources:
   - app-my-website.yaml
   - app-yral-auth.yaml
   - app-yral-metadata.yaml
-  - app-yral-web.yaml
   - infrastructure-alloy.yaml
   - infrastructure-beszel.yaml
   - infrastructure-cert-manager-issuers.yaml
