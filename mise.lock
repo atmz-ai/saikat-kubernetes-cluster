@@ -257,6 +257,7 @@ url = "https://awscli.amazonaws.com/awscli-exe-linux-x86_64-2.38.2.zip"
 url = "https://awscli.amazonaws.com/awscli-exe-linux-x86_64-2.38.2.zip"
 
 [tools.aws-cli."platforms.macos-arm64"]
+checksum = "blake3:00f977ebf54540ac7ed7676fa9f9c337ea88570097feb7f09230a0a2fbe7e58e"
 url = "https://awscli.amazonaws.com/AWSCLIV2-2.38.2.pkg"
 
 [tools.aws-cli."platforms.macos-x64"]
