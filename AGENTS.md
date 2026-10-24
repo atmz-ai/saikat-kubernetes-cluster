@@ -60,16 +60,6 @@ Every microservice owns one dedicated namespace containing:
 
 Cross-namespace is the exception (shared infra like Cilium/cert-manager/monitoring; oauth2-proxy for internal tools).
 
-### 3–6. Role & Playbook Discipline (Atomicity)
-- **Playbooks** (`ansible/playbooks/operations/`): Thin single-play wrappers only. `roles:` list or minimal `include_role` for pre/post task files. Zero conditional logic, loops, or non-role modules in playbooks.
-- **Roles**: Atomic (single responsibility). No `include_role` calls inside roles. No orchestration logic. Must be independently executable. Role-specific conditionals only.
-- Playbook = orchestration sequence of atomic roles (e.g. `provision` → `storage-longhorn` → `ssh-hardening` → `base-system` → `containerd` → `kubernetes` → `cluster-init` → ...).
-- New capability → new role first, added to existing playbook. New playbook only when structurally distinct (different host target or lifecycle stage). Ask before creating.
-
-**Reboot handling:** Only in `base-system` role (detect `/var/run/reboot-required`, `ansible.builtin.reboot`). Playbooks orchestrate across nodes.
-
-**Multi-node ops:** Always serial (one node complete + verified before next). Use `include_tasks` loops (inherently serial) when touching multiple nodes inside a role.
-
 ## Policies
 
 ### Missing CLI tools
@@ -186,11 +176,11 @@ Rust and Swift use `//` (or `///` for doc comments); Ansible, Python and YAML us
 - Restating what the code does ("// loop over the rows", "// create the client", "// the join playbook role order is:").
 - Explaining a design that a reader can derive from the code itself.
 - Re-argument of a decision the reader was not present for, where the code already reflects the answer.
-- Multi-paragraph essays on a file's background. This is documentation, not commentary, and belongs in `AGENTS.md`, a role `README.md`, or the component's own docs — where it is discoverable and maintained as prose rather than buried in a file header.
+- Multi-paragraph essays on a file's background. Keep only the implementation-specific invariant that needs explaining beside the owning code; reusable guidance spanning the project or role belongs in its `AGENTS.md`. Do not move redundant narration into another file merely to preserve it.
 
 **Prefer the machine-readable form when a comment is warranted** — Rust `///` items and `//!` module docs, Swift `///`: rendered by rustdoc/DocC/editor Quick Help, and they force contract-level framing (semantics, args, returns, errors) over line-local narration.
 
-**Length is the tell.** A justified comment is usually one to three lines saying the counter-intuitive thing and stopping. A comment block longer than the code it annotates is almost always an essay that should move to `AGENTS.md`/`README`.
+**Length is the tell.** A justified comment is usually one to three lines saying the counter-intuitive thing and stopping. A longer block should be tightened to the invariant; only reusable project-wide guidance belongs in the owning `AGENTS.md`.
 
 When touching code whose comments violate this, tighten them in the same change — gradual migration, same policy as the macro-free rules. This targets REDUNDANCY, not contract documentation: wire-pin shapes, incident references, and ownership/invariant statements that names genuinely cannot carry remain and are load-bearing.
 ### Commit Messages — No AI Attribution (Hard Rule)
@@ -387,13 +377,6 @@ All dependency **versions** must be declared once in the root `Cargo.toml` `[wor
 
 ### Shared vs Module-Local Constants
 Maintain a top-level `constants.rs` beside `lib.rs` for constants shared between multiple modules within a crate. Module-specific constants stay at the top of the module file that uses them. Only promote a constant to `constants.rs` when at least two modules reference it.
-
-### Error Handling
-In roles: use `fail`, `assert`, `changed_when: false`, `failed_when: false` + explicit checks.
-In playbooks: none (orchestration only).
-
-### Lint
-Run `ansible-lint ansible/playbooks/operations/` before changes. Playbooks must pass.
 
 ## Repository-Specific Patterns & Rules
 
@@ -795,10 +778,12 @@ Specifically:
 
 Add to / update AGENTS.md only for new patterns, clarifications that prevent repeated mistakes, or new core constraints.
 
-Do **not** add one-off workarounds, temporary fixes, or incident-specific notes (those belong in role READMEs).
+Do **not** add one-off workarounds, temporary fixes, or incident narratives to `AGENTS.md` files. Preserve a durable implementation-specific lesson beside the owning code or manifest, with a succinct tagged comment only when names and types cannot express it. Preserve a reusable folder-wide rule in that folder's `AGENTS.md`.
 
 Process: identify section, make minimal prescriptive update, remove obsolete guidance immediately.
 
-**AGENTS.md is the only memory to use.** Do not use agent-specific memory systems (e.g. `/memories/`, `.copilot/`, or similar) — that memory doesn't get shared between hosts and isn't checked into source control. It defeats the purpose of memory when we switch to another host. All persistent knowledge must live in AGENTS.md (committed to git) or in role/README files within the repo.
+**AGENTS.md is the canonical instruction file for humans and agents.** Do not create or maintain `README.md` files in code and configuration we own. When retiring a README, put reusable project- or role-wide guidance in the corresponding `AGENTS.md`; keep implementation-specific facts inline beside the owning code or manifest. Remove stale and redundant material instead of copying it wholesale, and update references. Independent submodules and vendored/generated content keep their upstream documentation and are not swept by this rule.
 
-**Service-specific details belong colocated as comments on the manifests/code that implements them.** AGENTS.md contains only repo-wide rules and patterns. When a detail applies to one component (versions, disk layouts, flag values, API patterns), put it in a header comment block on the relevant YAML/Ansible file. This keeps AGENTS.md scannable and ensures the detail is visible exactly where it's needed.
+**Use checked-in, shared knowledge only.** Do not use agent-specific memory systems (e.g. `/memories/`, `.copilot/`, or similar) — that memory doesn't get shared between hosts and isn't checked into source control. Persistent instructions live in the appropriately scoped `AGENTS.md`; implementation details live in the code and manifests that own them.
+
+**Inline and colocate by default.** The top-level `AGENTS.md` contains only global guidance. Child `AGENTS.md` files contain rules shared across their section, project, application, or role, at the narrowest common owner. Specific behavior, values, contracts, and pitfalls belong beside the code or manifest that implements them, not in a parallel instruction essay. Read applicable child instructions before working in that area. The root may point to those owners, but must not duplicate their guidance; child files must not duplicate declarations or inline implementation notes.

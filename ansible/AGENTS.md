@@ -145,10 +145,15 @@ meaningful once a shipped unit in the image genuinely errors.
 
 ## Roles and playbooks
 
-The structural rules (atomic roles, thin playbooks, no `include_role` inside roles,
-immutable nodes, per-component verification) are in the root `AGENTS.md` under
-"Core Architecture Principles" and "Deployment / Upgrade Workflow". They are not
-repeated here.
+- Playbooks in `ansible/playbooks/operations/` are thin single-play wrappers: a `roles:` list or minimal `include_role` for pre/post task files. No conditional logic, loops, or non-role modules in playbooks.
+- Roles are atomic, independently executable, and contain only role-specific conditions. Do not call `include_role` inside a role or hide orchestration there.
+- A playbook orchestrates the ordered sequence of roles. Add new capabilities as roles to an existing playbook; ask before creating a structurally distinct playbook with a different host target or lifecycle stage.
+- Reboot handling belongs only in `base-system`, using `/var/run/reboot-required` and `ansible.builtin.reboot`. Playbooks orchestrate across nodes.
+- Multi-node operations are serial: complete and verify one node before starting the next. Use `include_tasks` loops for serial work within a role.
+- Error handling belongs in roles: use `fail`, `assert`, appropriate `changed_when`, and explicit failure checks. Playbooks contain orchestration only.
+- Run `mise run ansible-lint` before Ansible changes and before review. Playbooks and roles must pass.
+
+The root `AGENTS.md` retains the shared immutable-infrastructure, production-safety, and per-component verification requirements.
 
 ### Current lifecycle entry points and limits
 
