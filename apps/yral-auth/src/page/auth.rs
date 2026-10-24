@@ -245,7 +245,7 @@ pub fn login_content(auth: Box<AuthQuery>) -> impl IntoView {
         .child(
             html::span()
                 .attr("class", "text-2xl mb-4")
-                .child("Login to OleOle"),
+                .child("Login to Yral"),
         )
         .child(
             html::div()
