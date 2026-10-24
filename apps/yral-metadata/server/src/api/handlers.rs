@@ -40,14 +40,12 @@ pub async fn set_user_metadata(
     Path(user_principal): Path<Principal>,
     Json(req): Json<SetUserMetadataReq>,
 ) -> Result<Json<ApiResult<SetUserMetadataRes>>> {
-    let result = set_user_metadata_impl(&state.spacetime, user_principal, req)
-        .await
-        .map_err(|e| {
-            log::error!("API error: {e:?}");
-            e
-        })?;
+    if let Err(e) = set_user_metadata_impl(&state.spacetime, user_principal, req).await {
+        log::error!("API error: {e:?}");
+        return Err(e);
+    }
 
-    Ok(Json(Ok(result)))
+    Ok(Json(Ok(())))
 }
 
 #[utoipa::path(
@@ -69,8 +67,8 @@ pub async fn admin_set_user_metadata(
     Path(user_principal): Path<Principal>,
     Json(req): Json<SetUserMetadataReq>,
 ) -> Result<Json<ApiResult<SetUserMetadataRes>>> {
-    let result = set_user_metadata_core(&state.spacetime, user_principal, &req.metadata).await?;
-    Ok(Json(Ok(result)))
+    set_user_metadata_core(&state.spacetime, user_principal, &req.metadata).await?;
+    Ok(Json(Ok(())))
 }
 
 #[utoipa::path(

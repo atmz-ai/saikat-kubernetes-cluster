@@ -48,6 +48,15 @@ git submodule update --init --recursive
 | ------------------------------- | ----------------------------------------------------------- |
 | `apps/my-website/`             | `saikat.dev`                                                |
 | `apps/yral-auth/`               | `auth.yral.com`                                             |
-| `apps/yral-web/`             | `legacy.yral.com`                                           |
 | `apps/yral-metadata/`           | `metadata.yral.com`                                         |
 | `apps/yral-database-spacetime/` | Workspace member (root Cargo.toml)                          || `apps/yral-ios/`                | App Store / TestFlight (`com.yral.iosApp`)                  |
+
+## Retired Legacy Frontend
+
+The legacy Leptos frontend and its dedicated build, routing, and deployment resources are removed. Shared authentication, SpacetimeDB, and external object-storage data are retained.
+
+Deploy retirement in two stages. Suspend `app-yral-web` and its image automation while preparing the removal, then push an empty resource set with the Kustomization explicitly resumed. Verify its inventory is empty, the retired namespace and image automation are absent, and the retained services remain healthy. Only then remove the empty Kustomization and its parent reference in a second push. Deleting a suspended Kustomization skips finalizer pruning and orphans its resources. Let Flux reconcile naturally, without forcing it. Removing local credentials does not revoke their upstream keys or delete external data.
+
+During retirement, Flux's bootstrap Git Secret had expired credentials and could not fetch a GitOps repair. The operator authorized a one-time local `flux create secret git` update using the age-encrypted `GITHUB_TOKEN` from fnox. Source readiness was verified without forced reconciliation; no Ansible recovery operation was added.
+
+Native release builds, local daemon health checks, and regression tests passed. The local auth image build failed before compilation when Rust's toolchain download could not resolve DNS inside the Apple builder. The operator explicitly waived local image validation for this deployment; production build and rollout checks remain required.

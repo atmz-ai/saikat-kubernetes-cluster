@@ -9,7 +9,6 @@ edition = "2021"
 ic-agent = { workspace = true }
 reqwest = {
   workspace = true,
-  default-features = false,
   features = [
     "http2",
     "json",

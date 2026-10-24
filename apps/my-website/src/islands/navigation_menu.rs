@@ -129,7 +129,6 @@ pub fn NavigationMenu() -> impl IntoView {
                                     NAV_LINKS
                                         .iter()
                                         .map(|link| {
-                                            let set_menu_open = set_menu_open;
                                             html::a()
                                                 .attr("href", link.url)
                                                 .attr(

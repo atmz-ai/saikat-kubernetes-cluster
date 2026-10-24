@@ -7,14 +7,7 @@ spec:
   interval: 1h
   path: ./kubernetes/apps/yral-web
   prune: true
-  wait: true
-  timeout: 5m
+  suspend: false
   sourceRef:
     kind: GitRepository
     name: flux-system
-  decryption:
-    provider: sops
-    secretRef:
-      name: sops-age
-  dependsOn:
-    - name: networking

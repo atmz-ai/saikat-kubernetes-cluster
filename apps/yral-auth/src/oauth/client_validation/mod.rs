@@ -1,4 +1,3 @@
-#[macro_use]
 mod whitelist;
 
 #[cfg(test)]

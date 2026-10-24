@@ -123,7 +123,7 @@ fn verify_delegation_chain(
 
         // Check delegation hasn't expired.
         let now_ns = current_epoch().as_nanos();
-        if now_ns > u64::try_from(sd.delegation.expiration_ns).unwrap_or(u64::MAX) as u128 {
+        if now_ns > u128::from(sd.delegation.expiration_ns) {
             return Err(Error::SignatureVerification("delegation expired".into()));
         }
 

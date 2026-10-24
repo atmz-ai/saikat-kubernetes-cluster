@@ -28,8 +28,8 @@
 // config in the infra repo), keep the API routes as a separate
 // service. Rationale: the auth app is fully interactive post-load —
 // SSR buys nothing but a Rust compile+server per deploy; a WASM SPA
-// collapses the deploy to static hosting and matches the yral-web /
-// my-website islands model already in this workspace.
+// collapses the deploy to static hosting. The my-website app's islands
+// model remains a separate SSR architecture.
 #[cfg(feature = "ssr")]
 pub mod api;
 pub mod app;

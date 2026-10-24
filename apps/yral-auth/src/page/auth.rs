@@ -189,7 +189,7 @@ pub fn auth_page() -> impl IntoView {
         )
         .child(Suspense(
             SuspenseProps::builder()
-                .fallback(|| Spinner())
+                .fallback(Spinner)
                 .children(ToChildren::to_children(move || {
                     Suspend::new(async move {
                         let auth = auth_query.await;
@@ -214,11 +214,13 @@ pub fn auth_page() -> impl IntoView {
                                 }
                             }
                             Ok(AuthKind::Redirect(path)) => {
-                                Either::Right(Redirect(RedirectProps::builder().path(path).build()))
+                                Redirect(RedirectProps::builder().path(path).build());
+                                Either::Right(())
                             }
-                            Err(e) => Either::Right(Redirect(
-                                RedirectProps::builder().path(e.to_redirect()).build(),
-                            )),
+                            Err(e) => {
+                                Redirect(RedirectProps::builder().path(e.to_redirect()).build());
+                                Either::Right(())
+                            }
                         }
                     })
                 }))

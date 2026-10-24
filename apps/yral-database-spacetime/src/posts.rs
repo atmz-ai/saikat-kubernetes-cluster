@@ -13,7 +13,7 @@
 //! not present on the `Post` table.
 //!
 //! ## Client access patterns
-//! - **Rust services** (off-chain-agent, yral-web): use generated
+//! * **Rust services** use generated
 //!   `spacetimedb-sdk` bindings (typed reducer/procedure calls).
 //! - **Mobile** (Kotlin): calls procedures via REST
 //!   (`POST /v1/database/{db}/call/:name`, JSON array body → typed JSON

@@ -78,11 +78,11 @@ async fn main_impl() -> Result<()> {
 
     let listener = tokio::net::TcpListener::bind(conf.bind_address)
         .await
-        .map_err(|e| Error::IO(e))?;
+        .map_err(Error::IO)?;
 
     log::info!("Server starting on {}", conf.bind_address);
 
-    axum::serve(listener, app).await.map_err(|e| Error::IO(e))?;
+    axum::serve(listener, app).await.map_err(Error::IO)?;
 
     Ok(())
 }

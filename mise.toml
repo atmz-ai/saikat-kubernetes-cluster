@@ -127,19 +127,6 @@ rush = "latest"
 # `unstable` is a crate feature, stable-fine), and nightly-2026-09-08's wasm
 # codegen drifted into breaking `spacetime generate`.
 #
-# CAVEAT — mise manages rust by installing its own toolchain and exporting
-# `RUSTUP_TOOLCHAIN=stable`, which TAKES PRECEDENCE over any
-# rust-toolchain.toml. That silently bypasses apps/yral-web/rust-toolchain.toml
-# (channel = "nightly"):
-#   local build with mise active → stable
-#   container build (no mise)    → nightly
-# so the prod image compiles with a different compiler than local builds.
-# nightly is genuinely needed there for `cargo leptos watch --hot-reload`
-# (see that file for the verified reasoning — the leptos `nightly`
-# cargo-features are inert on stable and are NOT the reason).
-# TODO(unify-yral-web-toolchain): make local and container agree — either
-# pin the container to stable and drop --hot-reload, or have the yral-web
-# tasks set RUSTUP_TOOLCHAIN=nightly explicitly.
 "core:rust" = { version = "stable", targets = [
   "wasm32-unknown-unknown",
   "x86_64-unknown-linux-musl",
@@ -205,11 +192,6 @@ CARGO_BINSTALL_DIR = "{{env.HOME}}/.local/share/cargo-binstall"
 # * The matching secret is NOT here — it is the fnox secret AWS_SECRET_ACCESS_KEY
 # * (named AWS_* because it feeds the S3 clients), injected by each s3-* task.
 # !
-# ! NOT the same credential as fnox's HETZNER_S3_ACCESS_KEY / HETZNER_S3_SECRET_KEY
-# ! (no _ID): that pair is the yral-web app's separate "profile storage" key, used
-# ! by kubernetes/apps/yral-web/secrets.sops.yaml and the yral-web dev daemon.
-# ! Two different Hetzner keys live in this repo — the ones below are the cluster
-# ! object-storage key (velero / etcd / longhorn backups).
 HETZNER_S3_ACCESS_KEY_ID = "XO5X9A1W8AMHY3DSTKMS"
 # Default location endpoint. Buckets live where they were CREATED
 # (fsn1 / hel1 / nbg1 ...), so this is a fallback only — pass the bucket's real
@@ -250,21 +232,11 @@ MCowBQYDK2VwAyEAKpZNfPOONR9AXiaGmHv8AHemm4SNK0uh+mf523ho5KU=
 
 RUST_LOG = "info"
 
-# ── yral-web ───────────────────────────────────────────────────────────
-# LEPTOS_SITE_ADDR is set per-daemon in the [daemons] section (prod: 8080,
-# dev: 8081).
 LEPTOS_HASH_FILES = "true"
-# Plaintext (non-sensitive) values — public OAuth identifiers.
-# These are the production redirect URLs; the dev daemons override them in
-# [daemons.yral-web-dev].
-GOOGLE_REDIRECT_URL = "http://127.0.0.1:8080/auth/google_redirect"
-YRAL_AUTH_REDIRECT_URL = "http://127.0.0.1:8080/auth/yral_redirect"
-# Yral-auth client ID (same as yral-auth's GOOGLE_CLIENT_ID)
-YRAL_AUTH_CLIENT_ID = "804814798298-taifmq3k6olk9bjr1cqb9gfnp1mssqqb.apps.googleusercontent.com"
 
 # ── yral-metadata ─────────────────────────────────────────────────────────
 # Bind address for the Axum server
-BIND_ADDRESS = "0.0.0.0:7000"
+BIND_ADDRESS = "0.0.0.0:7001"
 
 # ── yral-ios (App Store Connect identifiers — not secret) ─────────────────
 # yral-ios TestFlight/App Store upload path: xcodebuild archive →
@@ -1206,96 +1178,6 @@ FIRST_POD=$(kubectl -n yral-auth get pods -l app=yral-auth -o jsonpath='{.items[
 kubectl -n yral-auth logs "$FIRST_POD" --tail=20
 '''
 
-# ── yral-web ─────────────────────────────────────────────────────────────
-
-[tasks.yral-web-bootstrap]
-description = "Install yral-web build prerequisites (cargo-leptos, musl+wasm targets, npm deps)"
-depends = ["bootstrap"]
-run = '''
-rustup install
-cargo binstall cargo-leptos --no-confirm
-cd apps/yral-web && npm install
-'''
-
-[tasks.yral-web-build]
-description = "Build yral-web (release + WASM client). Linux/WSL: musl x86_64 (mimics prod). macOS: native arm64."
-# yral-web's bin uses the custom `prod-release` profile (lto, debug=1) — the
-# profile rides INSIDE target/<triple>/prod-release/ on musl, plain release/
-# native.
-dir = "apps/yral-web"
-run = '''
-if [[ "$(uname)" == "Darwin" ]]; then
-  cargo leptos --manifest-path ssr/Cargo.toml build --release
-else
-  LEPTOS_BIN_TARGET_TRIPLE=x86_64-unknown-linux-musl \
-    cargo leptos --manifest-path ssr/Cargo.toml build --release
-fi
-'''
-
-[tasks.yral-web-run]
-description = "Run yral-web locally (release binary, port 8080)"
-depends = ["yral-web-build"]
-daemons = ["yral-web"]
-run = "echo 'yral-web daemon started (mise daemons logs yral-web to follow)'"
-
-[tasks.yral-web-watch]
-description = "Run yral-web with hot reload via cargo leptos watch (debug, port 8080)"
-dir = "apps/yral-web"
-run = "fnox exec -- cargo leptos --manifest-path ssr/Cargo.toml watch --hot-reload --bin-features ssr,oauth-ssr"
-env = { LEPTOS_SITE_ADDR = "0.0.0.0:8080" }
-
-[tasks.yral-web-test]
-description = "Run yral-web tests (ssr feature + fnox secrets; uses local SpacetimeDB dev server for yral-auth integration tests)"
-dir = "apps/yral-web"
-daemons = ["spacetimedb-dev"]
-env = { SPACETIMEDB_URL = "http://127.0.0.1:3000" }
-run = "fnox exec -- cargo test --features ssr --bins --lib -- --test-threads=1"
-
-[tasks.yral-web-image]
-description = "Build the yral-web container image locally (container on macOS, podman on Linux)"
-depends = ["container-system-start"]
-run = '''
-if [[ "$(uname)" == "Darwin" ]]; then
-  exec container build -f apps/yral-web/Dockerfile.buildkit -t test/yral-web --platform linux/amd64 --cpus 17 --memory 40gb .
-else
-  exec podman build -f apps/yral-web/Dockerfile.buildkit -t test/yral-web --platform linux/amd64 .
-fi
-'''
-
-[tasks.yral-web-image-run]
-description = "Run the yral-web container image locally (podman, port 8080)"
-depends = ["yral-web-image"]
-daemons = ["yral-web-container"]
-run = "echo 'yral-web-container daemon started (mise daemons logs yral-web-container to follow)'"
-
-[tasks.yral-web-stop]
-description = "Stop yral-web dev server, watch, and container"
-run = "mise daemons stop yral-web yral-web-watch yral-web-container"
-
-[tasks.yral-web-all]
-description = "Full yral-web workflow: build → test → image → image-run → validate → stop"
-run = '''
-mise run yral-web-build
-mise run yral-web-run
-mise run yral-web-test
-mise run yral-web-image
-mise run yral-web-image-run
-'''
-
-[tasks.yral-web-validate]
-description = "Validate yral-web on prod (read-only kubectl checks)"
-run = '''
-echo "=== Pods ==="
-kubectl -n yral-web get pods -l app=yral-web -o wide
-echo ""
-echo "=== Health ==="
-kubectl -n yral-web get pods -l app=yral-web -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.containerStatuses[0].ready}{"\n"}{end}'
-echo ""
-echo "=== Recent logs (last 20 lines, first pod) ==="
-FIRST_POD=$(kubectl -n yral-web get pods -l app=yral-web -o jsonpath='{.items[0].metadata.name}')
-kubectl -n yral-web logs "$FIRST_POD" --tail=20
-'''
-
 # ── hello-world ─────────────────────────────────────────────────────────────
 # The `leptos-tutorial-builder-syntax` app (and the `hello-world` daemon that
 # pointed at it) were removed in cf6691f9, so this app has no source or Trunk
@@ -1318,7 +1200,7 @@ fi
 '''
 
 [tasks.yral-metadata-run]
-description = "Run yral-metadata locally (release binary, port 7000)"
+description = "Run yral-metadata locally (release binary, port 7001; avoids macOS Control Center on 7000)"
 depends = ["yral-metadata-build"]
 daemons = ["yral-metadata"]
 run = "echo 'yral-metadata daemon started (mise daemons logs yral-metadata to follow)'"
@@ -1731,22 +1613,16 @@ dir = "apps/yral-rishi-agent"
 depends = ["yral-rishi-agent-test-bootstrap"]
 run = "./.venv/bin/python -m pytest tests/ -v"
 
-# ── Dev: local SpacetimeDB + yral-auth + yral-web ────────────────────────
-# These tasks build the binaries and start the dev stack. The `dev` daemon group
-# (see [daemon_groups]) manages the daemons, and each daemon's own `depends`
-# supplies the ordering: spacetimedb-dev → yral-auth-dev → yral-web-dev.
-# Nothing auto-starts on shell entry — `pitchfork activate` is no longer used.
-
 [tasks.dev-build]
-description = "Build all dev binaries (yral-auth + yral-web + spacetime module)"
+description = "Build all dev binaries (yral-auth + spacetime module)"
+depends = ["runtime-config-check"]
 run = '''
 mise run yral-auth-build
-mise run yral-web-build
 mise run spacetime-build
 '''
 
 [tasks.dev-start]
-description = "Start all dev servers (SpacetimeDB local + yral-auth + yral-web)"
+description = "Start all dev servers (SpacetimeDB local + yral-auth)"
 depends = ["dev-build"]
 run = "mise daemons start dev"
 
@@ -1757,6 +1633,37 @@ run = "mise daemons stop dev"
 [tasks.dev-status]
 description = "Show status of all daemons"
 run = "mise daemons ls"
+
+[tasks.runtime-config-check]
+description = "Validate local daemon paths, ports, and task/group references"
+run = '''
+#!/usr/bin/env python3
+import pathlib
+import tomllib
+import urllib.parse
+
+configuration = tomllib.loads(pathlib.Path("mise.toml").read_text())
+daemons = configuration["daemons"]
+for daemon_name in ("yral-auth", "yral-auth-dev"):
+  command = daemons[daemon_name]["run"]
+  assert "../../target/release/yral-auth" in command
+  assert "../../target/x86_64-unknown-linux-musl/release/yral-auth" in command
+  assert "-- ./target/" not in command
+  print(f"Verified workspace-root binary paths: {daemon_name}")
+metadata_daemon = daemons["yral-metadata"]
+assert urllib.parse.urlparse(metadata_daemon["ready_http"]).port == int(configuration["env"]["BIND_ADDRESS"].rsplit(":", 1)[1])
+assert urllib.parse.urlparse(metadata_daemon["ready_http"]).port != 7000
+print("Verified metadata readiness uses its configured non-reserved local port.")
+for group_name, daemon_names in configuration["daemon_groups"].items():
+  assert all(daemon_name in daemons for daemon_name in daemon_names)
+  print(f"Verified daemon group references: {group_name}")
+for task_name, task in configuration["tasks"].items():
+  daemon_names = task.get("daemons", [])
+  if isinstance(daemon_names, list):
+    assert all(daemon_name in daemons for daemon_name in daemon_names)
+    if daemon_names:
+      print(f"Verified task daemon references: {task_name}")
+'''
 
 [tasks.test-spacetime-jwt]
 description = "Run only the JWT→SpacetimeDB identity integration tests (injects JWT_EC_PEM via fnox; SpacetimeDB is started by the daemons option)"
@@ -1809,11 +1716,12 @@ env = { LEPTOS_SITE_ADDR = "0.0.0.0:8081" }
 depends = ["container-system-start"]
 run = '''
 if [[ "$(uname)" == "Darwin" ]]; then
-  exec container run --rm -p 8080:8080 test/my-website
+  exec container run --rm -p 8083:8080 test/my-website
 else
-  exec podman run --rm -p 8080:8080 test/my-website
+  exec podman run --rm -p 8083:8080 test/my-website
 fi
 '''
+ready_http = "http://localhost:8083/"
 
 # ── SpacetimeDB standalone server (port 3000) ──────────────────────────────
 # Local SpacetimeDB instance for the yral-database-spacetime module. Required by
@@ -1828,7 +1736,7 @@ stop_signal = "SIGINT"
 retry = 3
 
 # ── SpacetimeDB local dev (in-memory + JWT keys, auto-publishes module) ─────
-# Used by the `dev` group and by the yral-auth/yral-web dev tasks. Starts the
+# Used by the `dev` group and by the yral-auth dev tasks. Starts the
 # local server, publishes the module (via the on_ready hook below), and stays
 # running. Data is lost on restart (in-memory).
 #
@@ -1875,9 +1783,9 @@ on_ready = "spacetime build -p apps/yral-database-spacetime && spacetime publish
 # apps/yral-auth/target is a stale pre-monorepo leftover.
 run = '''
 if [[ "$(uname)" == "Darwin" ]]; then
-  exec fnox exec -- ./target/release/yral-auth
+  exec fnox exec -- ../../target/release/yral-auth
 else
-  exec fnox exec -- ./target/x86_64-unknown-linux-musl/release/yral-auth
+  exec fnox exec -- ../../target/x86_64-unknown-linux-musl/release/yral-auth
 fi
 '''
 dir = "apps/yral-auth"
@@ -1898,7 +1806,7 @@ if [[ "$(uname)" == "Darwin" ]]; then
     -e JWT_EC_PEM -e JWT_PUB_EC_PEM \
     -e CLIENT_JWT_ED_PEM -e CLIENT_JWT_PUB_ED_PEM \
     -e COOKIE_KEY -e WHATSAPP_API_KEY \
-    -p 8080:8080 test/yral-auth
+    -p 8082:8080 test/yral-auth
 else
   exec fnox exec -- podman run --rm \
     -e APP_ENV -e GOOGLE_CLIENT_ID -e GOOGLE_CLIENT_SECRET \
@@ -1906,11 +1814,11 @@ else
     -e JWT_EC_PEM -e JWT_PUB_EC_PEM \
     -e CLIENT_JWT_ED_PEM -e CLIENT_JWT_PUB_ED_PEM \
     -e COOKIE_KEY -e WHATSAPP_API_KEY \
-    -p 8080:8080 test/yral-auth
+    -p 8082:8080 test/yral-auth
 fi
 '''
 dir = "apps/yral-auth"
-ready_http = "http://localhost:8080/healthz"
+ready_http = "http://localhost:8082/healthz"
 stop_signal = "SIGINT"
 
 # ── yral-auth dev (local SpacetimeDB, port 8080) ───────────────────────────
@@ -1921,9 +1829,9 @@ stop_signal = "SIGINT"
 [daemons.yral-auth-dev]
 run = '''
 if [[ "$(uname)" == "Darwin" ]]; then
-  exec fnox exec -- ./target/release/yral-auth
+  exec fnox exec -- ../../target/release/yral-auth
 else
-  exec fnox exec -- ./target/x86_64-unknown-linux-musl/release/yral-auth
+  exec fnox exec -- ../../target/x86_64-unknown-linux-musl/release/yral-auth
 fi
 '''
 dir = "apps/yral-auth"
@@ -1946,7 +1854,7 @@ else
 fi
 '''
 dir = "apps/yral-metadata"
-ready_http = "http://localhost:7000/healthz"
+ready_http = "http://localhost:7001/healthz"
 stop_signal = "SIGINT"
 
 # ── yral-metadata container (podman) ────────────────────────────────────────
@@ -1955,86 +1863,27 @@ stop_signal = "SIGINT"
 [daemons.yral-metadata-container]
 depends = ["container-system-start"]
 run = '''
-exec fnox exec -- podman run --rm \
-  -e APP_ENV -e RUST_LOG -e BIND_ADDRESS \
-  -e JWT_PUBLIC_KEY -e YRAL_AUTH_PUBLIC_KEY -e BACKEND_ADMIN_IDENTITY \
-  -p 7000:7000 test/yral-metadata
-'''
-dir = "apps/yral-metadata"
-ready_http = "http://localhost:7000/healthz"
-stop_signal = "SIGINT"
-
-# ── yral-web dev server (release binary, port 8080) ───────────────────────
-# Build first with: mise run yral-web-build
-
-[daemons.yral-web]
-# Binary path is OS-conditional at start. The musl build lands under the custom
-# `prod-release` profile dir (yral-web's bin-profile-release), the native macOS
-# build under plain release/.
-run = '''
 if [[ "$(uname)" == "Darwin" ]]; then
-  exec fnox exec -- ../../target/release/yral-web
+  exec fnox exec -- container run --rm \
+    -e APP_ENV -e RUST_LOG -e BIND_ADDRESS=0.0.0.0:7000 \
+    -e JWT_PUBLIC_KEY -e YRAL_AUTH_PUBLIC_KEY -e BACKEND_ADMIN_IDENTITY \
+    -p 7002:7000 test/yral-metadata
 else
-  exec fnox exec -- ../../target/x86_64-unknown-linux-musl/prod-release/yral-web
+  exec fnox exec -- podman run --rm \
+    -e APP_ENV -e RUST_LOG -e BIND_ADDRESS=0.0.0.0:7000 \
+    -e JWT_PUBLIC_KEY -e YRAL_AUTH_PUBLIC_KEY -e BACKEND_ADMIN_IDENTITY \
+    -p 7002:7000 test/yral-metadata
 fi
 '''
-dir = "apps/yral-web"
-ready_http = "http://localhost:8080/healthz"
+dir = "apps/yral-metadata"
+ready_http = "http://localhost:7002/healthz"
 stop_signal = "SIGINT"
-env = { LEPTOS_SITE_ADDR = "0.0.0.0:8080", LEPTOS_SITE_ROOT = "../../target/site" }
-
-# ── yral-web container (podman) ──────────────────────────────────────────
-# Build first with: mise run yral-web-image
-
-[daemons.yral-web-container]
-depends = ["container-system-start"]
-# fnox exec decrypts secrets into the env so podman's -e VAR (without =value)
-# copies them from the parent process into the container.
-run = '''
-exec fnox exec -- podman run --rm \
-  -e APP_ENV -e LEPTOS_ENV -e LEPTOS_SITE_ADDR -e LEPTOS_HASH_FILES \
-  -e GOOGLE_CLIENT_ID -e GOOGLE_REDIRECT_URL -e YRAL_AUTH_REDIRECT_URL \
-  -e YRAL_AUTH_CLIENT_ID \
-  -e COOKIE_KEY -e BACKEND_ADMIN_IDENTITY \
-  -e HETZNER_S3_ACCESS_KEY -e HETZNER_S3_SECRET_KEY \
-  -e GRPC_AUTH_TOKEN -e YRAL_AUTH_CLIENT_SECRET -e YRAL_AUTH_MIGRATION_ES256_PEM \
-  -p 8080:8080 test/yral-web
-'''
-dir = "apps/yral-web"
-ready_http = "http://localhost:8080/healthz"
-stop_signal = "SIGINT"
-
-# ── yral-web dev (local SpacetimeDB, port 8081) ─────────────────────────
-# Dev variant: points SPACETIMEDB_URL at the local server and uses port 8081 to
-# avoid the conflict with yral-auth-dev on 8080. Build first with:
-# mise run yral-web-build.
-
-[daemons.yral-web-dev]
-run = "exec fnox exec -- ../../target/x86_64-unknown-linux-musl/prod-release/yral-web"
-dir = "apps/yral-web"
-ready_http = "http://localhost:8081/healthz"
-stop_signal = "SIGINT"
-depends = ["spacetimedb-dev", "yral-auth-dev"]
-env = { LEPTOS_SITE_ADDR = "0.0.0.0:8081", LEPTOS_SITE_ROOT = "../../target/site", SPACETIMEDB_URL = "http://127.0.0.1:3000", SPACETIMEDB_DB_NAME = "yral-database-spacetime-4lbo7", GOOGLE_REDIRECT_URL = "http://127.0.0.1:8081/auth/google_redirect", YRAL_AUTH_REDIRECT_URL = "http://127.0.0.1:8081/auth/yral_redirect" }
-
-# ── yral-web watch (cargo leptos watch, hot reload, debug) ──────────────
-# Rebuilds server + WASM on file change and live-reloads the browser. Uses debug
-# profiles (fast rebuilds) and needs no pre-build — cargo leptos watch builds and
-# serves. fnox exec loads the age-encrypted secrets from fnox.toml.
-
-[daemons.yral-web-watch]
-run = "exec fnox exec -- cargo leptos --manifest-path ssr/Cargo.toml watch --hot-reload --bin-features ssr,oauth-ssr"
-dir = "apps/yral-web"
-ready_output = "Serving at"
-stop_signal = "SIGINT"
-env = { LEPTOS_SITE_ADDR = "0.0.0.0:8080" }
-
 # ── Groups ──────────────────────────────────────────────────────────────────
+
 # Named subsets, usable wherever a daemon name is accepted:
 #   mise daemons start dev      |  mise daemons stop --group dev
 # Dependency order inside `dev` is handled by each daemon's own `depends`:
 # spacetimedb-dev → (publishes the module via its on_ready hook) → yral-auth-dev
-# → yral-web-dev.
 
 [daemon_groups]
-dev = ["spacetimedb-dev", "yral-auth-dev", "yral-web-dev"]
+dev = ["spacetimedb-dev", "yral-auth-dev"]

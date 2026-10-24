@@ -31,7 +31,7 @@
 //! - `accept_new_user_registration(new_principal_text, authenticated, main_account_text)` — register/bot
 //! - `delete_user(subject_to_delete, id_token)` — procedure: cascade delete
 //!   + agent-service backend soft-deletes (the standalone reducer is
-//!   removed — this procedure is the mutation entry point)
+//!     removed — this procedure is the mutation entry point)
 //! - `update_user_last_access_time()` — sender only
 //! - `update_profile_picture_nsfw_info(oauth_subject, nsfw_info)` — admin only
 //! - `change_subscription_plan(oauth_subject, plan)` — admin only
@@ -810,7 +810,7 @@ fn cascade_delete_user(
         }
         UserAccountType::BotAccount { owner } => {
             // Admin or owner can delete a BotAccount
-            if !admin && owner != &caller_text {
+            if !admin && owner != caller_text {
                 return Err("Unauthorized".to_string());
             }
             // Remove this bot from the owner's bots list
@@ -819,19 +819,18 @@ fn cascade_delete_user(
                 .user_profiles_2()
                 .iter()
                 .find(|p| p.oauth_subject == *owner)
+                && let UserAccountType::MainAccount { bots } = &owner_profile.account_type
             {
-                if let UserAccountType::MainAccount { bots } = &owner_profile.account_type {
-                    let new_bots: Vec<String> = bots
-                        .iter()
-                        .filter(|b| *b != subject_to_delete)
-                        .cloned()
-                        .collect();
-                    owner_profile.account_type = UserAccountType::MainAccount { bots: new_bots };
-                    ctx.db
-                        .user_profiles_2()
-                        .oauth_subject()
-                        .update(owner_profile);
-                }
+                let new_bots: Vec<String> = bots
+                    .iter()
+                    .filter(|b| *b != subject_to_delete)
+                    .cloned()
+                    .collect();
+                owner_profile.account_type = UserAccountType::MainAccount { bots: new_bots };
+                ctx.db
+                    .user_profiles_2()
+                    .oauth_subject()
+                    .update(owner_profile);
             }
             // Repair yral-auth's AI-account list as well. Dropping the bot
             // from the profile-side `bots` list alone leaves its id in
