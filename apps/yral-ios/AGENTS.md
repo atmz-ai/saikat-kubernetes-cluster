@@ -266,7 +266,7 @@ public and unauthenticated (`kubernetes/networking/routes/snowplow-collector.yam
 **Kafka Bridge** (`kafka-bridge.yral.com`) is a different service and is
 READ-ONLY: its `KafkaUser` carries no write ACL. Use it solely to read events
 back when verifying an integration. Authenticate with the `X-Bearer-Token`
-header using `fnox get KAFKA_BRIDGE_TOKEN`.
+header using the age-decrypted `KAFKA_BRIDGE_TOKEN` supplied by mise.
 
 Two Bridge gotchas when verifying (both cost real debugging time):
 
@@ -407,7 +407,7 @@ before committing, or let format-on-save handle it.
 
 ## CI / Distribution
 
-**Deploys run LOCALLY: `fnox exec -- mise run yral-ios-upload-testflight`.**
+**Deploys run LOCALLY: `mise run yral-ios-upload-testflight`.**
 The CI deploy job is DISABLED (2026-09-01): the free public macOS runner pool
 queues 1h+ and starved the deploy job entirely; a local deploy (~2.5 min)
 is the iteration loop. CI runs CHECKS ONLY (lint + tests + simulator build)
@@ -416,13 +416,13 @@ kept as a commented block in `yral-ios-ci.yml` for easy re-enabling.
 
 **Checks parity:** CI needs only a working mise + the root repo's
 pre-existing `ANSIBLE_VAULT_PASSWORD` GitHub secret; `mise run bootstrap`
-extracts the age key from the vault and fnox decrypts the Firebase plist +
-signing secrets from `fnox.toml` — exactly like local. No repo-scoped iOS
+extracts the SSH identity from the vault and mise decrypts the Firebase plist and
+signing secrets from root `mise.toml`, exactly like local. No repo-scoped iOS
 GitHub secrets, no fastlane, no CocoaPods.
 
 - `.github/workflows/yral-ios-ci.yml` — checks only (lint + package tests
   + simulator build). The TestFlight deploy job is commented out — deploys
-  run locally via `fnox exec -- mise run yral-ios-upload-testflight`.
+  run locally via `mise run yral-ios-upload-testflight`.
 - `.github/workflows/yral-ios-app-store.yml` — release tags containing
   `iOS`: sets `MARKETING_VERSION` (Apple's fixed build-setting name for the
   user-facing version, `CFBundleShortVersionString`) from the tag, runs the
@@ -433,14 +433,16 @@ GitHub secrets, no fastlane, no CocoaPods.
   starvation as CI deploys — if it proves unreliable, run the upload task
   locally against the release tag instead (same mise task).
 
-### Signing secrets (fnox.toml — set once via `fnox set <KEY> --provider age`)
+### Signing secrets
 
-| fnox key | Content |
+Credentials are age-encrypted in the root `mise.toml`. The build checks the Firebase credential; upload checks all required signing values and fails clearly if the identity or a required value is missing. These checks never upload or print a secret.
+
+| Environment key | Content |
 | --- | --- |
 | `YRAL_IOS_DIST_CERT_P12_BASE64` | Apple Distribution cert (p12), base64 |
 | `YRAL_IOS_DIST_PROFILE_BASE64` | `Yral-Distribution` .mobileprovision, base64 |
 | `YRAL_IOS_CERT_PASSWORD` | Password of the distribution p12 |
-| `APP_STORE_CONNECT_API_KEY_BASE64` | ASC API key (AuthKey_J52D7789G2.p8), base64 |
+| `APP_STORE_CONNECT_API_KEY_BASE64` | App Store Connect API private key, base64 |
 
 Non-secret identifiers live in root `mise.toml [env]`:
 `YRAL_ASC_KEY_ID`, `YRAL_ASC_ISSUER_ID`, `YRAL_APPLE_TEAM_ID`.
@@ -452,12 +454,13 @@ altool resolves the API key by file convention:
 Single Firebase project (`yral-mobile`). **`GoogleService-Info.plist` is
 GITIGNORED** — it contains the project's Google Cloud API key, which GitHub
 secret scanning flags when committed (an earlier commit leaked it; the key
-was rotated 2026-09-01). The plist is stored in fnox
+was rotated 2026-09-01). The plist is age-encrypted in root `mise.toml`
 (`YRAL_IOS_FIREBASE_PLIST_BASE64`, base64) and injected at build time:
 the `yral-ios-build` and `yral-ios-upload-testflight` tasks materialize it
-from the fnox secret when run under `fnox exec --`. Rotating the API key
-again: rotate in GCP console → update the fnox secret
-(see fnox.toml for the exact command). Crashlytics + Analytics initialize at
+from the native mise age value. To rotate it, rotate the key in Google Cloud,
+update the plist, and store its Base64 with `mise set --age-encrypt --stdin`
+using the explicit infrastructure SSH recipient described in the root `AGENTS.md`.
+Crashlytics + Analytics initialize at
 launch (`YralAppRoot.configureFirebase()`), so every shipped build reports
 crashes from day one. The Crashlytics dSYM upload build phase runs after
 every Release build (path resolution documented in `project.pbxproj`).

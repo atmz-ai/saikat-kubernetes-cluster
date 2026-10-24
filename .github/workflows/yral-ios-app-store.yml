@@ -1,9 +1,9 @@
 name: Yral iOS → App Store
 
 # App Store distribution on published release tags containing "iOS"
-# (legacy repo convention, e.g. "v4.0.0-iOS"). Same mise/fnox pattern as
+# * Release tasks use the same mise age configuration as
 # yral-ios-ci.yml: the runner only has mise + the Ansible vault password;
-# everything else bootstraps from the repo (bootstrap → age key → fnox).
+# * Bootstrap provisions the identity before mise resolves required age values.
 # Upload path is Apple-canonical: xcodebuild archive → -exportArchive →
 # xcrun altool (inside mise run yral-ios-upload-testflight).
 on:
@@ -63,7 +63,7 @@ jobs:
         with:
           xcode-version: latest-stable
 
-      - name: Bootstrap (vault → age key → fnox)
+      - name: Bootstrap age decryption identity
         env:
           ANSIBLE_VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
         run: |
@@ -75,7 +75,7 @@ jobs:
       # Same task local and CI run for the TestFlight upload; the App Store
       # release reuses the archive+export+altool steps it contains.
       - name: Archive + upload to App Store Connect
-        run: fnox exec -- mise run yral-ios-upload-testflight
+        run: mise run yral-ios-upload-testflight
 
       - name: Commit version changes to main
         run: |

@@ -8,7 +8,7 @@ Use the root mise tasks, not starter-template installation commands or an applic
 
 - `mise run yral-auth-build` builds the server with `release-bin` and the WASM client with `release-lib`, including the production authentication-provider features.
 - `mise run yral-auth-run` starts the release daemon at `http://localhost:8080`; its health endpoint is `/healthz`.
-- `mise run yral-auth-test` runs tests with the authenticated local SpacetimeDB daemon and fnox-injected secrets.
+- `mise run yral-auth-test` runs tests with the authenticated local SpacetimeDB daemon and native mise age secrets.
 - `mise run yral-auth-image` and `mise run yral-auth-image-run` build and start the container; its local health endpoint is `http://localhost:8082/healthz`.
 - `mise run yral-auth-stop` stops the production-config local daemon and container. The separate `yral-auth-dev` daemon belongs to the root `dev` group.
 
@@ -24,7 +24,7 @@ OAuth client registrations and redirect allowlists live in `src/oauth/client_val
 mise exec -- cargo test -p yral-auth --features release-bin --lib oauth::client_validation::tests
 ```
 
-Configuration and signing credentials remain in the root mise/fnox declarations. Do not expose private signing keys or replace upstream authentication failures with generic messages.
+Configuration and age-encrypted signing credentials remain in the root mise declarations. Required secrets are checked before startup or tests; do not expose private signing keys or replace upstream authentication failures with generic messages.
 
 ## Deployment
 

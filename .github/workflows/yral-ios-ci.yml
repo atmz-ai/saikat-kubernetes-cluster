@@ -3,8 +3,7 @@ name: Yral iOS CI
 # Single workflow for the native iOS app (apps/yral-ios). Local and CI run
 # the SAME mise checks task — CI needs only: a working mise + the Ansible vault
 # password (the root repo's only GitHub secret). `mise run bootstrap`
-# extracts the age key from the vault; fnox decrypts the Firebase plist from
-# fnox.toml. No repo-scoped iOS secrets, no fastlane, no CocoaPods.
+# * Bootstrap extracts the SSH identity; mise decrypts the Firebase plist from mise.toml.
 #
 #   pull_request          → mise run yral-ios-checks (lint + tests + sim build)
 #   push/merge to main    → same checks (deploys run locally — see the
@@ -12,7 +11,7 @@ name: Yral iOS CI
 #
 # Dependabot/Renovate PRs are SKIPPED: GitHub never delivers repo secrets
 # (ANSIBLE_VAULT_PASSWORD) to workflows triggered by those bots, so the
-# vault → age key → fnox chain can never work there. The bumped action version
+# * The vault-to-age-identity chain cannot work there. The bumped action version
 # gets validated by the push-to-main run after the bot PR merges, which does
 # have secrets.
 on:
@@ -20,7 +19,6 @@ on:
     paths:
       - "apps/yral-ios/**"
       - ".github/workflows/yral-ios-ci.yml"
-      - "fnox.toml"
       - "mise.toml"
   push:
     branches:
@@ -28,7 +26,6 @@ on:
     paths:
       - "apps/yral-ios/**"
       - ".github/workflows/yral-ios-ci.yml"
-      - "fnox.toml"
       - "mise.toml"
   workflow_dispatch:
 
@@ -63,11 +60,8 @@ jobs:
         with:
           xcode-version: latest-stable
 
-      # Same bootstrap as local: fnox exec (used by the checks step for the
-      # gitignored GoogleService-Info.plist) requires the age key to decrypt
-      # fnox secrets. Without this, fnox exec fails resolving the first
-      # secret with identity_read_failed.
-      - name: Bootstrap (vault → age key → fnox)
+      # ! Non-strict age loading permits setup before bootstrap provisions the identity.
+      - name: Bootstrap age decryption identity
         env:
           ANSIBLE_VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
         run: |
@@ -77,15 +71,12 @@ jobs:
           mise run bootstrap
 
       - name: Run checks (lint + package tests + simulator build)
-        # fnox exec injects YRAL_IOS_FIREBASE_PLIST_BASE64 — the gitignored
-        # GoogleService-Info.plist is a required bundle resource for the
-        # xcodebuild step.
-        run: fnox exec -- mise run yral-ios-checks
+        run: mise run yral-ios-checks
 
   # TestFlight deploy DISABLED (2026-09-01): macOS runners on the free
   # public pool queue for 1h+ and the deploy job can be starved entirely —
   # it also raced ahead of the latest commit on at least one occasion.
-  # Deploys run LOCALLY: `fnox exec -- mise run yral-ios-upload-testflight`
+  # * Deploys run locally with mise run yral-ios-upload-testflight.
   # (identical mise task — local and CI run the same checks either way).
   # To re-enable: uncomment this job (and the bootstrap step it needs).
   # upload-testflight:
@@ -104,7 +95,7 @@ jobs:
   #       with:
   #         xcode-version: latest-stable
   #
-  #     - name: Bootstrap (vault → age key → fnox)
+  #     - name: Bootstrap age decryption identity
   #       env:
   #         ANSIBLE_VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
   #       run: |
@@ -114,7 +105,7 @@ jobs:
   #         mise run bootstrap
   #
   #     - name: Archive + upload to TestFlight
-  #       run: fnox exec -- mise run yral-ios-upload-testflight
+  #       run: mise run yral-ios-upload-testflight
   #
   #     - name: Upload build logs on failure
   #       if: failure()

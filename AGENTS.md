@@ -111,7 +111,7 @@ Never push sweeping changes without first verifying every affected component com
 In all `Cargo.toml` (and other manifest) files, list dependencies **alphabetically by key** within each `[dependencies]` section. Merge third-party and local/path deps into a single list (no separator comments). This makes it easier for human reviewers to find and parse dependency lists, and avoids duplicate entries. Apply this to `[workspace.dependencies]`, `[dependencies]`, `[dev-dependencies]`, and `[build-dependencies]` sections alike.
 
 ### Mise Tasks for Repeated Workflows (Hard Rule)
-**Create mise tasks only for repeated operations and reusable workflows. One-off commands do not need a mise task; run them directly instead of adding a task solely for a single execution.** Reuse an existing task when it provides required environment variables, fnox secrets, dependencies, or safety checks. For one-off commands, load those prerequisites explicitly when needed (for example, `mise exec --` or `fnox exec --`). Promote an operation to a task when it becomes a recurring workflow.
+**Create mise tasks only for repeated operations and reusable workflows. One-off commands do not need a mise task; run them directly instead of adding a task solely for a single execution.** Reuse an existing task when it provides required environment variables, age secrets, dependencies, or safety checks. For one-off commands, load those prerequisites explicitly with `mise exec --` when needed. Promote an operation to a task when it becomes a recurring workflow.
 
 This exception applies to the mise-only wording elsewhere in this document, including build, test, validation, and Ansible tooling. It does not permit imperative production mutations: infrastructure changes still belong in GitOps declarations or Ansible roles/playbooks. Required migration review, secret handling, and other safety checks must not be bypassed.
 
@@ -495,35 +495,34 @@ DNS is self-hosted, not Cloudflare. PowerDNS Authoritative runs from `kubernetes
 **Apex records are owned by `pdnsutil`, never by external-dns.** external-dns structurally cannot manage a zone apex: it never writes an ownership marker for an apex name (the name would be valid — `a-saikat.dev` — it is simply never emitted), so `plan.go` drops the apex from **both** creates and updates, and no record type can ever be converged there through a DNSEndpoint. The failure is silent — external-dns logs "Reconciliation succeeded". Tracked upstream as kubernetes-sigs/external-dns#6125 (with our independent confirmation on the issue). Consequence: the bare apex A + NS rrsets for every zone live in the GENERATED `kubernetes/infrastructure/external-dns/pdns-apex-records.yaml`, applied by the `pdns-zones` role with `pdnsutil rrset replace`. That role runs as the second play of `add-node` / `remove-node`, so node churn converges the apex automatically — a new node reaches the apex A records, and a removed node drops out of them. Its ConfigMap and Job are named by a content checksum, so a changed node set is a NEW Job that Flux creates (and prunes the previous one): no manual `kubectl delete job`, no `--force` on the Kustomization. **Never** declare an apex record in a DNSEndpoint (a declaration nothing acts on), and **never** hand-write the apex records or their ownership marker — regenerate from the inventory instead.
 
 ### Local Environment & Parity
-The repo uses a single monorepo-wide `mise.toml` at the repository root as the source of truth for tool versions, task orchestration, and all app-specific environment variables. There are **no per-app `mise.toml`, `fnox.toml`, or `pitchfork.toml` files** — all env vars, secrets, and daemon definitions live in the root `mise.toml`, root `fnox.toml`, and root `mise.toml` `[daemons]` respectively. App-specific env vars are grouped by `# ── <app> ──` comment headers in the root `[env]` section. Avoid adding per-project config files unless there is a strong, documented reason.
+The root `mise.toml` is the single source of truth for tool versions, task orchestration, plaintext environment values, age-encrypted local secrets, and daemon definitions. Do not add per-application tooling or secret configuration files. Keep application-specific values beside their existing root declarations.
 
-**mise (not direnv)** for env var management and tool versioning. Plaintext environment values belong in the `mise.toml` `[env]` section; secrets are managed by **fnox** (age-encrypted, committed to git in `fnox.toml`). No `.env` file is generated or loaded — `_.file = '.env'` was removed.
+**mise (not direnv)** manages tools and environment values. Local secrets are native age values under root `[env]`, committed as ciphertext. No `.env` file is generated or loaded.
 
-**Never put a tool's own credential variable names in `[env]`, repo-wide (Hard Rule).** Several CLIs give real environment variables precedence over **every** other credential source — `aws-cli` reads `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_ENDPOINT_URL` before `~/.aws/credentials` *and* before an `aws login` session. A repo-wide `[env]` entry using another service's variable names therefore silently hijacks that tool: every call is redirected at the wrong endpoint, and when only one half of the pair is globally set (the secret lives in fnox, absent from a bare shell) it fails with `Partial credentials found in env` before it ever reaches the real provider. Measured: `AWS_*` in `[env]`, set for Hetzner Object Storage, broke all real AWS access. Name shared values for what they are (`HETZNER_S3_*`) and have each task map them into the tool's expected names in its **own** `env` table (mise interpolates `{{env.X}}` there) — the standard names then exist only for the task that needs them. When a tool misreports an auth/credential error, suspect an ambient env var before suspecting the credential itself.
+**Never declare tool-standard credentials repo-wide (Hard Rule).** Native age values become ambient in activated shells and child processes; redaction is not process isolation. Store credentials under descriptive names such as `CLUSTER_GITHUB_TOKEN`, `CLUSTER_CLOUDFLARE_API_TOKEN`, `CLUSTER_GEMINI_API_KEY`, and `HETZNER_S3_SECRET_ACCESS_KEY`. Map them to standard names such as `GH_TOKEN` or `AWS_SECRET_ACCESS_KEY` only in the consuming task or command. CLIs often prefer environment credentials over saved accounts, so global standard-name exports can silently hijack unrelated tooling. Inspect ambient variables before diagnosing an authentication failure.
 
-**Secret management (fnox + age) — two separate keys:**
+**Local age secrets and Kubernetes SOPS use different identities.** Local mise values use the infrastructure SSH ed25519 identity extracted by `mise run bootstrap` into the gitignored `.saikat-machine-access-ed25519`. Its source is `vault_saikat_machine_access_ssh_private_key`; `age.ssh_identity_files` selects it. Do not substitute a personal SSH key or commit the private identity.
 
-There are **two distinct age keys** in this repo. Do not confuse them:
+For a single-line secret, encrypt with hidden input and an explicit infrastructure recipient:
 
-**Key 1 — fnox (SSH ed25519 → age identity):**
-- fnox uses the infra SSH ed25519 private key, which it internally converts to an age identity.
-- Private key: `vault_saikat_machine_access_ssh_private_key` from Ansible vault, extracted to `./.saikat-machine-access-ed25519` (repo-root, gitignored) by `mise run bootstrap`. **Not** `~/.ssh/id_ed25519` — that's the user's personal key.
-- `FNOX_AGE_KEY_FILE = './.saikat-machine-access-ed25519'` is set in `mise.toml [env]` — fnox picks it up automatically. No manual `export` needed.
-- `fnox.toml` at repo root defines all encrypted secret definitions (no per-app `fnox.toml` files). Secrets that had the same name but different values across apps (e.g. `BACKEND_ADMIN_IDENTITY`) are prefixed with the app name (e.g. `YRAL_METADATA_BACKEND_ADMIN_IDENTITY`). The encrypted ciphertext is safe to commit to git.
-- Rotating a secret: `fnox set <KEY> --provider age` (re-encrypts in `fnox.toml`, commit the change). For multi-line values (PEM keys/certs), pipe via stdin: `printf '%s' "$VALUE" | fnox set <KEY> --provider age`.
-- Running commands with secrets: `fnox exec -- <command>`, or `fnox export -f env -o .env` for tools that need a file (e.g. `podman --env-file`).
-- `fnox.local.toml` is gitignored for machine-specific overrides.
+```sh
+mise set --age-encrypt --prompt --age-ssh-recipient "$(ssh-keygen -y -f .saikat-machine-access-ed25519)" SECRET_NAME
+```
+
+For multiline or Base64 input, use `--stdin` instead of `--prompt`, keeping plaintext out of command arguments and logs. Explicit recipient flags prevent accidental encryption to additional personal keys discovered by mise. Use application prefixes when the same credential name would otherwise describe different values.
+
+`age.strict = false` permits fresh checkout and CI setup before bootstrap provisions the identity. Secret-consuming tasks must check the values they require with `mise run secrets-check -- <KEY>...`; skipped decryption is not proof a credential is available. Optional empty fallbacks belong at their consumers. Never print `mise env`, `mise set <KEY>`, or a whole process environment when secrets may be present; validate availability or compare values in memory instead.
 
 **Key 2 — SOPS (native age key):**
 - SOPS-encrypted `*.sops.yaml` files under `kubernetes/` use a **separate native age key** (not the SSH key).
 - The age private key is stored in Ansible vault as `vault_age_private_key` (a standard age key with `AGE-SECRET-KEY-...` format).
-- The corresponding public key (`age1pdqae3ffmt9rxtmn2758pxjqaaxnytg6mzx3wpepuhs7de2ttfkqk3z7hl`) is in `.sops.yaml`.
+- The public recipient is declared in `.sops.yaml`; do not duplicate it in local secret configuration.
 - To extract and use the age key: `mise run ansible-vault-view -- vault_age_private_key` → write to a temp file → `SOPS_AGE_KEY_FILE=/tmp/sops-age.key sops --decrypt <file>.sops.yaml`. Or simply use `mise run sops-decrypt -- <file>.sops.yaml` which handles this automatically.
 - **Never edit SOPS files outside of `sops`** — use `sops <file>.sops.yaml` to edit, or decrypt → edit → re-encrypt. Manual edits break the SOPS MAC integrity check.
-- To populate fnox secrets from SOPS: decrypt the SOPS file, extract values, and `fnox set <KEY> --provider age` for each.
+- When importing local values from SOPS, keep plaintext in memory or stdin and encrypt it as a native mise age value with the intended recipient.
 
 **Shared:**
-- Ansible vault remains the source for cluster ops secrets (roles consume `vault_*` vars directly). fnox replaced the old `generate-env` vault→`.env` pipeline for local dev.
+- Ansible vault remains the source for cluster-ops secrets; roles consume `vault_*` variables directly. This local-secret consolidation does not migrate Kubernetes SOPS or Ansible vault into mise.
 
 **Repeated workflow tasks live in `mise.toml`, not bash scripts.** Reusable setup, build, test, and run workflows are `mise` tasks (`mise tasks` to list). `scripts/setup-local-env.sh` is a thin `exec mise run setup` wrapper for compatibility only — do not add logic there. New recurring workflow steps belong in a new or updated mise task; one-off commands do not require one. Never create bespoke bash scripts for repo workflows.
 
@@ -544,12 +543,12 @@ There are **two distinct age keys** in this repo. Do not confuse them:
 
 This ensures `mise bootstrap --yes && mise run setup` is the only command needed to go from a fresh machine to a working environment.
 
-**Per-service local dev convention (all services):** Every service we host and maintain follows the same pattern for local development. **All configuration is centralized in the repo root** — there are no per-app `mise.toml`, `fnox.toml`, or `pitchfork.toml` files:
+**Per-service local dev convention (all services):** Every maintained service uses the root `mise.toml`, without per-application tooling, secret, or daemon config files:
 - **Tasks and plaintext env vars** → root `mise.toml` (app-specific env vars grouped by `# ── <app> ──` comment headers in `[env]`; tasks use `<app>-` prefix)
-- **Secrets** → root `fnox.toml` (age-encrypted, committed to git; app-specific secrets grouped by `# <app>` comment headers; same-named secrets prefixed with app name to disambiguate)
+- **Secrets** → root `mise.toml [env]` native age values; prefix names by their owner where needed.
 - **Long-running dev servers** → root `mise.toml` `[daemons]` (ready checks, restart policies); each `<app>-run` task declares `daemons = ["<app>"]`
-- Reuse shared secrets (Harbor credentials, etc.) across services — don't duplicate values, reference the same fnox secret definitions
-- For each new service onboarded, add env vars to root `mise.toml [env]`, create mise tasks (`<app>-build`, `<app>-run`, `<app>-image`) with `daemons = ["<app>"]` on the run task, add secrets to root `fnox.toml`, and add the daemon to `[daemons]` in root `mise.toml`
+- Reuse shared secret definitions across services rather than duplicating their values.
+- Onboard service environment values, age secrets, build/test/run/image tasks, and its daemon in root `mise.toml`. Run tasks declare only the daemons they require.
 
 ### SpacetimeDB Usage Rules
 
@@ -595,14 +594,14 @@ Module-specific syntax details (table index macro, accessor traits) belong as co
 
 ### External Service Config & Secrets (SpacetimeDB + general)
 For any external service the repo calls (SpacetimeDB Maincloud, third-party APIs, etc.):
-- **Locally:** plaintext values (URLs, DB names, identities) → `mise.toml [env]`; secrets (tokens, admin keys) → `fnox` (age-encrypted, committed).
+- **Locally:** plaintext values and native age-encrypted secrets both live in root `mise.toml [env]`.
 - **In-cluster:** plaintext → k8s `ConfigMap`; secrets → SOPS-encrypted `*.sops.yaml`. **Only provision cluster config if a service in our cluster actually calls the external service.** External clients (mobile apps, out-of-workspace backends) carry their own config and do not consume our cluster ConfigMaps/SOPS.
-- Wire config into the consuming app via its existing config mechanism (e.g. mobile `BuildConfig`/config module; Rust service `mise.toml [env]` + `fnox exec`).
+- Wire config into the consuming app through its existing mechanism, with mise providing local process environments.
 
 **Investigating yral-rishi-agent errors — Sentry first (read-only).** The agent reports every unhandled exception and ERROR log to the self-hosted Sentry at `https://sentry.rishi.yral.com` (SDK init in `apps/yral-rishi-agent/infra/sentry.py`: FastAPI/Starlette integrations, `attach_stacktrace=True`, error-level logs as events). When the agent's API misbehaves (HTTP 500s, generation failures), query it instead of guessing:
-- Token: fnox `SENTRY_RISHI_API_TOKEN` (read-scoped; `fnox get SENTRY_RISHI_API_TOKEN`).
+- Token: mise's age-decrypted `SENTRY_RISHI_API_TOKEN`, read-scoped; do not display it.
 - Scope: org `sentry`, project `yral-rishi-agent` (id 4); `yral-chat-ai` (id 2) also exists.
-- Pattern: `curl -H "Authorization: Bearer $(fnox get SENTRY_RISHI_API_TOKEN)" "https://sentry.rishi.yral.com/api/0/organizations/sentry/issues/?project=4&query=<terms>&statsPeriod=14d"` → `.../issues/<id>/events/latest/` for the full stack trace + request. Sentry issue titles carry the exception type; group by `sort=freq` for the loudest failures.
+- Pattern, in a mise-activated shell: `curl -H "Authorization: Bearer $SENTRY_RISHI_API_TOKEN" "https://sentry.rishi.yral.com/api/0/organizations/sentry/issues/?project=4&query=<terms>&statsPeriod=14d"` → `.../issues/<id>/events/latest/` for the full stack trace + request. Sentry issue titles carry the exception type; group by `sort=freq` for the loudest failures.
 - This path found a live bug end-to-end in four queries (Sentry #602: `ResponseValidationError` on `reason: null` → GitHub issue → upstream fix #510), with no SSH access to the swarm.
 - Server fixes land in `apps/yral-rishi-agent` (upstream `dolr-ai/yral-rishi-agent`, auto-deploys on merge to main; verify with a read-only probe of `/health` and `/openapi.json` before re-testing a client against it).
 
@@ -679,7 +678,7 @@ Two components are in play — Shipwright for builds, Tekton Triggers for the gi
 
 1. **Compile locally** — `mise run <app>-build` (release musl binary) or `mise run <app>-build-local` (debug, same code as production).
 2. **Test** — `mise run <app>-test` (unit tests; external-service-dependent tests are removed — only pure-logic and production-endpoint tests remain).
-3. **Run locally** — `mise run <app>-run` (release binary as a mise-managed daemon, fnox secrets injected) or `mise run <app>-run-local` (debug build).
+3. **Run locally** — `mise run <app>-run` (release binary as a mise-managed daemon with native age values) or `mise run <app>-run-local` (debug build).
 4. **Build image locally** — `mise run <app>-image` (podman build from repo root, `.dockerignore` excludes `target/` and `node_modules/`).
 5. **Run image locally** — `mise run <app>-image-run` (podman container as a mise-managed daemon, port forwarded).
 6. **Push** — `git push` and let the CI/CD pipeline (Tekton → Shipwright → Harbor → Flux) build and deploy.
