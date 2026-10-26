@@ -163,6 +163,9 @@ uv = "latest"
 # Machine-baseline packages (build-essential, curl, git, etc.) live in ~/.dotfiles/mise.linux.toml.
 [bootstrap.packages]
 "apt:bind9-dnsutils" = "latest"
+"apt:clang" = "latest"
+"apt:cmake" = "latest"
+"apt:libclang-dev" = "latest"
 "apt:libssl-dev" = "latest"
 "apt:musl-tools" = "latest"
 "apt:pkg-config" = "latest"
@@ -517,15 +520,177 @@ run = "./.venv/bin/ansible-playbook ansible/playbooks/operations/update-dns-zone
 description = "Lint Ansible playbooks, roles and manifests (ansible-lint on ansible/playbooks/operations/ + ansible/manifests/)"
 run = "./.venv/bin/ansible-lint ansible/playbooks/operations/ ansible/manifests/"
 
+[tasks.goose-build]
+description = "Build pinned upstream Goose with roaming and test peer authorization on Linux"
+run = '''
+#!/usr/bin/env -S ./.venv/bin/python
+import os
+from pathlib import Path
+import platform
+import shutil
+import subprocess
+import yaml
+
+if platform.system() != "Linux" or platform.machine() != "x86_64":
+  raise SystemExit("Goose image builds currently require Linux x86_64")
+missing = [tool for tool in ["clang", "cmake", "musl-gcc"] if not shutil.which(tool)]
+if missing:
+  raise SystemExit("Missing build tools: " + ", ".join(missing) + "; run mise bootstrap packages apply --yes")
+root = Path.cwd()
+with (root / "ansible/roles/goose/defaults/main.yml").open() as stream:
+  version = yaml.safe_load(stream)["goose_version"]
+source = root / "target/goose/source" / version
+environment = {key: os.environ[key] for key in ["PATH", "HOME", "CARGO_HOME", "RUSTUP_HOME", "SSL_CERT_FILE", "SSL_CERT_DIR"] if key in os.environ}
+environment["RUSTUP_TOOLCHAIN"] = subprocess.check_output(["rustup", "show", "active-toolchain"], env=environment, text=True).split()[0]
+environment["CARGO_TARGET_DIR"] = str(root / "target/goose/compiler")
+environment["CC_x86_64_unknown_linux_musl"] = "musl-gcc"
+if not source.exists():
+  source.parent.mkdir(parents=True, exist_ok=True)
+  subprocess.run(["git", "clone", "--depth", "1", "--branch", "v" + version, "https://github.com/aaif-goose/goose.git", str(source)], env=environment, check=True)
+subprocess.run(["git", "diff", "--exit-code", "HEAD"], cwd=source, env=environment, check=True)
+actual_version = subprocess.check_output(["git", "describe", "--tags", "--exact-match", "HEAD"], cwd=source, env=environment, text=True).strip()
+if actual_version != "v" + version:
+  raise SystemExit("Goose checkout does not match the declared release")
+subprocess.run(["cargo", "build", "--locked", "--release", "--target", "x86_64-unknown-linux-musl", "--package", "goose-cli", "--bin", "goose", "--no-default-features", "--features", "portable-default,roaming"], cwd=source, env=environment, check=True)
+subprocess.run(["cargo", "test", "--locked", "--package", "goose-roaming", "--lib", "trust::tests"], cwd=source, env=environment, check=True)
+binary = root / "target/goose/compiler/x86_64-unknown-linux-musl/release/goose"
+subprocess.run([str(binary), "--version"], env=environment, check=True)
+subprocess.run([str(binary), "roam", "--help"], env=environment, check=True)
+'''
+
+[tasks.goose-image]
+description = "Package and audit Goose backend and browser images with native mise OCI on Linux"
+depends = ["goose-build"]
+run = '''
+#!/usr/bin/env -S ./.venv/bin/python
+import json
+import os
+from pathlib import Path
+import re
+import subprocess
+import tempfile
+import tomllib
+import yaml
+
+root = Path.cwd()
+with (root / "ansible/roles/goose/defaults/main.yml").open() as stream:
+  defaults = yaml.safe_load(stream)
+with (root / "mise.toml").open("rb") as stream:
+  configuration = tomllib.load(stream)
+with (root / "mise.lock").open("rb") as stream:
+  lock = tomllib.load(stream)
+binary = root / "target/goose/compiler/x86_64-unknown-linux-musl/release/goose"
+browser = root / "target/goose/browser" / defaults["goose_browser_revision"]
+environment = {key: os.environ[key] for key in ["PATH", "HOME", "CARGO_HOME", "RUSTUP_HOME", "SSL_CERT_FILE", "SSL_CERT_DIR"] if key in os.environ}
+if not browser.exists():
+  browser.parent.mkdir(parents=True, exist_ok=True)
+  subprocess.run(["git", "init", str(browser)], env=environment, check=True)
+  subprocess.run(["git", "-C", str(browser), "fetch", "--depth", "1", "https://github.com/aaif-goose/goose-mobile.git", defaults["goose_browser_revision"]], env=environment, check=True)
+  subprocess.run(["git", "-C", str(browser), "checkout", "FETCH_HEAD"], env=environment, check=True)
+revision = subprocess.check_output(["git", "-C", str(browser), "rev-parse", "HEAD"], env=environment, text=True).strip()
+if revision != defaults["goose_browser_revision"]:
+  raise SystemExit("Browser checkout does not match the declared upstream revision")
+subprocess.run(["git", "-C", str(browser), "diff", "--exit-code", "HEAD"], env=environment, check=True)
+for image_name, tools, entrypoint, command, copies in [
+  ("backend", ["node", "python", "rust"], ["/usr/local/bin/goose"], ["roam", "share", "--cwd", "/home/goose"], [(binary, "/usr/local/bin/goose")]),
+  ("browser", ["python"], ["mise", "exec", "--", "python", "-m", "http.server", "8080", "--bind", "0.0.0.0", "--directory", "/srv"], [], [(browser / name, "/srv/goose-mobile/" + name) for name in ["index.html", "assets", "manifest.webmanifest", "favicon.svg"]]),
+]:
+  with tempfile.TemporaryDirectory(prefix="goose-oci-") as temporary_directory:
+    temporary = Path(temporary_directory)
+    lines = ["[settings]", "experimental = true", "", "[tools]"]
+    for tool in tools:
+      version = lock["tools"][tool][0]["version"]
+      if tool == "rust":
+        options = dict(configuration["tools"]["core:rust"])
+        options["version"] = version
+        value = "{ " + ", ".join(key + " = " + json.dumps(value) for key, value in options.items()) + " }"
+      else:
+        value = json.dumps(version)
+      lines.append(json.dumps("core:" + tool) + " = " + value)
+    lines.extend(["", "[oci]", "from = " + json.dumps(defaults["goose_base_image"]), 'user = "1000:1000"', 'workdir = "/home/goose"', "entrypoint = " + json.dumps(entrypoint), "cmd = " + json.dumps(command), "", "[oci.env]", 'HOME = "/home/goose"', 'GOOSE_DISABLE_KEYRING = "1"'])
+    (temporary / "mise.toml").write_text("\n".join(lines) + "\n")
+    (temporary / "empty.toml").write_text("")
+    isolated_environment = dict(environment)
+    isolated_environment.update({"MISE_GLOBAL_CONFIG_FILE": str(temporary / "empty.toml"), "MISE_SYSTEM_CONFIG_FILE": str(temporary / "empty.toml"), "MISE_CEILING_PATHS": str(temporary.parent), "MISE_OVERRIDE_CONFIG_FILENAMES": "mise.toml", "MISE_OVERRIDE_TOOL_VERSIONS_FILENAMES": "none", "MISE_NO_ENV": "1", "MISE_NO_HOOKS": "1"})
+    subprocess.run(["mise", "trust", str(temporary / "mise.toml")], cwd=temporary, env=isolated_environment, check=True)
+    output = root / "target/goose/oci" / image_name
+    arguments = ["mise", "oci", "build", "--output", str(output)]
+    for host_path, image_path in copies:
+      if not host_path.exists():
+        raise SystemExit("Missing image artifact: " + str(host_path))
+      print("Packaging " + str(host_path) + " as " + image_path, flush=True)
+      arguments.extend(["--copy", str(host_path) + ":" + image_path])
+    subprocess.run(arguments, cwd=temporary, env=isolated_environment, check=True)
+    with (output / "index.json").open() as stream:
+      index = json.load(stream)
+    manifest_path = output / "blobs/sha256" / index["manifests"][0]["digest"].split(":", 1)[1]
+    with manifest_path.open() as stream:
+      manifest = json.load(stream)
+    config_path = output / "blobs/sha256" / manifest["config"]["digest"].split(":", 1)[1]
+    config_bytes = config_path.read_bytes()
+    image_configuration = json.loads(config_bytes)
+    image_environment = dict(value.split("=", 1) for value in image_configuration["config"]["Env"])
+    generated_paths = {"HOME": "/home/goose", "CARGO_HOME": "/mise/rust/cargo", "RUSTUP_HOME": "/mise/rust/rustup"}
+    for key, expected in generated_paths.items():
+      if key in image_environment and image_environment[key] != expected:
+        raise SystemExit("Refusing unexpected image path for " + key)
+    leaked_names = (set(configuration["env"]) & set(image_environment)) - set(generated_paths) - {"_"}
+    if leaked_names:
+      raise SystemExit("Refusing image with inherited project environment: " + ", ".join(sorted(leaked_names)))
+    for key, value in os.environ.items():
+      if re.search("TOKEN|SECRET|PASSWORD|API_KEY|PRIVATE_KEY", key) and len(value) >= 16 and value.encode() in config_bytes:
+        raise SystemExit("Refusing image containing credential value from " + key)
+    if image_configuration["config"]["User"] != "1000:1000":
+      raise SystemExit("Refusing an image that does not use the declared non-root user")
+    print("PASS: " + image_name + " config has no project environment or known credentials", flush=True)
+    print("PASS: " + image_name + " manifest " + index["manifests"][0]["digest"], flush=True)
+'''
+
+[tasks.goose-push]
+description = "Build, audit, and push Goose images to Harbor without plaintext registry credential files"
+depends = ["goose-image"]
+run = '''
+#!/usr/bin/env -S ./.venv/bin/python
+import base64
+from datetime import datetime, timezone
+import json
+import os
+from pathlib import Path
+import subprocess
+import yaml
+
+root = Path.cwd()
+with (root / "ansible/roles/goose/defaults/main.yml").open() as stream:
+  defaults = yaml.safe_load(stream)
+decrypted = subprocess.check_output(["mise", "run", "sops-decrypt", "--", "kubernetes/infrastructure/harbor/harbor-admin-secret.sops.yaml"], text=True)
+password = yaml.safe_load(decrypted)["stringData"]["admin-password"]
+authentication = base64.b64encode(("admin:" + password).encode()).decode()
+registry_configuration = json.dumps({"auths": {"harbor.yral.com": {"auth": authentication}}})
+descriptor = os.memfd_create("goose-registry-auth", os.MFD_CLOEXEC)
+try:
+  os.write(descriptor, registry_configuration.encode())
+  environment = {key: os.environ[key] for key in ["PATH", "HOME", "SSL_CERT_FILE", "SSL_CERT_DIR"] if key in os.environ}
+  environment.update({"REGISTRY_AUTH_FILE": "/proc/self/fd/" + str(descriptor), "MISE_EXPERIMENTAL": "1"})
+  commit = subprocess.check_output(["git", "rev-parse", "--short=8", "HEAD"], text=True).strip()
+  tag = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S") + "-" + commit
+  for name, repository in [("backend", defaults["goose_image_repository"]), ("browser", defaults["goose_image_repository"] + "-browser")]:
+    output = root / "target/goose/oci" / name
+    reference = repository + ":" + tag
+    print("Pushing " + reference, flush=True)
+    subprocess.run(["mise", "--no-config", "--no-env", "--no-hooks", "oci", "push", "--image-dir", str(output), reference], env=environment, pass_fds=(descriptor,), check=True)
+    with (output / "index.json").open() as stream:
+      digest = json.load(stream)["manifests"][0]["digest"]
+    print("Published " + repository + "@" + digest, flush=True)
+finally:
+  os.close(descriptor)
+'''
+
 [tasks.sops-decrypt]
 description = "Decrypt a SOPS file (usage: mise run sops-decrypt -- kubernetes/path/to/file.sops.yaml)"
 run = '''
 #!/usr/bin/env bash
 set -euo pipefail
-KEYFILE=$(mktemp)
-ansible-vault view ansible/inventory/group_vars/all/vault.yml | grep 'AGE-SECRET-KEY' | tr -d '[:space:]' > "$KEYFILE"
-SOPS_AGE_KEY_FILE="$KEYFILE" sops --decrypt "$@"
-rm -f "$KEYFILE"
+SOPS_AGE_KEY="$(mise run ansible-vault-view -- vault_age_private_key)" sops --decrypt "$@"
 '''
 
 [tasks.sops-encrypt]
@@ -533,10 +698,33 @@ description = "Encrypt a plain YAML file as SOPS in-place (usage: mise run sops-
 run = '''
 #!/usr/bin/env bash
 set -euo pipefail
-KEYFILE=$(mktemp)
-ansible-vault view ansible/inventory/group_vars/all/vault.yml | grep 'AGE-SECRET-KEY' | tr -d '[:space:]' > "$KEYFILE"
-SOPS_AGE_KEY_FILE="$KEYFILE" sops --encrypt --in-place "$@"
-rm -f "$KEYFILE"
+sops --encrypt --in-place "$@"
+'''
+
+[tasks.sops-encrypt-stdin]
+description = "Encrypt Kubernetes YAML from stdin without plaintext files (usage: mise run sops-encrypt-stdin -- <destination.sops.yaml>)"
+raw = true
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+sops encrypt --filename-override "$1" --encrypted-regex '^(data|stringData)$'
+'''
+
+[tasks.sops-stdin-check]
+description = "Regression-test streaming Kubernetes Secret encryption and vault-backed decryption"
+run = '''
+#!/usr/bin/env -S ./.venv/bin/python
+import subprocess
+import yaml
+
+plaintext = "apiVersion: v1\nkind: Secret\nmetadata:\n  name: sops-stream-test\n  namespace: goose\nstringData:\n  value: nonsecret-test-value\n"
+encrypted = subprocess.run(["mise", "run", "sops-encrypt-stdin", "--", "kubernetes/apps/goose/test.sops.yaml"], input=plaintext, text=True, stdout=subprocess.PIPE, check=True).stdout
+document = yaml.safe_load(encrypted)
+assert document["metadata"]["name"] == "sops-stream-test"
+assert document["stringData"]["value"].startswith("ENC[")
+decrypted = subprocess.run(["mise", "--raw", "run", "sops-decrypt", "--", "--input-type", "yaml", "--output-type", "yaml", "/dev/stdin"], input=encrypted, text=True, stdout=subprocess.PIPE, check=True).stdout
+assert yaml.safe_load(decrypted) == yaml.safe_load(plaintext)
+print("PASS: streaming encryption preserves metadata, encrypts stringData, and round-trips without plaintext files")
 '''
 
 [tasks.sops-edit]
@@ -544,10 +732,7 @@ description = "Edit a SOPS file in-place (usage: mise run sops-edit -- kubernete
 run = '''
 #!/usr/bin/env bash
 set -euo pipefail
-KEYFILE=$(mktemp)
-ansible-vault view ansible/inventory/group_vars/all/vault.yml | grep 'AGE-SECRET-KEY' | tr -d '[:space:]' > "$KEYFILE"
-SOPS_AGE_KEY_FILE="$KEYFILE" sops "$@"
-rm -f "$KEYFILE"
+SOPS_AGE_KEY="$(mise run ansible-vault-view -- vault_age_private_key)" sops "$@"
 '''
 
 [tasks.setup]

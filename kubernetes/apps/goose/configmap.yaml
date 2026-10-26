@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: goose-runtime
+  namespace: goose
+data:
+  GOOSE_PROVIDER: azure_foundry
+  GOOSE_MODEL: gpt-6.1-sol
+  AZURE_FOUNDRY_ENDPOINT: https://saikat-3761-resource.services.ai.azure.com/

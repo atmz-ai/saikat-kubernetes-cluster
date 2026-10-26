@@ -1,0 +1,4 @@
+goose_version: "1.56.0"
+goose_browser_revision: "a85b99bb83d11177b70d28f8a0f5d2bfd7929144"
+goose_base_image: "ghcr.io/aaif-goose/goose@sha256:8d482beae2921550a0b58521e20fc9240263b577549042111bca571f003ac520"
+goose_image_repository: "harbor.yral.com/library/goose"

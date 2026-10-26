@@ -1,0 +1,122 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: goose
+  namespace: goose
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: goose
+  template:
+    metadata:
+      labels:
+        app: goose
+    spec:
+      automountServiceAccountToken: false
+      imagePullSecrets:
+        - name: harbor-pull-secret
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: prepare-home
+          image: harbor.yral.com/library/goose@sha256:69bf6845998306af39ef1647f01b2429d0da5aaae0cbe371761c185b15bb4c5f
+          command:
+            - /bin/sh
+            - -ec
+            - mkdir -p /home/goose/.config/goose /home/goose/workspace
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: home
+              mountPath: /home/goose
+      containers:
+        - name: goose
+          image: harbor.yral.com/library/goose@sha256:69bf6845998306af39ef1647f01b2429d0da5aaae0cbe371761c185b15bb4c5f
+          args:
+            - roam
+            - share
+            - --cwd
+            - /home/goose/workspace
+          envFrom:
+            - configMapRef:
+                name: goose-runtime
+            - secretRef:
+                name: goose-credentials
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -ec
+                - test -s /home/goose/.local/share/goose/roam/serve.lock
+          volumeMounts:
+            - name: home
+              mountPath: /home/goose
+            - name: trust
+              mountPath: /home/goose/.config/goose/roaming_trust.json
+              subPath: roaming_trust.json
+              readOnly: true
+      volumes:
+        - name: home
+          persistentVolumeClaim:
+            claimName: goose-home
+        - name: trust
+          configMap:
+            name: goose-trust
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: goose-browser
+  namespace: goose
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: goose-browser
+  template:
+    metadata:
+      labels:
+        app: goose-browser
+    spec:
+      automountServiceAccountToken: false
+      imagePullSecrets:
+        - name: harbor-pull-secret
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: browser
+          image: harbor.yral.com/library/goose-browser@sha256:78ddd11b9ae231b07c1e3bd315aca92c7d34d85414314f69935c671a5132c35e
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /goose-mobile/
+              port: http
+          livenessProbe:
+            httpGet:
+              path: /goose-mobile/
+              port: http
