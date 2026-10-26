@@ -1,4 +1,6 @@
 {
-  "allowed": [],
+  "allowed": [
+    "08af42e2bec3f2e0af406265eaa6fe251cc65ba19409e199068e7244eaf47fa6"
+  ],
   "revoked_keys": []
 }
