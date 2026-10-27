@@ -91,6 +91,9 @@
       - "{{ taint_check.stdout }}"
   when: node_role == "control-plane"
 
+- name: Reconcile load balancer eligibility during node setup
+  ansible.builtin.import_tasks: load-balancer.yml
+
 - name: Verify node labels
   ansible.builtin.command: kubectl get node {{ ansible_facts['hostname'] }} --show-labels
   environment:

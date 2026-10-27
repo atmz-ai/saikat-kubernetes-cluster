@@ -23,7 +23,6 @@ resources:
   - workstation-root-disk.yaml
   - workstation.yaml
   - workstation-service.yaml
-  - ssh-gateway.yaml
   - credentials.sops.yaml
   - desktop-auth.sops.yaml
   - machine-access-ssh.sops.yaml

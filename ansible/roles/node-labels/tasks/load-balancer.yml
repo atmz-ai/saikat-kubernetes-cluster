@@ -1,0 +1,78 @@
+---
+- name: Reconcile node load balancer eligibility
+  delegate_to: localhost
+  become: false
+  vars:
+    ansible_python_interpreter: "{{ ansible_playbook_python }}"
+    node_load_balancer_eligible: >-
+      {{ node_role | default('worker') != 'control-plane'
+         or stacked_control_plane | default(false) | bool }}
+  block:
+    - name: Require an explicit node reconciliation target
+      ansible.builtin.assert:
+        that:
+          - target_host is defined
+          - target_host | default('') | length > 0
+        fail_msg: "Pass an explicit target_host before reconciling node load balancer eligibility."
+
+    - name: Read registered node for load balancer eligibility
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Node
+        name: "{{ inventory_hostname }}"
+      register: node_load_balancer_information
+
+    - name: Require the node to be registered before changing eligibility
+      ansible.builtin.assert:
+        that:
+          - node_load_balancer_information.resources | length == 1
+        fail_msg: "{{ inventory_hostname }} must be registered before reconciling its load balancer eligibility."
+
+    - name: Remove load balancer exclusion from workload nodes
+      kubernetes.core.k8s_json_patch:
+        api_version: v1
+        kind: Node
+        name: "{{ inventory_hostname }}"
+        patch:
+          - op: remove
+            path: /metadata/labels/node.kubernetes.io~1exclude-from-external-load-balancers
+      when:
+        - node_load_balancer_eligible
+        - >-
+          'node.kubernetes.io/exclude-from-external-load-balancers'
+          in (node_load_balancer_information.resources[0].metadata.labels | default({}))
+
+    - name: Retain load balancer exclusion for dedicated control planes
+      kubernetes.core.k8s:
+        state: patched
+        definition:
+          apiVersion: v1
+          kind: Node
+          metadata:
+            name: "{{ inventory_hostname }}"
+            labels:
+              node.kubernetes.io/exclude-from-external-load-balancers: ""
+      when:
+        - not node_load_balancer_eligible
+        - >-
+          'node.kubernetes.io/exclude-from-external-load-balancers'
+          not in (node_load_balancer_information.resources[0].metadata.labels | default({}))
+
+    - name: Verify reconciled load balancer eligibility
+      when: not ansible_check_mode
+      block:
+        - name: Read reconciled node labels
+          kubernetes.core.k8s_info:
+            api_version: v1
+            kind: Node
+            name: "{{ inventory_hostname }}"
+          register: node_load_balancer_result
+
+        - name: Assert the exclusion matches workload eligibility
+          ansible.builtin.assert:
+            that:
+              - >-
+                ('node.kubernetes.io/exclude-from-external-load-balancers'
+                 in (node_load_balancer_result.resources[0].metadata.labels | default({})))
+                == (not node_load_balancer_eligible)
+            success_msg: "{{ inventory_hostname }} load balancer eligibility is reconciled."

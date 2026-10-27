@@ -1,0 +1,10 @@
+---
+- name: Reconcile node load balancer eligibility without provisioning or storage changes
+  hosts: "{{ target_host | default('localhost') }}"
+  serial: 1
+  gather_facts: false
+  tasks:
+    - name: Reconcile load balancer labels through the existing node labels role
+      ansible.builtin.include_role:
+        name: node-labels
+        tasks_from: load-balancer

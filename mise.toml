@@ -664,6 +664,9 @@ run = '''
 from pathlib import Path
 import subprocess
 from jinja2 import Environment, StrictUndefined
+from jinja2.nativetypes import NativeEnvironment
+from ansible.plugins.filter.core import FilterModule
+import jsonpatch
 import yaml
 
 for component in ["kubevirt", "containerized-data-importer"]:
@@ -702,6 +705,35 @@ assert cloud_init["ssh_pwauth"] is False
 assert cloud_init["users"][0]["uid"] == 1000
 assert "PermitRootLogin no" in cloud_init["write_files"][0]["content"]
 print("PASS: staged VM pins its root disk, preserves existing home data, and resolves bootstrap configuration", flush=True)
+ssh_service = next(item for item in application if item["kind"] == "Service" and item["metadata"]["name"] == "goose-workstation")
+assert ssh_service["spec"]["type"] == "LoadBalancer"
+assert ssh_service["spec"]["loadBalancerClass"] == "io.cilium/node"
+assert ssh_service["spec"]["allocateLoadBalancerNodePorts"] is False
+assert "externalIPs" not in ssh_service["spec"]
+assert not any("nodePort" in port for port in ssh_service["spec"]["ports"])
+assert ssh_service["spec"]["ports"] == [{"name": "ssh", "port": 2222, "targetPort": 22}]
+assert not any(item["kind"] in ["Gateway", "TCPRoute"] and item["metadata"]["name"] == "goose-ssh" for item in application)
+print("PASS: SSH uses Cilium Node IPAM with no NodePort, deprecated externalIPs, or unsupported Gateway", flush=True)
+node_label_tasks = yaml.safe_load(Path("ansible/roles/node-labels/tasks/load-balancer.yml").read_text())[0]
+policy_environment = NativeEnvironment(undefined=StrictUndefined)
+policy_environment.filters["bool"] = FilterModule().filters()["bool"]
+eligibility = policy_environment.from_string(node_label_tasks["vars"]["node_load_balancer_eligible"])
+for configuration, expected_eligible in [
+  ({"node_role": "worker"}, True),
+  ({}, True),
+  ({"node_role": "control-plane", "stacked_control_plane": True}, True),
+  ({"node_role": "control-plane", "stacked_control_plane": False}, False),
+  ({"node_role": "control-plane"}, False),
+]:
+  assert eligibility.render(**configuration) is expected_eligible
+  print("PASS: load balancer eligibility " + str(configuration), flush=True)
+patch_task = next(task for task in node_label_tasks["block"] if "kubernetes.core.k8s_json_patch" in task)
+original_node = {"metadata": {"labels": {"node.kubernetes.io/exclude-from-external-load-balancers": "", "preserved-label": "value"}}}
+updated_node = jsonpatch.apply_patch(original_node, patch_task["kubernetes.core.k8s_json_patch"]["patch"])
+assert "node.kubernetes.io/exclude-from-external-load-balancers" not in updated_node["metadata"]["labels"]
+assert updated_node["metadata"]["labels"]["preserved-label"] == "value"
+assert "node.kubernetes.io/exclude-from-external-load-balancers" in original_node["metadata"]["labels"]
+print("PASS: exclusion removal preserves other labels and leaves its input unchanged", flush=True)
 '''
 
 [tasks.goose-build-workflow-check]
