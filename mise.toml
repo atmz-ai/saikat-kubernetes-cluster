@@ -607,7 +607,8 @@ for image_name, tools, entrypoint, command, copies in [
       else:
         value = json.dumps(version)
       lines.append(json.dumps("core:" + tool) + " = " + value)
-    lines.extend(["", "[oci]", "from = " + json.dumps(defaults["goose_base_image"]), 'user = "1000:1000"', 'workdir = "/home/goose"', "entrypoint = " + json.dumps(entrypoint), "cmd = " + json.dumps(command), "", "[oci.env]", 'HOME = "/home/goose"', 'GOOSE_DISABLE_KEYRING = "1"'])
+    base_image = defaults["goose_backend_base_image"] if image_name == "backend" else defaults["goose_base_image"]
+    lines.extend(["", "[oci]", "from = " + json.dumps(base_image), 'user = "1000:1000"', 'workdir = "/home/goose"', "entrypoint = " + json.dumps(entrypoint), "cmd = " + json.dumps(command), "", "[oci.env]", 'HOME = "/home/goose"', 'GOOSE_DISABLE_KEYRING = "1"'])
     (temporary / "mise.toml").write_text("\n".join(lines) + "\n")
     (temporary / "empty.toml").write_text("")
     isolated_environment = dict(environment)
@@ -646,9 +647,45 @@ for image_name, tools, entrypoint, command, copies in [
     print("PASS: " + image_name + " manifest " + index["manifests"][0]["digest"], flush=True)
 '''
 
+[tasks.goose-ssh-check]
+description = "Validate Goose's canonical machine SSH identity and strict GitHub configuration without plaintext key files"
+run = '''
+#!/usr/bin/env -S ./.venv/bin/python
+import os
+from pathlib import Path
+import subprocess
+import yaml
+
+root = Path("kubernetes/apps/goose").resolve()
+secret = yaml.safe_load(subprocess.check_output(["mise", "--raw", "run", "sops-decrypt", "--", str(root / "machine-access-ssh.sops.yaml")], text=True))
+key = secret["stringData"]["ssh-privatekey"]
+canonical = subprocess.check_output(["mise", "--raw", "run", "ansible-vault-view", "--", "vault_saikat_machine_access_ssh_private_key"], text=True)
+assert key.strip() == canonical.strip()
+assert key.startswith("-----BEGIN OPENSSH PRIVATE KEY-----")
+descriptor = os.memfd_create("goose-ssh-check", os.MFD_CLOEXEC)
+try:
+  os.fchmod(descriptor, 0o600)
+  os.write(descriptor, key.encode())
+  public = subprocess.check_output(["ssh-keygen", "-y", "-P", "", "-f", "/proc/" + str(os.getpid()) + "/fd/" + str(descriptor)], text=True)
+  assert public.startswith("ssh-ed25519 ")
+  print("PASS: canonical private key parses as an Ed25519 identity without output framing")
+finally:
+  os.close(descriptor)
+environment = dict(os.environ)
+environment.update({"GIT_CONFIG_SYSTEM": str(root / "gitconfig"), "GIT_CONFIG_GLOBAL": "/dev/null"})
+url = subprocess.check_output(["git", "ls-remote", "--get-url", "https://github.com/atmz-ai/saikat-kubernetes-cluster.git"], env=environment, text=True).strip()
+assert url == "git@github.com:atmz-ai/saikat-kubernetes-cluster.git"
+settings = subprocess.check_output(["ssh", "-G", "-F", str(root / "ssh_config"), "github.com"], text=True)
+assert "identitiesonly yes" in settings and "batchmode yes" in settings
+assert "stricthostkeychecking true" in settings or "stricthostkeychecking yes" in settings
+fingerprint = subprocess.check_output(["ssh-keygen", "-lf", str(root / "known_hosts")], text=True)
+assert "SHA256:+DiY3wvvV6TuJJhbpZisF/zLDA0zPMSvHdkr4UvCOqU" in fingerprint
+print("PASS: GitHub URL rewrite and strict official host verification")
+'''
+
 [tasks.goose-push]
 description = "Build, audit, and push Goose images to Harbor without plaintext registry credential files"
-depends = ["goose-image"]
+depends = ["goose-image", "goose-ssh-check"]
 run = '''
 #!/usr/bin/env -S ./.venv/bin/python
 import base64

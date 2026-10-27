@@ -5,6 +5,12 @@ configMapGenerator:
     namespace: goose
     files:
       - roaming_trust.json
+  - name: goose-ssh-config
+    namespace: goose
+    files:
+      - gitconfig
+      - ssh_config
+      - known_hosts
 resources:
   - namespace.yaml
   - reference-grant.yaml
@@ -14,4 +20,5 @@ resources:
   - service.yaml
   - credentials.sops.yaml
   - desktop-auth.sops.yaml
+  - machine-access-ssh.sops.yaml
   - harbor-pull-secret.sops.yaml

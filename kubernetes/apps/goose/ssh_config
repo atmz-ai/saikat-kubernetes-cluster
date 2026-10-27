@@ -1,0 +1,8 @@
+Host github.com
+    User git
+    IdentityFile /home/goose/.ssh/id_ed25519
+    IdentitiesOnly yes
+    IdentityAgent none
+    BatchMode yes
+    StrictHostKeyChecking yes
+    UserKnownHostsFile /etc/goose-ssh/known_hosts

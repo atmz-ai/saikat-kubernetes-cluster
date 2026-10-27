@@ -3,6 +3,8 @@ kind: Deployment
 metadata:
   name: goose
   namespace: goose
+  annotations:
+    secret.reloader.stakater.com/reload: goose-machine-access-ssh
 spec:
   replicas: 1
   strategy:
@@ -27,11 +29,14 @@ spec:
           type: RuntimeDefault
       initContainers:
         - name: prepare-home
-          image: harbor.yral.com/library/goose@sha256:69bf6845998306af39ef1647f01b2429d0da5aaae0cbe371761c185b15bb4c5f
+          image: harbor.yral.com/library/goose@sha256:6994a795ca7ed3ff17ab7fdad54f2986f815a31a0247fdafaa88d66fc8cd488a
           command:
             - /bin/sh
             - -ec
-            - mkdir -p /home/goose/.config/goose /home/goose/workspace
+            - >-
+              mkdir -p /home/goose/.config/goose /home/goose/workspace &&
+              cp /run/goose-machine-access/ssh-privatekey /home/goose/.ssh/id_ed25519 &&
+              chmod 0600 /home/goose/.ssh/id_ed25519
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
@@ -39,9 +44,14 @@ spec:
           volumeMounts:
             - name: home
               mountPath: /home/goose
+            - name: ssh-identity
+              mountPath: /home/goose/.ssh
+            - name: machine-access-secret
+              mountPath: /run/goose-machine-access
+              readOnly: true
       containers:
         - name: goose
-          image: harbor.yral.com/library/goose@sha256:69bf6845998306af39ef1647f01b2429d0da5aaae0cbe371761c185b15bb4c5f
+          image: harbor.yral.com/library/goose@sha256:6994a795ca7ed3ff17ab7fdad54f2986f815a31a0247fdafaa88d66fc8cd488a
           workingDir: /home/goose/workspace
           args:
             - serve
@@ -77,6 +87,12 @@ spec:
               mountPath: /home/goose/.config/goose/roaming_trust.json
               subPath: roaming_trust.json
               readOnly: true
+            - name: ssh-identity
+              mountPath: /home/goose/.ssh
+              readOnly: true
+            - name: ssh-config
+              mountPath: /etc/goose-ssh
+              readOnly: true
       volumes:
         - name: home
           persistentVolumeClaim:
@@ -84,6 +100,16 @@ spec:
         - name: trust
           configMap:
             name: goose-trust
+        - name: ssh-identity
+          emptyDir:
+            medium: Memory
+        - name: machine-access-secret
+          secret:
+            secretName: goose-machine-access-ssh
+            defaultMode: 0440
+        - name: ssh-config
+          configMap:
+            name: goose-ssh-config
 ---
 apiVersion: apps/v1
 kind: Deployment

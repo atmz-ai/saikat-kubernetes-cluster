@@ -1,0 +1,4 @@
+[core]
+    sshCommand = ssh -F /etc/goose-ssh/ssh_config
+[url "git@github.com:"]
+    insteadOf = https://github.com/
