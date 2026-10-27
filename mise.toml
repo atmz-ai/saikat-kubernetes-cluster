@@ -531,6 +531,8 @@ import shutil
 import subprocess
 import yaml
 
+if os.geteuid() == 0:
+  raise SystemExit("Run goose-build without sudo.")
 if platform.system() != "Linux" or platform.machine() != "x86_64":
   raise SystemExit("Goose image builds currently require Linux x86_64")
 missing = [tool for tool in ["clang", "cmake", "musl-gcc"] if not shutil.which(tool)]
@@ -580,8 +582,10 @@ with (root / "mise.toml").open("rb") as stream:
 with (root / "mise.lock").open("rb") as stream:
   lock = tomllib.load(stream)
 binary = root / "target/goose/compiler/x86_64-unknown-linux-musl/release/goose"
+if not binary.is_file():
+  raise SystemExit("Missing compiled Goose binary; run mise run goose-build without sudo first.")
 browser = root / "target/goose/browser" / defaults["goose_browser_revision"]
-environment = {key: os.environ[key] for key in ["PATH", "HOME", "CARGO_HOME", "RUSTUP_HOME", "SSL_CERT_FILE", "SSL_CERT_DIR"] if key in os.environ}
+environment = {key: os.environ[key] for key in ["PATH", "HOME", "CARGO_HOME", "RUSTUP_HOME", "SSL_CERT_FILE", "SSL_CERT_DIR", "SUDO_UID"] if key in os.environ}
 if not browser.exists():
   browser.parent.mkdir(parents=True, exist_ok=True)
   subprocess.run(["git", "init", str(browser)], env=environment, check=True)
@@ -609,6 +613,11 @@ for image_name, tools, entrypoint, command, copies in [
       lines.append(json.dumps("core:" + tool) + " = " + value)
     base_image = defaults["goose_backend_base_image"] if image_name == "backend" else defaults["goose_base_image"]
     lines.extend(["", "[oci]", "from = " + json.dumps(base_image), 'user = "1000:1000"', 'workdir = "/home/goose"', "entrypoint = " + json.dumps(entrypoint), "cmd = " + json.dumps(command), "", "[oci.env]", 'HOME = "/home/goose"', 'GOOSE_DISABLE_KEYRING = "1"'])
+    if image_name == "backend":
+      toolchain = subprocess.check_output(["rustup", "show", "active-toolchain"], env=environment, text=True).split()[0]
+      if not toolchain.endswith("-x86_64-unknown-linux-gnu"):
+        raise SystemExit("The backend requires the installed Linux GNU Rust toolchain")
+      lines.append("RUSTUP_TOOLCHAIN = " + json.dumps(toolchain))
     (temporary / "mise.toml").write_text("\n".join(lines) + "\n")
     (temporary / "empty.toml").write_text("")
     isolated_environment = dict(environment)
@@ -645,6 +654,78 @@ for image_name, tools, entrypoint, command, copies in [
       raise SystemExit("Refusing an image that does not use the declared non-root user")
     print("PASS: " + image_name + " config has no project environment or known credentials", flush=True)
     print("PASS: " + image_name + " manifest " + index["manifests"][0]["digest"], flush=True)
+'''
+
+# TODO: clean up these unused tasks
+[tasks.kubevirt-manifests-check]
+description = "Render official VM operators, verify role-owned release pins, and preserve the existing Goose workload"
+run = '''
+#!/usr/bin/env -S ./.venv/bin/python
+from pathlib import Path
+import subprocess
+from jinja2 import Environment, StrictUndefined
+import yaml
+
+for component in ["kubevirt", "containerized-data-importer"]:
+  role = Path("ansible/roles") / component
+  defaults = yaml.safe_load((role / "defaults/main.yml").read_text())
+  expected = Environment(undefined=StrictUndefined).from_string((role / "templates/operator-kustomization.yaml.j2").read_text()).render(**defaults)
+  directory = Path("kubernetes/infrastructure") / component
+  assert expected.rstrip() == (directory / "operator/kustomization.yaml").read_text().rstrip(), component + " entrypoint differs from its role-owned release pin"
+  for path in [directory / "operator", directory]:
+    resources = list(yaml.safe_load_all(subprocess.check_output(["kubectl", "kustomize", str(path)], text=True)))
+    for resource in resources:
+      print("Validated " + resource["kind"] + " " + resource["metadata"]["name"], flush=True)
+cluster = list(yaml.safe_load_all(subprocess.check_output(["kubectl", "kustomize", "kubernetes/clusters/yral-k8s"], text=True)))
+for component in ["kubevirt", "containerized-data-importer"]:
+  name = "infrastructure-" + component
+  resource = next(item for item in cluster if item["kind"] == "Kustomization" and item["metadata"]["name"] == name)
+  assert resource["spec"]["dependsOn"][0]["name"] == name + "-operator"
+  print("PASS: " + name + " waits for its operator", flush=True)
+application = list(yaml.safe_load_all(subprocess.check_output(["kubectl", "kustomize", "kubernetes/apps/goose"], text=True)))
+goose = next(item for item in application if item["kind"] == "Deployment" and item["metadata"]["name"] == "goose")
+assert [item["name"] for item in goose["spec"]["template"]["spec"]["containers"]] == ["goose"]
+print("PASS: operator bootstrap preserves the existing Goose container", flush=True)
+'''
+
+[tasks.goose-build-workflow-check]
+description = "Regression-test unprivileged compilation and isolated sudo ownership context for OCI packaging"
+run = '''
+#!/usr/bin/env -S ./.venv/bin/python
+import ast
+import os
+import tomllib
+from unittest.mock import patch
+
+with open("mise.toml", "rb") as stream:
+  tasks = tomllib.load(stream)["tasks"]
+with patch("os.geteuid", return_value=0):
+  try:
+    exec(compile(tasks["goose-build"]["run"], "goose-build", "exec"), {})
+  except SystemExit as error:
+    assert "without sudo" in str(error)
+  else:
+    raise AssertionError("Privileged compilation must be rejected")
+print("PASS: compilation rejects root before running Git or Cargo")
+body = ast.parse(tasks["goose-image"]["run"])
+assignment = next(node for node in body.body if isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id == "environment" for target in node.targets))
+with patch.dict(os.environ, {"PATH": "/usr/bin", "HOME": "/home/operator", "SUDO_UID": "1000", "GITHUB_TOKEN": "must-not-pass"}, clear=True):
+  namespace = {"os": os}
+  exec(compile(ast.Module(body=[assignment], type_ignores=[]), "image-environment", "exec"), namespace)
+  assert namespace["environment"] == {"PATH": "/usr/bin", "HOME": "/home/operator", "SUDO_UID": "1000"}
+print("PASS: packaging preserves sudo repository ownership context without inheriting credentials")
+selection = next(node for node in ast.walk(body) if isinstance(node, ast.If) and isinstance(node.test, ast.Compare) and isinstance(node.test.left, ast.Name) and node.test.left.id == "image_name" and any(isinstance(child, ast.Name) and child.id == "toolchain" for child in ast.walk(node)))
+for selected, valid in [("stable-x86_64-unknown-linux-gnu", True), ("stable", False), ("stable-x86_64-unknown-linux-musl", False)]:
+  namespace = {"image_name": "backend", "environment": {}, "subprocess": __import__("subprocess"), "json": __import__("json"), "lines": []}
+  with patch("subprocess.check_output", return_value=selected + " (default)\n"):
+    try:
+      exec(compile(ast.Module(body=[selection], type_ignores=[]), "image-rust-toolchain", "exec"), namespace)
+    except SystemExit:
+      assert not valid
+    else:
+      assert valid
+      assert namespace["lines"] == ['RUSTUP_TOOLCHAIN = "' + selected + '"']
+print("PASS: packaging selects a complete GNU Rust toolchain and rejects ambiguous or musl selections")
 '''
 
 [tasks.goose-ssh-check]
@@ -684,12 +765,13 @@ print("PASS: GitHub URL rewrite and strict official host verification")
 '''
 
 [tasks.goose-push]
-description = "Build, audit, and push Goose images to Harbor without plaintext registry credential files"
-depends = ["goose-image", "goose-ssh-check"]
+description = "Audit and push prebuilt Goose images to Harbor without privileged compilation or plaintext credential files"
+depends = ["goose-build-workflow-check", "goose-ssh-check"]
 run = '''
 #!/usr/bin/env -S ./.venv/bin/python
 import base64
 from datetime import datetime, timezone
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -697,6 +779,26 @@ import subprocess
 import yaml
 
 root = Path.cwd()
+if os.geteuid() == 0:
+  raise SystemExit("Push prebuilt images without sudo.")
+for name in ["backend", "browser"]:
+  output = root / "target/goose/oci" / name
+  with (output / "index.json").open() as stream:
+    index = json.load(stream)
+  manifest_digest = index["manifests"][0]["digest"].split(":", 1)[1]
+  manifest_bytes = (output / "blobs/sha256" / manifest_digest).read_bytes()
+  assert hashlib.sha256(manifest_bytes).hexdigest() == manifest_digest
+  manifest = json.loads(manifest_bytes)
+  for blob in [manifest["config"], *manifest["layers"]]:
+    digest = blob["digest"].split(":", 1)[1]
+    with (output / "blobs/sha256" / digest).open("rb") as stream:
+      assert hashlib.file_digest(stream, "sha256").hexdigest() == digest
+    print("PASS: " + name + " blob sha256:" + digest, flush=True)
+  image_configuration = json.loads((output / "blobs/sha256" / manifest["config"]["digest"].split(":", 1)[1]).read_bytes())
+  assert image_configuration["config"]["User"] == "1000:1000"
+  if name == "backend":
+    image_environment = dict(value.split("=", 1) for value in image_configuration["config"]["Env"])
+    assert image_environment["RUSTUP_TOOLCHAIN"].endswith("-x86_64-unknown-linux-gnu")
 with (root / "ansible/roles/goose/defaults/main.yml").open() as stream:
   defaults = yaml.safe_load(stream)
 decrypted = subprocess.check_output(["mise", "run", "sops-decrypt", "--", "kubernetes/infrastructure/harbor/harbor-admin-secret.sops.yaml"], text=True)

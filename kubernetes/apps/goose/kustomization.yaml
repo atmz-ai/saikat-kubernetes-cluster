@@ -21,4 +21,5 @@ resources:
   - credentials.sops.yaml
   - desktop-auth.sops.yaml
   - machine-access-ssh.sops.yaml
+  - ssh-host.sops.yaml
   - harbor-pull-secret.sops.yaml

@@ -21,6 +21,8 @@ resources:
   - infrastructure-cert-manager.yaml
   - infrastructure-cilium.yaml
   - infrastructure-cloudnative-pg.yaml
+  - infrastructure-containerized-data-importer-operator.yaml
+  - infrastructure-containerized-data-importer.yaml
   - infrastructure-coredns.yaml
   - infrastructure-dbx.yaml
   - infrastructure-external-dns.yaml
@@ -32,6 +34,8 @@ resources:
   - infrastructure-kafka-bridge.yaml
   - infrastructure-kafka-connect.yaml
   - infrastructure-kafka-console.yaml
+  - infrastructure-kubevirt-operator.yaml
+  - infrastructure-kubevirt.yaml
   - infrastructure-longhorn-backup.yaml
   - infrastructure-longhorn.yaml
   - infrastructure-loki.yaml
