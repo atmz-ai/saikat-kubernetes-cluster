@@ -13,4 +13,5 @@ resources:
   - deployment.yaml
   - service.yaml
   - credentials.sops.yaml
+  - desktop-auth.sops.yaml
   - harbor-pull-secret.sops.yaml

@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: Secret
+metadata:
+    name: goose-desktop-auth
+    namespace: goose
+type: Opaque
+stringData:
+    GOOSE_SERVER__SECRET_KEY: ENC[AES256_GCM,data:Dlk8vMgJPnESgDgAWXgD005JaeUbCXutmM2LHFKovQOXe57xBcMxMS5RnhD35ZUej66SRRhTFztCciUiKhfFww==,iv:fLJ2mNvQWb3bTX3oUYMmSiHTKjf8K8G6xekOiYZvj+E=,tag:1JMjFJHHNDdXGhBIYqIhGg==,type:str]
+sops:
+    age:
+        - enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBZdGg1aTl1YlhmL2hGWW5G
+            c3k1aEVUaTUyRjMwbmJpeW1kVEQxMWZKNlFVCkpadXhpWFAyY3JjZmVSZEZVb1dG
+            eWFmZkJtc2RyTDRWRFIyOTZOTTE5TEkKLS0tIGZnbVRBbm1CcTRiQ200VUVIa2RO
+            ckVZeHd0aXVjdG1aRC9iUktkWTNvVkkKliNEITxIOgjhab32y/HzOaGduViPcEFi
+            f69Sk6URzgEv106Lk6+NNvsYzVnWj4/34NCz1tJah2GiWFmH3ZU25g==
+            -----END AGE ENCRYPTED FILE-----
+          recipient: age1pdqae3ffmt9rxtmn2758pxjqaaxnytg6mzx3wpepuhs7de2ttfkqk3z7hl
+    encrypted_regex: ^(data|stringData)$
+    lastmodified: "2026-10-27T10:51:11Z"
+    mac: ENC[AES256_GCM,data:wo3TlwB3r08mowbSMo1L5uBgc9l8EfqGF7HsRSIM86P+kIIJzVu/yW3mwOgIn4qpkf3hMU0+R5MRF4VvJfu1v66OaYoCcGxAHpG0JvD0baBiBOE3Z4URvnVxzRDFHVuLZRlUfFt+TNEWdTG5aRLPFZAns3C6WKvJmi3C530GTjw=,iv:zwO7MrNSeztvEtT/+ddVvPkaQDqM1HVa7UvFq2Ck2q0=,tag:Ws6vR2+Gp74xIsjMKQoDOQ==,type:str]
+    version: 3.13.3

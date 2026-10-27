@@ -42,26 +42,34 @@ spec:
       containers:
         - name: goose
           image: harbor.yral.com/library/goose@sha256:69bf6845998306af39ef1647f01b2429d0da5aaae0cbe371761c185b15bb4c5f
+          workingDir: /home/goose/workspace
           args:
-            - roam
-            - share
-            - --cwd
-            - /home/goose/workspace
+            - serve
+            - --platform
+            - desktop
+            - --host
+            - 0.0.0.0
+            - --port
+            - "3284"
+            - --roam
+          ports:
+            - name: acp
+              containerPort: 3284
           envFrom:
             - configMapRef:
                 name: goose-runtime
             - secretRef:
                 name: goose-credentials
+            - secretRef:
+                name: goose-desktop-auth
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
               drop: [ALL]
           readinessProbe:
-            exec:
-              command:
-                - /bin/sh
-                - -ec
-                - test -s /home/goose/.local/share/goose/roam/serve.lock
+            httpGet:
+              path: /status
+              port: acp
           volumeMounts:
             - name: home
               mountPath: /home/goose

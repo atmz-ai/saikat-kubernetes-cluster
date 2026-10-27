@@ -12,3 +12,6 @@ spec:
     - group: ""
       kind: Service
       name: goose-browser
+    - group: ""
+      kind: Service
+      name: goose
