@@ -8,14 +8,13 @@ spec:
   chart:
     spec:
       chart: cilium
-      version: "1.20.2"
+      version: "1.20.4"
       sourceRef:
         kind: HelmRepository
         name: cilium
         namespace: kube-system
-  # Upgrade strategy: never uninstall on failure — Cilium is CNI, pulling it
-  # out would take down all pod networking. Instead, retry the upgrade.
-  # 15m timeout: Cilium DaemonSet rolling update across all nodes takes >5m.
+  # ! Never uninstall Cilium on upgrade failure; it owns pod networking.
+  # * Previous cross-node rolling upgrades exceeded five minutes.
   timeout: 15m
   upgrade:
     remediation:
@@ -23,6 +22,10 @@ spec:
   rollback:
     force: true
   values:
+    # ! The serial rollout policy overrides the chart's two-unavailable-agent default.
+    updateStrategy:
+      rollingUpdate:
+        maxUnavailable: 1
     cluster:
       name: yral-k8s-cluster
       id: 1
@@ -82,32 +85,17 @@ spec:
     # Cloudflare proxy connects to origin port 443 → hits these pods on every CP node.
     gatewayAPI:
       enabled: true
-      # `experimentalChannel: true` was set because TLSRoute was an experimental-
-      # only resource. As of Cilium 1.20 (running v1.20.2), TLSRoute is a
-      # first-class supported resource on the STANDARD channel — Cilium 1.20
-      # documents support for Gateway API v1.6.1 across GatewayClass, Gateway,
-      # HTTPRoute, GRPCRoute, TLSRoute, BackendTLSPolicy, ReferenceGrant,
-      # ListenerSet, TCPRoute and UDPRoute, all on standard.
-      #
-      # It is left true for now rather than flipped without verification: Cilium
-      # with this flag set installs the experimental bundle, while our Flux
-      # gateway-api kustomization installs the standard bundle at v1.6.2. Both
-      # currently converge on v1.6.2 and the Cilium HelmRelease reports
-      # Ready/UpgradeSucceeded, so there is no active conflict — but the
-      # combination is untidy and the two sources should be made to agree.
-      #
-      # When flipping to the standard channel, note the upstream
-      # safe-upgrades ValidatingAdmissionPolicy (installed by the standard bundle
-      # and NOT by the experimental one) will then be present and will actively
-      # DENY an experimental CRD being applied over a standard one — i.e. it
-      # enforces the direction of travel. Verify TLSRoute objects stay Accepted
-      # and ResolvedRefs after the change.
+      # ! Preserve the existing CRD channel during this patch upgrade.
+      # ? A separate channel migration must verify stored TLSRoute API versions.
       experimentalChannel: true
       hostNetwork:
         enabled: true
 
     envoy:
       enabled: true
+      updateStrategy:
+        rollingUpdate:
+          maxUnavailable: 1
       # Required for hostNetwork mode with privileged ports (80, 443 < 1024).
       # Without NET_BIND_SERVICE, Envoy cannot bind to ports <= 1023.
       # ref: https://docs.cilium.io/en/v1.19/network/servicemesh/gateway-api/host-network-mode/#bind-to-privileged-port
