@@ -20,3 +20,12 @@ spec:
     - name: networking
     - name: infrastructure-longhorn
     - name: infrastructure-harbor
+    - name: infrastructure-kubevirt
+    - name: infrastructure-containerized-data-importer
+  healthCheckExprs:
+    - apiVersion: kubevirt.io/v1
+      kind: VirtualMachine
+      current: status.ready
+    - apiVersion: cdi.kubevirt.io/v1beta1
+      kind: DataVolume
+      current: status.phase == 'Succeeded'

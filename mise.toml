@@ -686,6 +686,22 @@ application = list(yaml.safe_load_all(subprocess.check_output(["kubectl", "kusto
 goose = next(item for item in application if item["kind"] == "Deployment" and item["metadata"]["name"] == "goose")
 assert [item["name"] for item in goose["spec"]["template"]["spec"]["containers"]] == ["goose"]
 print("PASS: operator bootstrap preserves the existing Goose container", flush=True)
+role = Path("ansible/roles/goose")
+defaults = yaml.safe_load((role / "defaults/main.yml").read_text())
+expected = Environment(undefined=StrictUndefined).from_string((role / "templates/workstation-root-disk.yaml.j2").read_text()).render(**defaults)
+root_disk = next(item for item in application if item["kind"] == "DataVolume" and item["metadata"]["name"] == "goose-workstation-root")
+assert yaml.safe_load(expected) == root_disk
+assert root_disk["metadata"]["annotations"]["kustomize.toolkit.fluxcd.io/prune"] == "disabled"
+virtual_machine = next(item for item in application if item["kind"] == "VirtualMachine" and item["metadata"]["name"] == "goose-workstation")
+volumes = virtual_machine["spec"]["template"]["spec"]["volumes"]
+assert not any(item.get("persistentVolumeClaim", {}).get("claimName") == "goose-home" for item in volumes)
+config_reference = next(item["configMap"]["name"] for item in volumes if "configMap" in item)
+assert any(item["kind"] == "ConfigMap" and item["metadata"]["name"] == config_reference for item in application)
+cloud_init = yaml.safe_load(next(item["cloudInitNoCloud"]["userData"] for item in volumes if "cloudInitNoCloud" in item))
+assert cloud_init["ssh_pwauth"] is False
+assert cloud_init["users"][0]["uid"] == 1000
+assert "PermitRootLogin no" in cloud_init["write_files"][0]["content"]
+print("PASS: staged VM pins its root disk, preserves existing home data, and resolves bootstrap configuration", flush=True)
 '''
 
 [tasks.goose-build-workflow-check]
@@ -750,6 +766,10 @@ try:
   public = subprocess.check_output(["ssh-keygen", "-y", "-P", "", "-f", "/proc/" + str(os.getpid()) + "/fd/" + str(descriptor)], text=True)
   assert public.startswith("ssh-ed25519 ")
   print("PASS: canonical private key parses as an Ed25519 identity without output framing")
+  virtual_machine = yaml.safe_load((root / "workstation.yaml").read_text())
+  cloud_init = yaml.safe_load(next(volume["cloudInitNoCloud"]["userData"] for volume in virtual_machine["spec"]["template"]["spec"]["volumes"] if "cloudInitNoCloud" in volume))
+  assert cloud_init["users"][0]["ssh_authorized_keys"][0].split()[:2] == public.split()[:2]
+  print("PASS: VM authorizes exactly the canonical machine-access identity")
 finally:
   os.close(descriptor)
 environment = dict(os.environ)

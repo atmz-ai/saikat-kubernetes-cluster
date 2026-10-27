@@ -1,0 +1,6 @@
+nameReference:
+  - kind: ConfigMap
+    fieldSpecs:
+      - kind: VirtualMachine
+        group: kubevirt.io
+        path: spec/template/spec/volumes/configMap/name

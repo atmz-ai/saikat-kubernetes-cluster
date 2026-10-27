@@ -1,0 +1,20 @@
+apiVersion: cdi.kubevirt.io/v1beta1
+kind: DataVolume
+metadata:
+  name: goose-workstation-root
+  namespace: goose
+  annotations:
+    kustomize.toolkit.fluxcd.io/prune: disabled
+spec:
+  source:
+    http:
+      url: https://cloud-images.ubuntu.com/releases/{{ goose_virtual_machine_image_release }}/release-{{ goose_virtual_machine_image_build }}/ubuntu-{{ goose_virtual_machine_image_release }}-server-cloudimg-amd64.img
+      checksum: sha256:{{ goose_virtual_machine_image_sha256 }}
+  storage:
+    accessModes:
+      - ReadWriteOnce
+    volumeMode: Filesystem
+    storageClassName: longhorn
+    resources:
+      requests:
+        storage: 80Gi

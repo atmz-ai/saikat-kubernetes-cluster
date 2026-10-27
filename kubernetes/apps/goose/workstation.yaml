@@ -1,0 +1,104 @@
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: goose-workstation
+  namespace: goose
+spec:
+  runStrategy: Always
+  template:
+    metadata:
+      labels:
+        app: goose-workstation
+    spec:
+      domain:
+        cpu:
+          cores: 4
+        resources:
+          requests:
+            memory: 16Gi
+        devices:
+          disks:
+            - name: root-disk
+              disk:
+                bus: virtio
+            - name: cloud-init
+              disk:
+                bus: virtio
+            - name: ssh-host
+              serial: GOOSEHOSTKEY
+              disk:
+                bus: virtio
+            - name: machine-access
+              serial: GOOSEACCESS
+              disk:
+                bus: virtio
+            - name: ssh-config
+              serial: GOOSECONFIG
+              disk:
+                bus: virtio
+          interfaces:
+            - name: default
+              masquerade: {}
+      networks:
+        - name: default
+          pod: {}
+      readinessProbe:
+        guestAgentPing: {}
+      # ! Secret and ConfigMap ISO disks are boot snapshots, not live guest projections.
+      volumes:
+        - name: root-disk
+          dataVolume:
+            name: goose-workstation-root
+        - name: ssh-host
+          secret:
+            secretName: goose-ssh-host
+        - name: machine-access
+          secret:
+            secretName: goose-machine-access-ssh
+        - name: ssh-config
+          configMap:
+            name: goose-ssh-config
+        - name: cloud-init
+          cloudInitNoCloud:
+            userData: |
+              #cloud-config
+              hostname: goose-workstation
+              ssh_pwauth: false
+              disable_root: true
+              users:
+                - name: goose
+                  uid: 1000
+                  homedir: /home/goose
+                  shell: /bin/bash
+                  groups: [sudo]
+                  sudo: ALL=(ALL) NOPASSWD:ALL
+                  ssh_authorized_keys:
+                    - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIM/H7Jp2RgC1xtg1nyzpmhzOTmUz3n+PQPsk83BzUskg saikat-machine-access
+              packages:
+                - qemu-guest-agent
+              mounts:
+                - [/dev/disk/by-id/virtio-GOOSEHOSTKEY, /mnt/goose-ssh-host, auto, "ro", "0", "0"]
+                - [/dev/disk/by-id/virtio-GOOSEACCESS, /mnt/goose-machine-access, auto, "ro", "0", "0"]
+                - [/dev/disk/by-id/virtio-GOOSECONFIG, /mnt/goose-ssh-config, auto, "ro", "0", "0"]
+              write_files:
+                - path: /etc/ssh/sshd_config.d/10-goose-workstation.conf
+                  permissions: "0644"
+                  content: |
+                    AllowUsers goose
+                    PasswordAuthentication no
+                    KbdInteractiveAuthentication no
+                    PermitRootLogin no
+                    AllowTcpForwarding local
+                    AllowAgentForwarding no
+                    HostKey /etc/ssh/ssh_host_ed25519_key
+              runcmd:
+                - [install, -d, -o, goose, -g, goose, -m, "0700", /home/goose/.ssh]
+                - [install, -d, -o, goose, -g, goose, /home/goose/workspace]
+                - [install, -o, goose, -g, goose, -m, "0600", /mnt/goose-machine-access/ssh-privatekey, /home/goose/.ssh/id_ed25519]
+                - [install, -o, root, -g, root, -m, "0600", /mnt/goose-ssh-host/ssh_host_ed25519_key, /etc/ssh/ssh_host_ed25519_key]
+                - [install, -d, /etc/goose-ssh]
+                - [install, -m, "0644", /mnt/goose-ssh-config/ssh_config, /etc/goose-ssh/ssh_config]
+                - [install, -m, "0644", /mnt/goose-ssh-config/known_hosts, /etc/goose-ssh/known_hosts]
+                - [install, -m, "0644", /mnt/goose-ssh-config/gitconfig, /etc/gitconfig]
+                - [systemctl, restart, ssh]
+                - [systemctl, start, qemu-guest-agent]

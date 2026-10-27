@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: goose-workstation
+  namespace: goose
+spec:
+  selector:
+    app: goose-workstation
+  ports:
+    - name: ssh
+      port: 22
+      targetPort: 22
