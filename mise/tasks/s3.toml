@@ -1,0 +1,357 @@
+# ── Hetzner Object Storage maintenance ──────────────────────────────────────
+# Abort orphaned multipart uploads. These are NOT objects: they are incomplete
+# `CreateMultipartUpload` sessions whose chunks occupy billable space, are
+# invisible to every listing (`ls`, `du`, and the Hetzner console all miss
+# them), and block `DeleteBucket` forever. They accumulate here from
+# litestream-style continuous chunked writers that restart without ever
+# completing a session. Clearing them is a prerequisite for retiring a bucket.
+#
+# Why this is a task and not a one-liner: AbortMultipartUpload is a
+# one-per-upload API with NO batch form (DeleteObjects accepts only Key and
+# VersionId per object — there is no UploadId field), so parallelism is the
+# only lever available. Hetzner's Ceph RGW caps throughput at ~25 aborts/sec
+# regardless of worker count (measured: -j 64 and -j 200 both ~40s per 1000),
+# so the runtime is bound by server round-trips, not by local concurrency.
+#
+# Two AWS CLI behaviours this works around, both verified:
+#   * `--max-items 1000` AUTO-PAGINATES internally, so a pass really does
+#     collect 1000 uploads (a raw single page returns only ~260 for the same
+#     bucket). It also appends the pagination NextToken as a trailing line in
+#     --output text mode, which parses as a bogus single-field record.
+#   * hence the `awk -F'\t' 'NF==2'` filter: it keeps only genuine
+#     key<TAB>uploadId pairs and correctly reports 0 for a bucket with no
+#     pending uploads (without it, an empty bucket reports 1 phantom upload).
+#
+# Counts come from real per-abort exit statuses (the OK/FAIL echo is gated on
+# the abort's exit code), never from the number of records listed.
+#
+# Transient failures are expected and self-healing. postgres-1-backup produced
+# 320 failures in two chunks that ran ~5x slower than normal (255s and 236s vs
+# ~45s), then recovered on its own — the failed sessions are simply re-listed
+# by the next chunk and aborted there. The final abort count (0 remaining on a
+# re-run) is the real success signal, not the exit code: this task exits
+# non-zero if ANY abort ever failed, so a "task failed" line after a long run
+# usually just means re-run it (it is idempotent — a re-run over a clean bucket
+# reports 0 and exits 0).
+#
+# ── Retiring a bucket end-to-end (verified on postgres-1-backup) ────────────
+#   1. mise run s3-abort-multipart-uploads -- <bucket> <endpoint>   # this task
+#   2. delete the objects (s5cmd rm --recursive / rclone purge)
+#   3. s5cmd --endpoint-url <endpoint> rb s3://<bucket>
+#
+# Step 3 can fail with `BucketNotEmpty: 409` on a SINGLE object that LIST
+# reports but that does not actually exist — a Ceph RGW bucket-index entry whose
+# backing RADOS object is gone. It is not data loss work to recover: HeadObject
+# 404s, GetObject fails, and BOTH DeleteObject and the DeleteObjects batch path
+# (aws/s5cmd/rclone all tried) return success while the entry survives listing.
+# Versioning is off (`get-bucket-versioning` empty, the entry shows as a
+# Version with VersionId null), so there is no delete marker to clear.
+#
+# The repair is to make the index entry consistent by writing the key back,
+# after which a normal delete takes effect:
+#   printf 'repair' > /tmp/repair.txt
+#   aws s3api put-object --bucket <bucket> --key '<ghost key>' --body /tmp/repair.txt --endpoint-url <endpoint>
+#   aws s3api delete-object --bucket <bucket> --key '<ghost key>' --endpoint-url <endpoint>
+#   s5cmd --endpoint-url <endpoint> rb s3://<bucket>
+# (On postgres-1-backup the ghost was yral-ai-chat/yral_chat.db/0000/
+#  000000000000c81e-000000000000c81e.ltx — PUT then DELETE cleared it and the
+#  bucket deleted on the first try.)
+[s3-abort-multipart-uploads]
+description = "Abort orphaned multipart uploads on a bucket (usage: mise run s3-abort-multipart-uploads -- <bucket> [endpoint] [max_chunks] [jobs])"
+# ! The AWS_* names are set HERE, not in [env], so they exist only for this task
+# ! and cannot shadow real AWS credentials elsewhere in the repo.
+env = { AWS_ACCESS_KEY_ID = "{{env.HETZNER_S3_ACCESS_KEY_ID}}", AWS_SECRET_ACCESS_KEY = "${HETZNER_S3_SECRET_ACCESS_KEY:-}", AWS_ENDPOINT_URL = "{{env.HETZNER_S3_ENDPOINT}}", AWS_DEFAULT_REGION = "{{env.HETZNER_S3_REGION}}" }
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+
+bucket="${1:-}"
+endpoint="${2:-${AWS_ENDPOINT_URL:-}}"
+max_chunks="${3:-100000}"
+jobs="${4:-64}"
+
+if [ -z "$bucket" ] || [ -z "$endpoint" ]; then
+  echo "usage: mise run s3-abort-multipart-uploads -- <bucket> [endpoint] [max_chunks] [jobs]" >&2
+  exit 2
+fi
+
+mise run secrets-check -- HETZNER_S3_SECRET_ACCESS_KEY
+if [ -z "$AWS_SECRET_ACCESS_KEY" ]; then
+  echo "AWS_SECRET_ACCESS_KEY unavailable - run mise run bootstrap" >&2
+  exit 2
+fi
+
+workdir=$(mktemp -d)
+trap 'rm -rf "$workdir"' EXIT
+records="$workdir/records.tsv"
+results="$workdir/results.txt"
+
+total_aborted=0
+total_failed=0
+emptied=0
+started_at=$(date +%s)
+echo "bucket=$bucket endpoint=$endpoint jobs=$jobs max_chunks=$max_chunks"
+
+for ((chunk = 1; chunk <= max_chunks; chunk++)); do
+  if ! aws s3api list-multipart-uploads \
+      --bucket "$bucket" --max-items 1000 \
+      --query 'Uploads[].[Key,UploadId]' --output text \
+      --endpoint-url "$endpoint" > "$workdir/page.txt" 2> "$workdir/page.err"; then
+    echo "listing failed on chunk $chunk: $(cat "$workdir/page.err")" >&2
+    exit 1
+  fi
+
+  awk -F'\t' 'NF==2' "$workdir/page.txt" > "$records"
+  listed=$(wc -l < "$records" | tr -d ' ')
+
+  if [ "$listed" -eq 0 ]; then
+    echo "no pending multipart uploads - nothing left to abort"
+    emptied=1
+    break
+  fi
+
+  chunk_started=$(date +%s)
+  rush -j "$jobs" -d '\t' \
+    "aws s3api abort-multipart-upload --bucket $bucket --key {1} --upload-id {2} --endpoint-url $endpoint >/dev/null 2>&1 && echo OK || echo FAIL" \
+    < "$records" > "$results"
+  chunk_elapsed=$(( $(date +%s) - chunk_started ))
+
+  # grep -c exits 1 on zero matches, which set -e would treat as a failure
+  aborted=$(grep -c '^OK$' "$results" || true)
+  failed=$((listed - aborted))
+  total_aborted=$((total_aborted + aborted))
+  total_failed=$((total_failed + failed))
+
+  echo "chunk $chunk: listed=$listed aborted=$aborted failed=$failed | cumulative aborted=$total_aborted failed=$total_failed | chunk=${chunk_elapsed}s elapsed=$(( $(date +%s) - started_at ))s"
+done
+
+echo "=== DONE: aborted=$total_aborted failed=$total_failed elapsed=$(( $(date +%s) - started_at ))s ==="
+
+# Success is "no uploads remain", NOT "no abort ever failed". Transient
+# failures are expected (ChunkedEncoding/throttling under load) and self-heal:
+# the failed sessions are re-listed by a later chunk and aborted there. Gating
+# on total_failed would report a fully successful run as a task failure.
+if [ "$emptied" -eq 1 ]; then
+  if [ "$total_failed" -gt 0 ]; then
+    echo "note: $total_failed transient failures were recovered by later chunks"
+  fi
+  exit 0
+fi
+
+echo "stopped after $max_chunks chunks with uploads still pending - re-run to continue" >&2
+exit 1
+'''
+
+# Fully retire a bucket: abort orphaned multipart uploads, delete every object,
+# then delete the bucket. This is the three-step recipe from the note above,
+# collapsed into one command so a bucket can be reclaimed without remembering
+# the order or the Ceph ghost-object repair.
+#
+# Step 1 delegates to s3-abort-multipart-uploads rather than reimplementing the
+# chunked abort loop — that loop is the part with the accumulated hard-won
+# detail (the NextToken phantom record, the exit-code semantics), and it should
+# exist in exactly one place.
+#
+# Step 2 uses `s5cmd rm --all-versions "s3://bucket/*"`, NOT plain `rm`. Per
+# s5cmd's own help: `*` matches across `/` (so nested keys are included) and
+# --all-versions is documented as "delete all versions of all objects in the
+# bucket" — which is what clears old versions and delete markers. Plain `rm`
+# leaves those behind on a versioned bucket, and they block DeleteBucket at
+# step 3 just as surely as real objects do.
+#
+# Step 3 handles the Ceph RGW ghost index entry described in the note above: a
+# key that LIST reports but that does not exist (HeadObject 404s; every delete
+# path returns success while the entry survives listing). Any key still listed
+# after step 2 is exactly that case, so it is repaired by rewriting the key to
+# make the index entry consistent and then deleting it again.
+#
+# DESTRUCTIVE AND IRREVERSIBLE. Because a typo in a bucket name would destroy a
+# live bucket (this account holds e.g. a control-plane backup sink), the task
+# requires the bucket name to be typed back unless `-y` is passed for
+# non-interactive use, and it refuses outright when there is no TTY and no -y.
+[s3-retire-bucket]
+description = "Delete every object in a bucket and the bucket itself (edit bucket/url at the top of the task, then run)"
+# ! The AWS_* names are set HERE, not in [env], so they exist only for this task
+# ! and cannot shadow real AWS credentials elsewhere in the repo.
+env = { AWS_ACCESS_KEY_ID = "{{env.HETZNER_S3_ACCESS_KEY_ID}}", AWS_SECRET_ACCESS_KEY = "${HETZNER_S3_SECRET_ACCESS_KEY:-}", AWS_ENDPOINT_URL = "{{env.HETZNER_S3_ENDPOINT}}", AWS_DEFAULT_REGION = "{{env.HETZNER_S3_REGION}}" }
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ── edit these two ──────────────────────────────────────────────────────────
+bucket="CHANGE-ME"
+endpoint="https://fsn1.your-objectstorage.com"
+assume_yes=""
+# ────────────────────────────────────────────────────────────────────────────
+
+if [ "$bucket" = "CHANGE-ME" ]; then
+  echo "edit 'bucket' (and 'endpoint' if the bucket is not in fsn1) at the top of this task, then re-run" >&2
+  exit 2
+fi
+
+if [ -z "$bucket" ] || [ -z "$endpoint" ]; then
+  echo "bucket and endpoint must both be non-empty" >&2
+  exit 2
+fi
+
+mise run secrets-check -- HETZNER_S3_SECRET_ACCESS_KEY
+if [ -z "$AWS_SECRET_ACCESS_KEY" ]; then
+  echo "AWS_SECRET_ACCESS_KEY unavailable - run mise run bootstrap" >&2
+  exit 2
+fi
+
+# aws-cli's interactive pager hijacks output into the alternate buffer, which
+# hides everything this task prints.
+export AWS_PAGER=""
+
+echo "bucket=$bucket endpoint=$endpoint"
+
+if [ "$assume_yes" != "-y" ] && [ "$assume_yes" != "--yes" ]; then
+  echo "This PERMANENTLY deletes every object in '$bucket' and then the bucket itself."
+  if [ ! -t 0 ]; then
+    echo "refusing: no TTY to confirm on - pass -y as the third argument to proceed non-interactively" >&2
+    exit 2
+  fi
+  read -r -p "Type the bucket name to confirm: " typed
+  if [ "$typed" != "$bucket" ]; then
+    echo "aborted - '$typed' does not match '$bucket'" >&2
+    exit 2
+  fi
+fi
+
+echo "=== step 1/3: abort orphaned multipart uploads ==="
+mise run s3-abort-multipart-uploads -- "$bucket" "$endpoint"
+
+echo "=== step 2/3: delete all object versions ==="
+# s5cmd is run DIRECTLY, not captured into a shell variable: capturing adds a
+# second, larger buffer on top of the tool's own, so a long delete prints nothing
+# until it finishes and the operator cannot follow along at all.
+#
+# Output is left at s5cmd's default verbosity (one line per deleted object) and
+# must never be quieted with --log error. Note that s5cmd buffers its own stdout
+# internally, so on a long delete the lines arrive in bursts rather than
+# instantly — that is the tool's behaviour, not something added here. For a
+# definitive liveness check while it runs, confirm the first listed key is
+# advancing: `aws s3api list-objects-v2 --bucket <b> --max-keys 1`. The complete
+# per-object log is emitted by the time the command returns.
+#
+# s5cmd rm exits 1 with "no object found" when the pattern matches nothing, which
+# is the normal case for an already-empty bucket (e.g. its only content was the
+# uploads step 1 just aborted). That is not fatal, so the exit code is reported
+# and the task continues to step 3, whose `rb` is the real gate: DeleteBucket
+# fails with BucketNotEmpty if any object or version survived, so a genuine
+# deletion failure still fails the task — with s5cmd's own error already visible
+# in the log above it.
+set +e
+s5cmd --endpoint-url "$endpoint" rm --all-versions "s3://$bucket/*"
+rm_status=$?
+set -e
+if [ "$rm_status" -ne 0 ]; then
+  echo "note: s5cmd rm exited $rm_status (an empty bucket reports 'no object found'); step 3 verifies"
+fi
+
+# Anything still listed after an --all-versions delete is a ghost index entry
+# (see the note on s3-abort-multipart-uploads above). Rewrite then delete.
+#
+# list-objects-v2 --output text emits the literal string "None" when the bucket
+# has no objects left, so it must be filtered out — otherwise the repair loop
+# "repairs" a key literally named None (a spurious PUT+DELETE on every run).
+# stderr is NOT redirected: if the listing fails, the reason should be visible in
+# the log rather than swallowed (the task still fails at step 3's verification).
+workdir=$(mktemp -d)
+trap 'rm -rf "$workdir"' EXIT
+aws --no-cli-pager s3api list-objects-v2 --bucket "$bucket" \
+  --query 'Contents[].Key' --output text \
+  --endpoint-url "$endpoint" | grep -vx 'None' > "$workdir/remaining.txt" || true
+
+repaired=0
+while IFS= read -r key; do
+  [ -z "$key" ] && continue
+  printf 'repair' > "$workdir/placeholder"
+  aws --no-cli-pager s3api put-object --bucket "$bucket" --key "$key" \
+    --body "$workdir/placeholder" --endpoint-url "$endpoint" >/dev/null 2>&1
+  aws --no-cli-pager s3api delete-object --bucket "$bucket" --key "$key" \
+    --endpoint-url "$endpoint" >/dev/null 2>&1
+  echo "  repaired ghost object: $key"
+  repaired=$((repaired + 1))
+done < "$workdir/remaining.txt"
+[ "$repaired" -gt 0 ] && echo "  repaired $repaired ghost object(s)"
+
+echo "=== step 3/3: delete the bucket ==="
+# Retried on BucketNotEmpty because that 409 is EXPECTED, not an error, right
+# after a mass version delete: Ceph's bucket index lags the deletions, so for a
+# short window every listing reports the bucket empty while DeleteBucket still
+# refuses. Verified on ansuman-yral — after deleting ~395k versions, all three
+# listings showed 0 objects / 0 versions / 0 delete markers yet `rb` returned
+# BucketNotEmpty; it exited 0 on the next attempt with nothing else changed.
+#
+# Every attempt is logged. The loop is bounded so a genuinely non-empty bucket
+# still fails the task (a real leftover — e.g. an object the ghost-repair above
+# could not clear — reports the same 409 every time).
+rb_attempt=1
+rb_max_attempts=10
+rb_delay_seconds=6
+while :; do
+  echo "  rb attempt $rb_attempt/$rb_max_attempts"
+  if s5cmd --endpoint-url "$endpoint" rb "s3://$bucket"; then
+    break
+  fi
+  if [ "$rb_attempt" -ge "$rb_max_attempts" ]; then
+    echo "bucket '$bucket' could not be deleted after $rb_max_attempts attempts" >&2
+    exit 1
+  fi
+  rb_attempt=$((rb_attempt + 1))
+  sleep "$rb_delay_seconds"
+done
+
+if aws --no-cli-pager s3api head-bucket --bucket "$bucket" --endpoint-url "$endpoint" >/dev/null 2>&1; then
+  echo "bucket '$bucket' still exists - deletion did not take effect" >&2
+  exit 1
+fi
+echo "=== DONE: '$bucket' retired (every object deleted, bucket removed) ==="
+'''
+
+# ── General Hetzner Object Storage task ─────────────────────────────────────
+# The most common one-off: a command against a specific bucket in a specific
+# location. Set `bucket` and `url` at the top, set the command in the marked
+# line, then run — nothing is passed as a positional argument, so the target is
+# visible in the file on every run.
+#
+# `url` is explicit rather than inherited from HETZNER_S3_ENDPOINT because the
+# default is a SINGLE location (fsn1) while buckets live where they were created
+# (fsn1 / hel1 / nbg1 ...) — see the aws-cli note in [tools] above. The
+# --endpoint-url "$url" below targets the bucket's real location regardless of
+# the default.
+[s3-hetzner]
+description = "One-off Hetzner Object Storage command — edit bucket/url/command at the top of the task, then run"
+# ! The AWS_* names are set HERE, not in [env], so they exist only for this task
+# ! and cannot shadow real AWS credentials elsewhere in the repo.
+env = { AWS_ACCESS_KEY_ID = "{{env.HETZNER_S3_ACCESS_KEY_ID}}", AWS_SECRET_ACCESS_KEY = "${HETZNER_S3_SECRET_ACCESS_KEY:-}", AWS_ENDPOINT_URL = "{{env.HETZNER_S3_ENDPOINT}}", AWS_DEFAULT_REGION = "{{env.HETZNER_S3_REGION}}" }
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ── edit these two ──────────────────────────────────────────────────────────
+bucket="CHANGE-ME"
+url="https://fsn1.your-objectstorage.com"
+# ────────────────────────────────────────────────────────────────────────────
+
+mise run secrets-check -- HETZNER_S3_SECRET_ACCESS_KEY
+if [ -z "$AWS_SECRET_ACCESS_KEY" ]; then
+  echo "AWS_SECRET_ACCESS_KEY unavailable - run mise run bootstrap" >&2
+  exit 2
+fi
+
+# aws-cli's interactive pager hijacks output into the alternate buffer.
+export AWS_PAGER=""
+
+if [ "$bucket" = "CHANGE-ME" ]; then
+  echo "edit 'bucket' (and 'url' if the bucket is not in fsn1) at the top of this task, then re-run" >&2
+  exit 2
+fi
+
+echo "bucket=$bucket url=$url"
+
+# ── edit this command for the operation you want ────────────────────────────
+aws --no-cli-pager s3 ls "s3://$bucket" --endpoint-url "$url"
+'''

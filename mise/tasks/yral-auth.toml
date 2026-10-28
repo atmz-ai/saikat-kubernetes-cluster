@@ -1,0 +1,114 @@
+# ── yral-auth ────────────────────────────────────────────────────────────────
+
+[yral-auth-build]
+description = "Build yral-auth (release + WASM client). Linux/WSL: musl x86_64 (mimics prod). macOS: native arm64."
+dir = "apps/yral-auth"
+run = '''
+if [[ "$(uname)" == "Darwin" ]]; then
+  cargo leptos build --release --lib-features release-lib --bin-features release-bin
+else
+  LEPTOS_BIN_TARGET_TRIPLE=x86_64-unknown-linux-musl \
+    cargo leptos build --release --lib-features release-lib --bin-features release-bin
+fi
+'''
+
+[yral-auth-run]
+description = "Run yral-auth locally (release binary, port 8080)"
+depends = ["yral-auth-build"]
+daemons = ["yral-auth"]
+run = "echo 'yral-auth daemon started (mise daemons logs yral-auth to follow)'"
+
+[yral-auth-test]
+description = "Run yral-auth tests with the authenticated local SpacetimeDB server"
+dir = "apps/yral-auth"
+daemons = ["spacetimedb-dev"]
+env = { SPACETIMEDB_URL = "http://127.0.0.1:3000" }
+run = ["mise run secrets-check -- JWT_EC_PEM", "cargo test --features ssr --bins --lib -- --test-threads=1"]
+
+# ── Local image builds: runtime + builder sizing (all *-image tasks) ─────────
+# Every `<app>-image` task is OS-conditional:
+#   macOS  → `container build` (Apple's CLI)
+#   Linux  → `podman build`
+#
+# SIZING IS REQUIRED ON macOS — the builder VM default (2 CPUs / 2048 MB) OOMs.
+# Measured 2026-09-24 on this repo's Leptos image (Apple CLI 1.4.1): at the
+# default, `cargo leptos build` failed with
+#     error: could not compile `syn`  (signal: 9, SIGKILL: kill)
+#     Error: resourceExhausted: ... process ... did not complete successfully:
+#            cannot allocate memory
+# The image compiles ~200 crates to two targets (WASM front + musl server), so
+# the default genuinely cannot build it. Current setting:
+#     --cpus 17     all but one of the host's 18 cores
+#     --memory 40gb 8 GB spare of the host's 48 GB
+#
+# VERIFIED 2026-09-24 at this setting: build succeeded (529 s), peak 46 GB used /
+# 7603 MB compressor, swap 0, swapfiles 0 — no panic. An earlier version of this
+# setting had panicked the host ("watchdog timeout: no checkins from watchdogd in
+# 90 seconds"), but that was caused by the build CONTEXT: `.dockerignore` used
+# `**`-globs that `container build` does not apply, so ~15 GB was transferred and
+# pushed the host into memory-compressor/swap thrash. With the context fixed
+# (66 MB) the memory pressure is gone and the near-total allocation is safe.
+# If the host ever becomes unresponsive, drop to `--cpus 8 --memory 24gb`.
+#
+# NOT the cause of slow builds: build start-up latency (a ~80 s stall reported as
+# "transferring dockerfile") is the CONTEXT TREE WALK, not the VM size. That is
+# fixed by .dockerignore using explicit paths (15 GB → 66 MB). The two problems
+# are independent; the flags are for OOM, not speed.
+#
+# The values are duplicated across the five tasks on purpose — one line to change
+# per task beats an indirection for five call sites.
+#
+# BuildKit's layer CACHE lives inside the builder VM and GROWS across builds; no
+# flag caps it. If a build ever fails for disk, clear the cache
+# (`container builder delete`, then re-run) — the next build rebuilds it.
+
+[yral-auth-image]
+description = "Build the yral-auth container image locally (container on macOS, podman on Linux)"
+depends = ["container-system-start"]
+run = '''
+if [[ "$(uname)" == "Darwin" ]]; then
+  exec container build -f apps/yral-auth/Dockerfile.buildkit -t test/yral-auth --platform linux/amd64 --cpus 17 --memory 40gb .
+else
+  exec podman build -f apps/yral-auth/Dockerfile.buildkit -t test/yral-auth --platform linux/amd64 .
+fi
+'''
+
+[yral-auth-image-run]
+description = "Run the yral-auth container image locally (podman, port 8080)"
+depends = ["yral-auth-image"]
+daemons = ["yral-auth-container"]
+run = "echo 'yral-auth-container daemon started (mise daemons logs yral-auth-container to follow)'"
+
+[yral-auth-stop]
+description = "Stop yral-auth dev server and container"
+run = "mise daemons stop yral-auth yral-auth-container"
+
+[yral-auth-all]
+description = "Full yral-auth workflow: build → test → image → image-run → validate → stop"
+run = '''
+mise run yral-auth-build
+mise run yral-auth-run
+mise run yral-auth-test
+mise run yral-auth-image
+mise run yral-auth-image-run
+'''
+
+[yral-auth-validate]
+description = "Validate yral-auth on prod (read-only kubectl checks)"
+run = '''
+echo "=== Pods ==="
+kubectl -n yral-auth get pods -l app=yral-auth -o wide
+echo ""
+echo "=== Health ==="
+kubectl -n yral-auth get pods -l app=yral-auth -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.containerStatuses[0].ready}{"\n"}{end}'
+echo ""
+echo "=== Recent logs (last 20 lines, first pod) ==="
+FIRST_POD=$(kubectl -n yral-auth get pods -l app=yral-auth -o jsonpath='{.items[0].metadata.name}')
+kubectl -n yral-auth logs "$FIRST_POD" --tail=20
+'''
+
+[test-spacetime-jwt]
+description = "Run JWT-to-SpacetimeDB identity integration tests with the local authenticated server"
+dir = "apps/yral-auth"
+daemons = ["spacetimedb-dev"]
+run = ["mise run secrets-check -- JWT_EC_PEM", "cargo test -p yral-auth --features ssr spacetime::integration_tests -- --test-threads=1"]

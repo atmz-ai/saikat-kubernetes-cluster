@@ -1,0 +1,65 @@
+# ─── my-website (Leptos SSR app, islands architecture) ────────────────────────
+
+[my-website-build]
+description = "Build my-website (release + WASM client). Linux/WSL: musl x86_64 (mimics prod). macOS: native arm64."
+dir = "apps/my-website"
+run = '''
+if [[ "$(uname)" == "Darwin" ]]; then
+  cargo leptos build --release
+else
+  LEPTOS_BIN_TARGET_TRIPLE=x86_64-unknown-linux-musl \
+    cargo leptos build --release
+fi
+'''
+
+[my-website-run]
+description = "Run my-website locally (release binary, port 8081)"
+depends = ["my-website-build"]
+daemons = ["my-website"]
+run = "echo 'my-website daemon started (mise daemons logs my-website to follow)'"
+
+[my-website-watch]
+description = "Run my-website with hot reload via cargo leptos watch (debug, port 8080)"
+dir = "apps/my-website"
+run = "cargo leptos watch --hot-reload"
+env = { LEPTOS_SITE_ADDR = "0.0.0.0:8080" }
+
+[my-website-test]
+description = "Run my-website tests"
+dir = "apps/my-website"
+run = "cargo test --features ssr --bins --lib"
+
+[my-website-image]
+description = "Build the my-website container image locally (container on macOS, podman on Linux)"
+depends = ["container-system-start"]
+run = '''
+if [[ "$(uname)" == "Darwin" ]]; then
+  exec container build -f apps/my-website/Dockerfile.buildkit -t test/my-website --platform linux/amd64 --cpus 17 --memory 40gb .
+else
+  exec podman build -f apps/my-website/Dockerfile.buildkit -t test/my-website --platform linux/amd64 .
+fi
+'''
+
+[my-website-image-run]
+description = "Run the my-website container image locally (podman, port 8080)"
+depends = ["my-website-image"]
+daemons = ["my-website-container"]
+run = "echo 'my-website-container daemon started (mise daemons logs my-website-container to follow)'"
+
+[my-website-stop]
+description = "Stop my-website dev server and container"
+run = "mise daemons stop my-website my-website-container"
+
+[my-website-validate]
+description = "Validate my-website on prod (read-only kubectl checks)"
+run = '''
+echo "=== Pods ==="
+kubectl -n my-website get pods -l app=my-website -o wide
+echo ""
+echo "=== Health ==="
+kubectl -n my-website get pods -l app=my-website -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.containerStatuses[0].ready}{"\n"}{end}'
+echo ""
+echo "=== Recent logs (last 20 lines, first pod) ==="
+FIRST_POD=$(kubectl -n my-website get pods -l app=my-website -o jsonpath='{.items[0].metadata.name}')
+kubectl -n my-website logs "$FIRST_POD" --tail=20
+'''

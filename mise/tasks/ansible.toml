@@ -1,0 +1,22 @@
+[ansible-vault-decrypt]
+description = "Decrypt ansible/inventory/group_vars/all/vault.yml for editing"
+run = "./.venv/bin/ansible-vault decrypt ansible/inventory/group_vars/all/vault.yml"
+
+[ansible-vault-encrypt]
+description = "Re-encrypt ansible/inventory/group_vars/all/vault.yml after editing"
+run = "./.venv/bin/ansible-vault encrypt ansible/inventory/group_vars/all/vault.yml"
+
+[ansible-vault-view]
+description = "View a value from Ansible vault (usage: mise run ansible-vault-view -- <yaml key>)"
+run = '''
+./.venv/bin/ansible-vault view ansible/inventory/group_vars/all/vault.yml | \
+  ./.venv/bin/python -c "import sys, yaml; print(yaml.safe_load(sys.stdin)[sys.argv[1]])" "$@"
+'''
+
+[ansible-playbook]
+description = "Run an Ansible playbook (usage: mise run ansible-playbook -- ansible/playbooks/operations/<playbook>.yml [-e target_host=...])"
+run = "./.venv/bin/ansible-playbook"
+
+[ansible-lint]
+description = "Lint Ansible playbooks, roles and manifests (ansible-lint on ansible/playbooks/operations/ + ansible/manifests/)"
+run = "./.venv/bin/ansible-lint ansible/playbooks/operations/ ansible/manifests/"

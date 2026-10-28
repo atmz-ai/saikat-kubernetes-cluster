@@ -495,7 +495,7 @@ DNS is self-hosted, not Cloudflare. PowerDNS Authoritative runs from `kubernetes
 **Apex records are owned by `pdnsutil`, never by external-dns.** external-dns structurally cannot manage a zone apex: it never writes an ownership marker for an apex name (the name would be valid — `a-saikat.dev` — it is simply never emitted), so `plan.go` drops the apex from **both** creates and updates, and no record type can ever be converged there through a DNSEndpoint. The failure is silent — external-dns logs "Reconciliation succeeded". Tracked upstream as kubernetes-sigs/external-dns#6125 (with our independent confirmation on the issue). Consequence: the bare apex A + NS rrsets for every zone live in the GENERATED `kubernetes/infrastructure/external-dns/pdns-apex-records.yaml`, applied by the `pdns-zones` role with `pdnsutil rrset replace`. That role runs as the second play of `add-node` / `remove-node`, so node churn converges the apex automatically — a new node reaches the apex A records, and a removed node drops out of them. Its ConfigMap and Job are named by a content checksum, so a changed node set is a NEW Job that Flux creates (and prunes the previous one): no manual `kubectl delete job`, no `--force` on the Kustomization. **Never** declare an apex record in a DNSEndpoint (a declaration nothing acts on), and **never** hand-write the apex records or their ownership marker — regenerate from the inventory instead.
 
 ### Local Environment & Parity
-The root `mise.toml` is the single source of truth for tool versions, task orchestration, plaintext environment values, age-encrypted local secrets, and daemon definitions. Do not add per-application tooling or secret configuration files. Keep application-specific values beside their existing root declarations.
+The root `mise.toml` is the single source of truth for tool versions, plaintext environment values, age-encrypted local secrets, and daemon definitions. Task definitions live in owner-scoped `mise/tasks/<owner>.toml` files, selected explicitly by root `[task_config].includes`. Do not add per-application tooling or secret configuration files. Keep application-specific values beside their existing root declarations.
 
 **mise (not direnv)** manages tools and environment values. Local secrets are native age values under root `[env]`, committed as ciphertext. No `.env` file is generated or loaded.
 
@@ -524,7 +524,9 @@ For multiline or Base64 input, use `--stdin` instead of `--prompt`, keeping plai
 **Shared:**
 - Ansible vault remains the source for cluster-ops secrets; roles consume `vault_*` variables directly. This local-secret consolidation does not migrate Kubernetes SOPS or Ansible vault into mise.
 
-**Repeated workflow tasks live in `mise.toml`, not bash scripts.** Reusable setup, build, test, and run workflows are `mise` tasks (`mise tasks` to list). `scripts/setup-local-env.sh` is a thin `exec mise run setup` wrapper for compatibility only — do not add logic there. New recurring workflow steps belong in a new or updated mise task; one-off commands do not require one. Never create bespoke bash scripts for repo workflows.
+**Repeated workflow tasks live in `mise/tasks/<owner>.toml`, not bash scripts.** Reusable setup, build, test, and run workflows are `mise` tasks (`mise tasks` to list). `scripts/setup-local-env.sh` is a thin `exec mise run setup` wrapper for compatibility only — do not add logic there. New recurring workflow steps belong in a new or updated mise task; one-off commands do not require one. Never create bespoke bash scripts for repo workflows.
+
+**Task catalogs use mise's [included TOML format](https://mise.jdx.dev/tasks/task-discovery.html#included-toml-files):** write `[<task-name>]`, not `[tasks.<task-name>]`. Preserve app-prefixed task names. Included tasks inherit the root tools, environment, variables, and project working directory; retain explicit `dir` overrides. Register new catalogs in root `task_config.includes`; top-level `include` does not accept tasks. Code inspecting task declarations must read the selected catalogs rather than assume root `[tasks]` exists.
 
 **Prefer existing mise tasks for recurring workflows.** Use the corresponding `mise run` task when its environment, secrets, dependency chain, or safety checks are needed. One-off tooling commands may run directly with the necessary prerequisites; do not create a task just to run them once.
 
@@ -544,11 +546,12 @@ For multiline or Base64 input, use `--stdin` instead of `--prompt`, keeping plai
 This ensures `mise bootstrap --yes && mise run setup` is the only command needed to go from a fresh machine to a working environment.
 
 **Per-service local dev convention (all services):** Every maintained service uses the root `mise.toml`, without per-application tooling, secret, or daemon config files:
-- **Tasks and plaintext env vars** → root `mise.toml` (app-specific env vars grouped by `# ── <app> ──` comment headers in `[env]`; tasks use `<app>-` prefix)
+- **Tasks** → `mise/tasks/<app>.toml`, selected by root `task_config.includes`; tasks use `<app>-` prefix.
+- **Plaintext env vars** → root `mise.toml` (app-specific env vars grouped by `# ── <app> ──` comment headers in `[env]`).
 - **Secrets** → root `mise.toml [env]` native age values; prefix names by their owner where needed.
 - **Long-running dev servers** → root `mise.toml` `[daemons]` (ready checks, restart policies); each `<app>-run` task declares `daemons = ["<app>"]`
 - Reuse shared secret definitions across services rather than duplicating their values.
-- Onboard service environment values, age secrets, build/test/run/image tasks, and its daemon in root `mise.toml`. Run tasks declare only the daemons they require.
+- Onboard service environment values, age secrets, and its daemon in root `mise.toml`; build/test/run/image tasks belong in its selected task catalog. Run tasks declare only the daemons they require.
 
 ### SpacetimeDB Usage Rules
 

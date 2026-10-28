@@ -1,0 +1,238 @@
+[python-setup]
+description = "Install the repository's declared Python tooling without provisioning credentials"
+run = "python -m venv .venv && ./.venv/bin/pip install --upgrade pip && ./.venv/bin/pip install -e ."
+
+[workspace-setup]
+description = "Install workspace tools and build dependencies without changing SSH identities or cluster credentials"
+run = "mise bootstrap packages apply --yes && mise install && mise run python-setup"
+
+[bootstrap]
+description = "Explicitly provision infrastructure credentials and initialize application submodules"
+depends = ["python-setup"]
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+
+./.venv/bin/ansible-galaxy collection install -r ansible/requirements.yml -p ansible/collections
+
+# Validate the vault password once, up front. A missing/empty/incorrect password
+# (e.g. GitHub PRs from Dependabot/Renovate, which never receive repo secrets)
+# must degrade to warn-and-skip below — NOT crash the whole bootstrap with a
+# traceback deep inside a Python one-liner.
+# Sets: bootstrap_vault_ok=true|false
+bootstrap_vault_ok=false
+if [ -s ansible/.vault_pass ] && \
+   ./.venv/bin/ansible-vault view ansible/inventory/group_vars/all/vault.yml --vault-password-file ansible/.vault_pass > /dev/null 2>&1; then
+  bootstrap_vault_ok=true
+  echo '  ✓ Vault password valid — ansible/.vault_pass decrypts the vault'
+else
+  echo '  ⚠ Vault password missing or does not decrypt ansible/inventory/group_vars/all/vault.yml'
+  echo '    → skipping ALL vault extractions (infra SSH key, kubeconfig, age identity).'
+  echo '    → CI runs from Dependabot/Renovate PRs are expected to land here (no secrets).'
+  echo '    → locally: check ansible/.vault_pass contains the real vault password.'
+fi
+
+# Extract saikat-machine-access SSH private key from Ansible vault → ./.saikat-machine-access-ed25519 (repo-local, gitignored)
+# * Used for age decryption and ansible.cfg (private_key_file), and installed
+# as the machine's default SSH identity below. Idempotent — skips if already present.
+if [ "$bootstrap_vault_ok" = true ] && [ ! -f .saikat-machine-access-ed25519 ]; then
+  ./.venv/bin/ansible-vault view ansible/inventory/group_vars/all/vault.yml --vault-password-file ansible/.vault_pass | \
+    ./.venv/bin/python -c "import sys, yaml; print(yaml.safe_load(sys.stdin)['vault_saikat_machine_access_ssh_private_key'])" \
+    > .saikat-machine-access-ed25519
+  chmod 600 .saikat-machine-access-ed25519
+  echo '  ✓ Extracted saikat-machine-access SSH key to .saikat-machine-access-ed25519'
+elif [ -f .saikat-machine-access-ed25519 ]; then
+  echo '  ✓ Saikat machine-access SSH key already at .saikat-machine-access-ed25519'
+fi
+
+# Install the saikat-machine-access SSH key as the machine's DEFAULT identity (~/.ssh/id_ed25519),
+# deliberately OVERWRITING any existing key (operator decision 2026-09-01: this
+# vault key is the adopted identity for everything — GitHub + every node provider;
+# see ansible/inventory/group_vars/all/vars.yml "single key for everything"). ssh,
+# git, and ansible then pick it up automatically — locally AND on the CI runner,
+# which is what lets the submodule clone below authenticate with no CI-specific
+# setup.
+if [ -f .saikat-machine-access-ed25519 ]; then
+  mkdir -p ~/.ssh && chmod 700 ~/.ssh
+  cp .saikat-machine-access-ed25519 ~/.ssh/id_ed25519
+  chmod 600 ~/.ssh/id_ed25519
+  # Regenerate the matching .pub — a stale .pub from a previous key makes SSH
+  # reject the pair ("contents do not match public").
+  ssh-keygen -y -f ~/.ssh/id_ed25519 > ~/.ssh/id_ed25519.pub
+  chmod 644 ~/.ssh/id_ed25519.pub
+  echo '  ✓ Installed saikat-machine-access SSH key as ~/.ssh/id_ed25519 (default machine identity)'
+fi
+
+# Initialize git submodules (app source repos). SSH URLs (git@github.com:...)
+# resolve via the default identity installed above. accept-new handles a fresh
+# CI runner (github.com not yet in known_hosts) while still refusing CHANGED
+# host keys (TOFU).
+GIT_SSH_COMMAND="ssh -o StrictHostKeyChecking=accept-new" git submodule update --init --recursive
+
+# Extract kubeconfig from Ansible vault → ~/.kube/config (idempotent — skips if already present)
+if [ "$bootstrap_vault_ok" = true ] && [ ! -f ~/.kube/config ]; then
+  mkdir -p ~/.kube
+  ./.venv/bin/ansible-vault view ansible/inventory/group_vars/all/vault.yml --vault-password-file ansible/.vault_pass | \
+    ./.venv/bin/python -c "import sys, yaml; print(yaml.safe_load(sys.stdin)['vault_kubeconfig'])" \
+    > ~/.kube/config
+  chmod 600 ~/.kube/config
+  echo '  ✓ Extracted kubeconfig to ~/.kube/config'
+elif [ -f ~/.kube/config ]; then
+  echo '  ✓ Kubeconfig already at ~/.kube/config'
+fi
+'''
+
+[workspace-bootstrap-check]
+description = "Regression-test credential-free workspace setup and task-scoped Goose credentials"
+run = '''
+#!/usr/bin/env -S ./.venv/bin/python
+import os
+from pathlib import Path
+import tomllib
+from unittest.mock import patch
+
+with open("mise.toml", "rb") as stream:
+  configuration = tomllib.load(stream)
+tasks = {}
+for filename in configuration["task_config"]["includes"]:
+  tasks.update(tomllib.loads(Path(filename).read_text()))
+assert "gcloud" not in configuration["tools"]
+assert configuration["tools"]["asdf:mise-plugins/mise-gcloud"]["depends"] == ["python"]
+print("PASS: workspace installation avoids the broken vfox gcloud backend", flush=True)
+assert "mise run bootstrap" not in tasks["workspace-setup"]["run"]
+assert "vault" not in tasks["python-setup"]["run"]
+assert "python-setup" in tasks["bootstrap"]["depends"]
+print("PASS: workspace setup does not provision infrastructure credentials", flush=True)
+script = compile(tasks["goose-serve"]["run"], "goose-serve", "exec")
+with patch.dict(os.environ, {"GOOSE_AZURE_FOUNDRY_API_KEY": "fixture-api-key", "GOOSE_DESKTOP_SECRET_KEY": "fixture-server-secret"}, clear=True), patch("os.execve") as execute:
+  exec(script, {})
+  executable, arguments, environment = execute.call_args.args
+  assert arguments[arguments.index("--host") + 1] == "127.0.0.1"
+  assert arguments[-1] == "--roam"
+  assert environment["AZURE_FOUNDRY_API_KEY"] == "fixture-api-key"
+  assert environment["GOOSE_SERVER__SECRET_KEY"] == "fixture-server-secret"
+  assert environment["GOOSE_PROVIDER"] == "azure_foundry"
+  assert "GIT_CONFIG_SYSTEM" not in environment
+print("PASS: Goose shares workspace tooling and maps credentials only at launch", flush=True)
+for missing in ["GOOSE_AZURE_FOUNDRY_API_KEY", "GOOSE_DESKTOP_SECRET_KEY"]:
+  fixture = {"GOOSE_AZURE_FOUNDRY_API_KEY": "fixture-api-key", "GOOSE_DESKTOP_SECRET_KEY": "fixture-server-secret"}
+  fixture.pop(missing)
+  with patch.dict(os.environ, fixture, clear=True), patch("os.execve") as execute:
+    try:
+      exec(script, {})
+    except SystemExit as error:
+      assert missing in str(error)
+    else:
+      raise AssertionError("Missing credentials must prevent startup")
+    execute.assert_not_called()
+  print("PASS: missing " + missing + " never starts Goose", flush=True)
+assert configuration["daemons"]["goose"]["ready_http"] == "http://127.0.0.1:3284/status"
+assert configuration["daemons"]["goose"]["init"] == ["mise run goose-build"]
+assert tasks["goose-run"]["daemons"] == ["goose"]
+assert "depends" not in tasks["goose-run"]
+print("PASS: the daemon builds Goose before launching or checking readiness", flush=True)
+assert "ansible" not in tasks["workstation-setup"]["run"]
+assert "goose-run" not in tasks["workstation-setup"]["run"]
+print("PASS: workstation setup stays mise-only and does not unexpectedly start Goose", flush=True)
+'''
+
+[setup]
+description = "Install system packages, repo toolchain, and Python tooling"
+run = "mise bootstrap packages apply --yes && mise install && mise run bootstrap && echo 'Environment is ready'"
+
+[secrets-check]
+description = "Verify requested age secrets are available without printing their values"
+run = '''
+#!/usr/bin/env python3
+import os
+import pathlib
+import sys
+import tomllib
+
+configuration = tomllib.loads((pathlib.Path("{{config_root}}") / "mise.toml").read_text())
+secret_names = sys.argv[1:] or [
+  name for name, value in configuration["env"].items()
+  if isinstance(value, dict) and "age" in value
+]
+missing_names = []
+for name in secret_names:
+  if os.environ.get(name):
+    print(f"Available secret: {name}")
+  else:
+    print(f"Missing required secret: {name}", file=sys.stderr)
+    missing_names.append(name)
+if missing_names:
+  print("Run mise run bootstrap to provision the identity, or rotate the required encrypted value with mise set --age-encrypt --prompt.", file=sys.stderr)
+  sys.exit(1)
+'''
+
+[container-system-start]
+description = "Ensure Apple's container apiserver is running (macOS only; no-op on Linux)"
+# `container build`/`container run` need the launchd-managed apiserver up. It is
+# normally started on first use, but a task whose first container invocation runs
+# inside a non-interactive daemon can race it. Idempotent — exit 0 when already
+# running — so it is safe as a `depends` for every container-touching task.
+run = '''
+if [[ "$(uname)" == "Darwin" ]]; then
+  exec container system start
+fi
+'''
+
+[dev-build]
+description = "Build all dev binaries (yral-auth + spacetime module)"
+depends = ["runtime-config-check"]
+run = '''
+mise run yral-auth-build
+mise run spacetime-build
+'''
+
+[dev-start]
+description = "Start all dev servers (SpacetimeDB local + yral-auth)"
+depends = ["dev-build"]
+run = "mise daemons start dev"
+
+[dev-stop]
+description = "Stop all dev servers"
+run = "mise daemons stop dev"
+
+[dev-status]
+description = "Show status of all daemons"
+run = "mise daemons ls"
+
+[runtime-config-check]
+description = "Validate local daemon paths, ports, and task/group references"
+run = '''
+#!/usr/bin/env python3
+import pathlib
+import tomllib
+import urllib.parse
+
+configuration = tomllib.loads(pathlib.Path("mise.toml").read_text())
+assert "tasks" not in configuration
+tasks = {}
+for filename in configuration["task_config"]["includes"]:
+  catalog = tomllib.loads(pathlib.Path(filename).read_text())
+  assert not (tasks.keys() & catalog.keys()), "Duplicate tasks in " + filename
+  tasks.update(catalog)
+  print("Verified task catalog: " + filename)
+daemons = configuration["daemons"]
+for daemon_name in ("yral-auth", "yral-auth-dev"):
+  command = daemons[daemon_name]["run"]
+  assert "../../target/release/yral-auth" in command
+  assert "../../target/x86_64-unknown-linux-musl/release/yral-auth" in command
+  assert "-- ./target/" not in command
+  print(f"Verified workspace-root binary paths: {daemon_name}")
+metadata_daemon = daemons["yral-metadata"]
+assert urllib.parse.urlparse(metadata_daemon["ready_http"]).port == int(configuration["env"]["BIND_ADDRESS"].rsplit(":", 1)[1])
+assert urllib.parse.urlparse(metadata_daemon["ready_http"]).port != 7000
+print("Verified metadata readiness uses its configured non-reserved local port.")
+for group_name, daemon_names in configuration["daemon_groups"].items():
+  assert all(daemon_name in daemons for daemon_name in daemon_names)
+  print(f"Verified daemon group references: {group_name}")
+for task_name, task in tasks.items():
+  daemon_names = task.get("daemons", [])
+  if isinstance(daemon_names, list):
+    assert all(daemon_name in daemons for daemon_name in daemon_names)
+    if daemon_names:
+      print(f"Verified task daemon references: {task_name}")
+'''

@@ -20,6 +20,8 @@ on:
       - "apps/yral-ios/**"
       - ".github/workflows/yral-ios-ci.yml"
       - "mise.toml"
+      - "mise/tasks/workspace.toml"
+      - "mise/tasks/yral-ios.toml"
   push:
     branches:
       - main
@@ -27,6 +29,8 @@ on:
       - "apps/yral-ios/**"
       - ".github/workflows/yral-ios-ci.yml"
       - "mise.toml"
+      - "mise/tasks/workspace.toml"
+      - "mise/tasks/yral-ios.toml"
   workflow_dispatch:
 
 permissions:
