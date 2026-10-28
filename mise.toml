@@ -847,8 +847,8 @@ for output, accepted in [(expected, True), (expected.removeprefix("code "), Fals
   with patch("pathlib.Path.home", return_value=Path("/fixture")), patch("pathlib.Path.mkdir"), patch("pathlib.Path.exists", return_value=True), patch("subprocess.check_output", return_value=output):
     try:
       exec(installer, {})
-    except SystemExit:
-      assert not accepted
+    except SystemExit as error:
+      assert accepted if error.code == 0 else not accepted
     else:
       assert accepted
   print("PASS: VS Code version fixture accepted=" + str(accepted), flush=True)
@@ -861,6 +861,19 @@ with patch("pathlib.Path.mkdir"), patch("pathlib.Path.exists", return_value=Fals
     raise AssertionError("An invalid archive must never be extracted")
   extract.assert_not_called()
 print("PASS: an invalid VS Code checksum prevents extraction", flush=True)
+account_guard = tasks["workstation-tunnel-setup"]["run"].split("sudo -n loginctl", 1)[0]
+account_guard = account_guard.replace("vscode_executable=/usr/local/bin/code", "vscode_executable=fixture_cli")
+fixture_prefix = 'fixture_account="$1"; fixture_exit="$2"; fixture_cli() { printf "%s\\n" "$fixture_account"; return "$fixture_exit"; }\n'
+for account, exit_code, accepted in [
+  ("logged in with provider GitHub Account", "0", True),
+  ("not logged in", "1", False),
+  ("logged in with provider Microsoft Account", "0", False),
+]:
+  result = subprocess.run(["bash", "-c", fixture_prefix + account_guard, "--", account, exit_code], capture_output=True, text=True)
+  assert (result.returncode == 0) is accepted
+  if not accepted:
+    assert account in result.stderr and "workstation-tunnel-login" in result.stderr
+  print("PASS: tunnel account accepted=" + str(accepted) + "; failed authorization is surfaced verbatim", flush=True)
 deployment_gate = yaml.safe_load(Path("kubernetes/clusters/yral-k8s/app-goose.yaml").read_text())["spec"]
 assert deployment_gate.get("wait", False) is False
 checks = deployment_gate["healthChecks"]
@@ -897,7 +910,7 @@ sudo -n ln -sfn "$HOME/.local/bin/mise" /usr/local/bin/mise
 '''
 
 [tasks.workstation-vscode-install]
-description = "Install and verify the approved standalone VS Code CLI inside the current user's home"
+description = "Adopt the approved installed VS Code CLI or install it without replacing working authorization"
 run = '''
 #!/usr/bin/env python3
 import hashlib
@@ -912,6 +925,14 @@ import urllib.request
 configuration = tomllib.loads(Path("mise.toml").read_text())["vars"]
 version = configuration["workstation_vscode_version"]
 commit = configuration["workstation_vscode_commit"]
+expected_output = "code " + version + " (commit " + commit + ")"
+existing_binary = Path("/usr/local/bin/code")
+if existing_binary.exists():
+  output = subprocess.check_output([str(existing_binary), "--version"], text=True).strip()
+  if output != expected_output:
+    raise SystemExit("Unexpected existing VS Code CLI version; refusing replacement: " + output)
+  print("Adopted existing " + output, flush=True)
+  raise SystemExit(0)
 directory = Path.home() / ".local/share/vscode-cli" / version
 directory.mkdir(parents=True, exist_ok=True)
 binary = directory / "code"
@@ -930,8 +951,9 @@ if not binary.exists():
     with tarfile.open(archive) as contents:
       contents.extractall(directory, filter="data")
 output = subprocess.check_output([str(binary), "--version"], text=True).strip()
-if output != "code " + version + " (commit " + commit + ")":
+if output != expected_output:
   raise SystemExit("Unexpected installed VS Code CLI version: " + output)
+subprocess.run(["sudo", "-n", "ln", "-sfn", str(binary), "/usr/local/bin/code"], check=True)
 print("Verified " + output, flush=True)
 '''
 
@@ -941,7 +963,7 @@ depends = ["workstation-vscode-install"]
 run = '''
 #!/usr/bin/env bash
 set -euo pipefail
-exec "$HOME/.local/share/vscode-cli/{{ vars.workstation_vscode_version }}/code" --cli-data-dir "$HOME/.vscode-cli" tunnel user login --provider github
+exec /usr/local/bin/code --cli-data-dir "$HOME/.vscode-cli" tunnel user login --provider github
 '''
 
 [tasks.workstation-tunnel-setup]
@@ -952,8 +974,11 @@ run = '''
 set -euo pipefail
 export XDG_RUNTIME_DIR="/run/user/$(id -u)"
 export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
-vscode_executable="$HOME/.local/share/vscode-cli/{{ vars.workstation_vscode_version }}/code"
-account=$("$vscode_executable" --cli-data-dir "$HOME/.vscode-cli" tunnel user show)
+vscode_executable=/usr/local/bin/code
+account=$("$vscode_executable" --cli-data-dir "$HOME/.vscode-cli" tunnel user show) || {
+  printf '%s\n' "$account" 'Run mise run workstation-tunnel-login first.' >&2
+  exit 1
+}
 if [[ "$account" != 'logged in with provider GitHub Account' ]]; then
   printf '%s\n' "$account" 'Run mise run workstation-tunnel-login first.' >&2
   exit 1
