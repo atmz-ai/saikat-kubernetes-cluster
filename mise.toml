@@ -726,6 +726,7 @@ from jinja2.nativetypes import NativeEnvironment
 from ansible.plugins.filter.core import FilterModule
 import jsonpatch
 import tomllib
+import base64
 import yaml
 
 for component in ["kubevirt", "containerized-data-importer"]:
@@ -758,7 +759,10 @@ volumes = virtual_machine["spec"]["template"]["spec"]["volumes"]
 assert not any(item.get("persistentVolumeClaim", {}).get("claimName") == "goose-home" for item in volumes)
 config_reference = next(item["configMap"]["name"] for item in volumes if "configMap" in item)
 assert any(item["kind"] == "ConfigMap" and item["metadata"]["name"] == config_reference for item in application)
-cloud_init = yaml.safe_load(next(item["cloudInitNoCloud"]["userData"] for item in volumes if "cloudInitNoCloud" in item))
+cloud_init_volume = next(item["cloudInitNoCloud"] for item in volumes if "cloudInitNoCloud" in item)
+assert "userData" not in cloud_init_volume
+cloud_init_secret = next(item for item in application if item["kind"] == "Secret" and item["metadata"]["name"] == cloud_init_volume["secretRef"]["name"])
+cloud_init = yaml.safe_load(base64.b64decode(cloud_init_secret["data"]["userdata"]))
 assert cloud_init["ssh_pwauth"] is False
 assert cloud_init["users"][0]["uid"] == 1000
 assert "PermitRootLogin no" in next(item["content"] for item in cloud_init["write_files"] if item["path"].endswith("10-goose-workstation.conf"))
@@ -809,7 +813,14 @@ configuration = tomllib.loads(Path("mise.toml").read_text())
 tasks = configuration["tasks"]
 virtual_machine = yaml.safe_load(Path("kubernetes/apps/goose/workstation.yaml").read_text())
 volumes = virtual_machine["spec"]["template"]["spec"]["volumes"]
-cloud_init = yaml.safe_load(next(volume["cloudInitNoCloud"]["userData"] for volume in volumes if "cloudInitNoCloud" in volume))
+cloud_init_volume = next(volume["cloudInitNoCloud"] for volume in volumes if "cloudInitNoCloud" in volume)
+assert "userData" not in cloud_init_volume
+assert cloud_init_volume["secretRef"]["name"] == "goose-workstation-cloud-init"
+assert "userDataSecretRef" not in cloud_init_volume
+cloud_init_source = Path("kubernetes/apps/goose/workstation-cloud-init.yaml").read_text()
+assert len(cloud_init_source.encode()) > 2048
+cloud_init = yaml.safe_load(cloud_init_source)
+print("PASS: large cloud-init data uses a Secret reference, never the rejected inline field", flush=True)
 settings = next(item for item in cloud_init["write_files"] if item["path"] == "/home/goose/.config/mise/config.toml")
 assert tomllib.loads(settings["content"])["settings"]["self_update"]["auto"] is True
 assert settings["owner"] == "goose:goose"
