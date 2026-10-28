@@ -861,6 +861,21 @@ with patch("pathlib.Path.mkdir"), patch("pathlib.Path.exists", return_value=Fals
     raise AssertionError("An invalid archive must never be extracted")
   extract.assert_not_called()
 print("PASS: an invalid VS Code checksum prevents extraction", flush=True)
+deployment_gate = yaml.safe_load(Path("kubernetes/clusters/yral-k8s/app-goose.yaml").read_text())["spec"]
+assert deployment_gate.get("wait", False) is False
+checks = deployment_gate["healthChecks"]
+assert any(item["kind"] == "VirtualMachineInstance" and item["name"] == "goose-workstation" for item in checks)
+assert not any(item["kind"] == "VirtualMachine" for item in checks)
+assert {item["name"] for item in checks if item["kind"] == "Deployment"} == {"goose", "goose-browser"}
+assert any(item["kind"] == "DataVolume" for item in checks)
+assert any(item["kind"] == "PersistentVolumeClaim" for item in checks)
+instance_expression = next(item["current"] for item in deployment_gate["healthCheckExprs"] if item["kind"] == "VirtualMachineInstance")
+assert "status.phase == 'Running'" in instance_expression and "condition.status == 'True'" in instance_expression
+for phase, ready, expected_ready in [("Running", "True", True), ("Running", "False", False), ("Failed", "True", False)]:
+  status = {"phase": phase, "conditions": [{"type": "Ready", "status": ready}]}
+  observed_ready = status["phase"] == "Running" and any(item["type"] == "Ready" and item["status"] == "True" for item in status["conditions"])
+  assert observed_ready is expected_ready
+print("PASS: staged VM generations do not block healthy instances; failed or unready instances remain blocked", flush=True)
 '''
 
 [tasks.workstation-mise-setup]
