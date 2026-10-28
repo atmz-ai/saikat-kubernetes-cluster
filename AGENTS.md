@@ -494,6 +494,39 @@ DNS is self-hosted, not Cloudflare. PowerDNS Authoritative runs from `kubernetes
 
 **Apex records are owned by `pdnsutil`, never by external-dns.** external-dns structurally cannot manage a zone apex: it never writes an ownership marker for an apex name (the name would be valid — `a-saikat.dev` — it is simply never emitted), so `plan.go` drops the apex from **both** creates and updates, and no record type can ever be converged there through a DNSEndpoint. The failure is silent — external-dns logs "Reconciliation succeeded". Tracked upstream as kubernetes-sigs/external-dns#6125 (with our independent confirmation on the issue). Consequence: the bare apex A + NS rrsets for every zone live in the GENERATED `kubernetes/infrastructure/external-dns/pdns-apex-records.yaml`, applied by the `pdns-zones` role with `pdnsutil rrset replace`. That role runs as the second play of `add-node` / `remove-node`, so node churn converges the apex automatically — a new node reaches the apex A records, and a removed node drops out of them. Its ConfigMap and Job are named by a content checksum, so a changed node set is a NEW Job that Flux creates (and prunes the previous one): no manual `kubectl delete job`, no `--force` on the Kustomization. **Never** declare an apex record in a DNSEndpoint (a declaration nothing acts on), and **never** hand-write the apex records or their ownership marker — regenerate from the inventory instead.
 
+### Browser Browsing & Control
+
+- For all web browsing and browser control, prefer Chrome DevTools MCP connected
+  to the user's installed Chrome and already-open profile over VS Code's embedded
+  browser. Reuse existing tabs where possible and verify the connection, intended
+  profile, and website account in the current agent session before acting.
+- Operator confirmed on 20261028 that installed Chrome, the intended open profile,
+  remote debugging, and local MCP setup are already enabled. Do not ask the user
+  to repeat setup or sign in to a fresh profile when MCP exposes only blank or
+  sign-in tabs. Investigate MCP routing and attachment to the existing local
+  profile first; this confirmation is not proof of the current connection.
+- If the intended Chrome profile is unavailable, report the blocker and ask before
+  switching browsers or starting a separate profile. A blank tab or sign-in page
+  is not proof that the user's intended open profile is connected.
+- Connect through a local user-profile MCP server on the machine running Chrome;
+  installing a server on the remote VS Code host does not grant local browser
+  access. Never copy profiles, export cookies, or expose debugging ports publicly.
+- Enter passwords and OTPs directly in the browser, never through chat. Browser
+  access does not waive approval requirements or production mutation restrictions.
+
+### Outbound Communication - Drafts Only
+
+- Do not create a Markdown draft file for every communication. Create one only
+  when the user explicitly asks for a local file or an archival copy.
+- Requests to send, reply, forward or message authorize preparing an unsent draft
+  directly in the intended browser text field or mailbox draft. Verify the
+  sending account, recipient or space, and attachments before entering the text.
+- Leave the draft available for the user to review and send. Never click Send,
+  Post or Submit, or use a keyboard shortcut that transmits the message, even
+  after approval of the text. The user performs that action.
+- This applies to email, Google Chat, SMS and ticketing; it does not authorize
+  other changes to the outbound system or bypass production mutation restrictions.
+
 ### Local Environment & Parity
 The root `mise.toml` is the single source of truth for tool versions, plaintext environment values, age-encrypted local secrets, and daemon definitions. Task definitions live in owner-scoped `mise/tasks/<owner>.toml` files, selected explicitly by root `[task_config].includes`. Do not add per-application tooling or secret configuration files. Keep application-specific values beside their existing root declarations.
 
