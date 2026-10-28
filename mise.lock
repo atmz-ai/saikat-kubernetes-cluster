@@ -239,6 +239,10 @@ checksum = "sha256:2f4edac1703a2f695254d6ff52ede03481e67db1f094915763d863158c17d
 url = "https://github.com/WebAssembly/binaryen/releases/download/version_131/binaryen-version_131-x86_64-windows.tar.gz"
 url_api = "https://api.github.com/repos/WebAssembly/binaryen/releases/assets/478305109"
 
+[[tools."asdf:mise-plugins/mise-gcloud"]]
+version = "591.0.0"
+backend = "asdf:mise-plugins/mise-gcloud"
+
 [[tools.aws-cli]]
 version = "2.38.5"
 backend = "aqua:aws/aws-cli"
@@ -416,38 +420,6 @@ url_api = "https://api.github.com/repos/fluxcd/flux2/releases/assets/538282898"
 
 [tools.flux2."platforms.windows-x64".provenance.slsa]
 url = "https://github.com/fluxcd/flux2/releases/download/v2.9.5/provenance.intoto.jsonl"
-
-[[tools.gcloud]]
-version = "589.0.0"
-backend = "vfox:mise-plugins/vfox-gcloud"
-
-[tools.gcloud."platforms.linux-arm64"]
-checksum = "sha256:84cf40953433227e8019077af3b7e198b46bd3beff6d67b45168bec2eea3bd94"
-url = "https://storage.googleapis.com/cloud-sdk-release/google-cloud-sdk-589.0.0-linux-arm.tar.gz"
-
-[tools.gcloud."platforms.linux-arm64-musl"]
-checksum = "sha256:84cf40953433227e8019077af3b7e198b46bd3beff6d67b45168bec2eea3bd94"
-url = "https://storage.googleapis.com/cloud-sdk-release/google-cloud-sdk-589.0.0-linux-arm.tar.gz"
-
-[tools.gcloud."platforms.linux-x64"]
-checksum = "sha256:8c0149c63f58a777959bbac11cc150fce98f2f9178a74ef337ce0b3acf24b7f0"
-url = "https://storage.googleapis.com/cloud-sdk-release/google-cloud-sdk-589.0.0-linux-x86_64.tar.gz"
-
-[tools.gcloud."platforms.linux-x64-musl"]
-checksum = "sha256:8c0149c63f58a777959bbac11cc150fce98f2f9178a74ef337ce0b3acf24b7f0"
-url = "https://storage.googleapis.com/cloud-sdk-release/google-cloud-sdk-589.0.0-linux-x86_64.tar.gz"
-
-[tools.gcloud."platforms.macos-arm64"]
-checksum = "sha256:dc27f003c1061891f596ce04a4ac3b2b2ff8b9ee5d8b8822b62ae087d5e9e02c"
-url = "https://storage.googleapis.com/cloud-sdk-release/google-cloud-sdk-589.0.0-darwin-arm.tar.gz"
-
-[tools.gcloud."platforms.macos-x64"]
-checksum = "sha256:52849b402c3283a30e5e8817bc995819ef7637b60b2679cc512f07269e0c549b"
-url = "https://storage.googleapis.com/cloud-sdk-release/google-cloud-sdk-589.0.0-darwin-x86_64.tar.gz"
-
-[tools.gcloud."platforms.windows-x64"]
-checksum = "sha256:b9c2f4f296154f55e8a31a6979106573bc1ad8691041d4a32ea90c1834fdf995"
-url = "https://storage.googleapis.com/cloud-sdk-release/google-cloud-sdk-589.0.0-windows-x86_64-bundled-python.zip"
 
 [[tools.gh]]
 version = "2.102.0"
@@ -687,16 +659,6 @@ url_api = "https://api.github.com/repos/podman-container-tools/podman/releases/a
 checksum = "sha256:af1f85c22214088a0a9986b9c82b4c9b5b74eda8ecaa6c8cca82b1a63f339b4a"
 url = "https://github.com/podman-container-tools/podman/releases/download/v6.1.4/podman-remote-static-linux_amd64.tar.gz"
 url_api = "https://api.github.com/repos/podman-container-tools/podman/releases/assets/634977464"
-
-[tools.podman."platforms.macos-arm64"]
-checksum = "sha256:dadcb94999dcb7f19f8269e292fc56d2bfbe2bfab5826981a568a466bff26843"
-url = "https://github.com/podman-container-tools/podman/releases/download/v6.1.4/podman-remote-release-darwin_arm64.zip"
-url_api = "https://api.github.com/repos/podman-container-tools/podman/releases/assets/634977395"
-
-[tools.podman."platforms.windows-x64"]
-checksum = "sha256:8b70cd2511bfac9b65e58858d8fe54eeb68e3420eeb600e3f869b9a4b8576572"
-url = "https://github.com/podman-container-tools/podman/releases/download/v6.1.4/podman-remote-release-windows_amd64.zip"
-url_api = "https://api.github.com/repos/podman-container-tools/podman/releases/assets/634977390"
 
 [[tools.python]]
 version = "3.14.8"

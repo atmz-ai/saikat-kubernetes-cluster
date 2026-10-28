@@ -6,6 +6,20 @@ age.ssh_identity_files = [".saikat-machine-access-ed25519"]
 age.strict = false
 # * Imported age payloads use unpadded Base64; padding is not part of ciphertext.
 
+[vars]
+goose_version = "1.56.0"
+goose_browser_revision = "a85b99bb83d11177b70d28f8a0f5d2bfd7929144"
+goose_base_image = "ghcr.io/aaif-goose/goose@sha256:8d482beae2921550a0b58521e20fc9240263b577549042111bca571f003ac520"
+goose_backend_base_image = "mcr.microsoft.com/devcontainers/base@sha256:6ee2b4097c75d33e9a94d941577a3286e5d629434fba384688b06daeeaaeac99"
+goose_image_repository = "harbor.yral.com/library/goose"
+goose_virtual_machine_image_release = "26.04"
+goose_virtual_machine_image_build = "20261016"
+goose_virtual_machine_image_sha256 = "5645d0318ad21f643ebb1ac4567514620e9893380b07b0201fda163baa5b7eb5"
+workstation_vscode_version = "1.143.1"
+workstation_vscode_commit = "e646868227c3e3a9e3f24277c8c7220be42c0be7"
+workstation_vscode_sha256 = "22da21dfa7051bf3a0f048cd7e875c4fe582ddd3e8451cd17a725d199029a9fe"
+workstation_tunnel_name = "goose-workstation"
+
 [tools]
 age = "latest"
 # binaryen (wasm-opt) PINNED to 131 — do NOT let `mise upgrade --bump` float
@@ -50,9 +64,8 @@ cargo-binstall = "latest"
 eza = "latest"
 flux2 = "2.9.5"
 gh = "latest"
-# gcloud — Google Cloud CLI (Cloud Run GPU / GKE GPU probes). Declarative via
-# mise so a fresh checkout can query GCP without a system install.
-gcloud = "latest"
+# ! The vfox gcloud backend imports an unavailable Lua python module before installation.
+"asdf:mise-plugins/mise-gcloud" = { version = "latest", depends = ["python"] }
 helm = "latest"
 # SpacetimeDB CLI. The release tarball names its binary `spacetimedb-cli`,
 # but the canonical, documented invocation is `spacetime` (see
@@ -163,6 +176,7 @@ uv = "latest"
 # Machine-baseline packages (build-essential, curl, git, etc.) live in ~/.dotfiles/mise.linux.toml.
 [bootstrap.packages]
 "apt:bind9-dnsutils" = "latest"
+"apt:build-essential" = "latest"
 "apt:clang" = "latest"
 "apt:cmake" = "latest"
 "apt:libclang-dev" = "latest"
@@ -256,6 +270,8 @@ YRAL_APPLE_TEAM_ID = "2UL556KNXC"
 
 CLUSTER_GITHUB_TOKEN = { age = "YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IHNzaC1lZDI1NTE5IG5QMTlMdyB2SElId3NsRUk5ZkFsSW1ua3JpVzBmZWZ4cFU5KzFrRmZFRTJSOGlBc2wwCnJUUHJtUWRCcVVHZnI3cXM2d2NoaXhpL1pja254Tk5ydDV4OGswVG90cTgKLT4gMyk3LWdyZWFzZSAzIGdlK25mZ0QKN2wvUC9LYVRURk9VUzk3KzdRZk9weWVTaE4ra1lBaGZzUlEvNVFSU1ZBCi0tLSAveVJrNFFmdFl0TnZKanpFeFNIenFzcXdzRWtOeDFXYllYd2JVZ2czZFhrCrlke0xMBDlp3063E6GnKUYV0gAT0iTTwHsGtpcg0UC3MOsaJRZdxzRJxvYKNDOMjToXPT7Jg873l2+d6I/O38PBT4jLLATjNeKyHGnhAm4bG9qNDbRp+mP4vpCJqDYIGnOnkBI48bfUCLAzWo3xETbF3L+SSG4O9YYbVpH5" }
 BTC_REWARDS_GCHAT_WEBHOOK_URL = ""
+GOOSE_AZURE_FOUNDRY_API_KEY = { age = "YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IHNzaC1lZDI1NTE5IG5QMTlMdyBybGZ2YlpkOS9vUFFZUmowUkdxOWY5cFdWWHZwZ3poUGx5SWtJcmp3UGtFClE2VVQwTVFTZEN5RWM1WE5vWmM4MGRRVFFueWFXMmR3MlVQblc2WmprNjgKLT4gZlBvUGU1LWdyZWFzZSByTVcgM1FRQyggMSogS24KcWl1dFBMcmxHckpTM29OZW5lUGlZUk9wZWhuay9NL1Z1RUtWdER5ZHNQVjViSEZ3R3R6Z2E0Z3hyME1POXJkcgpHWVdKK0w0Z2xicklwKzVTNU5FeFlJWGV0cGVpdENJU0s4LzdFMkUKLS0tIFFEMlJXQXRHTlFONDZFMTlWSU9hOHFyaEk3MnV4VFkzSCtaWUlYYUg3RFkKWgeQjU2TPH1FIdL7FXP1MgJKWyngVcUSHRCaZdUdLpUlfW/4K0SilISdyMq8Rd9f2UN289J71NHUYyeE56Fd29MhmIbmq50BwsDRFCj9FE9yo3nM2CVzg0Oygc839/bJ5QFLPeu+SAzMuV+C/hQ4yfo0ae4" }
+GOOSE_DESKTOP_SECRET_KEY = { age = "YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IHNzaC1lZDI1NTE5IG5QMTlMdyBDWWNvMVc1S3FnS3ZiQVVFVVhLZXd6OHQ0SDBUUUhtN0tsSi9jSExEL3p3Ckd5cGhFWDB3RE8wQnNiN2FpZDRtL0xHMi8xLzhvcnFLUHBSSjNMMkZRdDQKLT4gclRPOmx+fW0tZ3JlYXNlIFx3XVRfIEAgM2tsZD1xQmUKaC95TzBuM1NBcy9wMklqQ3hscUE1VFVEdmJXSXgxZ2xHb3NKN01QMnhhNjRQYkViUVMvanQ5dkt2Q2NRRHFEQwptdHdNekdoeWVrYk1LeXRBWENaVTRLUXdBNDhmdEtPOEUzVFVjUHkwSTZlQTZpT040cDF3dlArak1GTHdBUlp1CgotLS0gSVlWUGNSR0F5emNxVUZtbERxMHAwZTRCaytRWXRWRVltSkdERkRmZzkySQpwuK9iV1f1mwoZiIxpXyIWrmlvzbNSOPSmkBXAz6/y/ycDLv/TekWL+vuIC44hvtw4imAQXVm20NI27R6v1l/cxwZ28CuIar1nxkIj3m/pzMBnmn8qG0fQ1E7QUUTp9JQ" }
 
 [env.CLUSTER_CLOUDFLARE_API_TOKEN]
 age = "YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IHNzaC1lZDI1NTE5IG5QMTlMdyAvMlZCY1ZqV1l4bElTOWdnRU0yYlQ3Yks2ZytiVDRzaThZSWhPYkZxUjBBCkFSWWhOOVBwRWtIWHhMRXN2YVVhTWkzcXZ0ejAyL2VFTDBMdnUzbzZxczQKLT4gVC1ncmVhc2UgMF5iZyEKVDVCQkV3dkFGQWdybTdUbnIydTZGOGZIRVdqSEcwUmtCUGUxV0dqL21ZL0s4eEZhCi0tLSBIeUNIZlpjSHZtdHJDUnIwYVlJMkt4YXV1ZUNOS1pHVU5yQm5OQlhOVldjCiWpPd1hjcfUH0b8rkNJ03WlfsQ+qTWrmLSDjWhhajt2e+831J8WEvqF4xWvohHWUmCUIgBmuskBa7A2ZtksTIfZT35ovnEEiw"
@@ -330,13 +346,22 @@ age = "YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IHNzaC1lZDI1NTE5IG5QMTlMdyBFK1Vmcmc4RGJWa
 [env.CLUSTER_GEMINI_API_KEY]
 age = "YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IHNzaC1lZDI1NTE5IG5QMTlMdyAxYkF3d3BNZjZtQnJ1OU5lVTlOWDVLV090dXpVS2doazFmWFVOcU5yWndFClpac1dPUnBuYndFZXMwRS9SUkh3UWhhejcwRUNvOTI1NUpCVCt2RmlGencKLT4gSkFDS2ktZ3JlYXNlIF91IFYKbk1IbXVyQng0REt1emppZ1N2bEZ0ZE9WVWxPbGcrbEc4TkZLeUx2dnFYNmR5Tjg4M0RLLzNTZlJ1QmMKLS0tIEVxdWcvSWlIMTBwdi9BZnZGNk11b0l4Q1RPN2JvRkFNVTFhWWpJWk56VnMKxkcuMsZArVOlaj7vZgMMh2r//ZJgEjDot+xO33uZgX2DgBVdnyevf8B0rP/0LRVhL+87Ur/iSpyYTcDG7h0uidPQ41O8eEscDAE6OhKTLzgJqbP6/g"
 
+[tasks.python-setup]
+description = "Install the repository's declared Python tooling without provisioning credentials"
+run = "python -m venv .venv && ./.venv/bin/pip install --upgrade pip && ./.venv/bin/pip install -e ."
+
+[tasks.workspace-setup]
+description = "Install workspace tools and build dependencies without changing SSH identities or cluster credentials"
+run = "mise bootstrap packages apply --yes && mise install && mise run python-setup"
+
 [tasks.bootstrap]
-description = "Create .venv, install Python tooling, and extract infra SSH key from vault"
+description = "Explicitly provision infrastructure credentials and initialize application submodules"
+depends = ["python-setup"]
 run = '''
 #!/usr/bin/env bash
 set -euo pipefail
 
-python -m venv .venv && ./.venv/bin/pip install --upgrade pip && ./.venv/bin/pip install -e . && ./.venv/bin/ansible-galaxy collection install -r ansible/requirements.yml -p ansible/collections
+./.venv/bin/ansible-galaxy collection install -r ansible/requirements.yml -p ansible/collections
 
 # Validate the vault password once, up front. A missing/empty/incorrect password
 # (e.g. GitHub PRs from Dependabot/Renovate, which never receive repo secrets)
@@ -529,7 +554,7 @@ from pathlib import Path
 import platform
 import shutil
 import subprocess
-import yaml
+import tomllib
 
 if os.geteuid() == 0:
   raise SystemExit("Run goose-build without sudo.")
@@ -539,8 +564,8 @@ missing = [tool for tool in ["clang", "cmake", "musl-gcc"] if not shutil.which(t
 if missing:
   raise SystemExit("Missing build tools: " + ", ".join(missing) + "; run mise bootstrap packages apply --yes")
 root = Path.cwd()
-with (root / "ansible/roles/goose/defaults/main.yml").open() as stream:
-  version = yaml.safe_load(stream)["goose_version"]
+with (root / "mise.toml").open("rb") as stream:
+  version = tomllib.load(stream)["vars"]["goose_version"]
 source = root / "target/goose/source" / version
 environment = {key: os.environ[key] for key in ["PATH", "HOME", "CARGO_HOME", "RUSTUP_HOME", "SSL_CERT_FILE", "SSL_CERT_DIR"] if key in os.environ}
 environment["RUSTUP_TOOLCHAIN"] = subprocess.check_output(["rustup", "show", "active-toolchain"], env=environment, text=True).split()[0]
@@ -560,6 +585,39 @@ subprocess.run([str(binary), "--version"], env=environment, check=True)
 subprocess.run([str(binary), "roam", "--help"], env=environment, check=True)
 '''
 
+[tasks.goose-serve]
+description = "Run the pinned Goose server with the workspace environment and existing Azure provider declaration"
+run = '''
+#!/usr/bin/env -S ./.venv/bin/python
+import os
+from pathlib import Path
+import yaml
+
+root = Path.cwd()
+configuration = yaml.safe_load((root / "kubernetes/apps/goose/configmap.yaml").read_text())["data"]
+environment = os.environ.copy()
+environment.update({name: value for name, value in configuration.items() if name != "GIT_CONFIG_SYSTEM"})
+for source, destination in [
+  ("GOOSE_AZURE_FOUNDRY_API_KEY", "AZURE_FOUNDRY_API_KEY"),
+  ("GOOSE_DESKTOP_SECRET_KEY", "GOOSE_SERVER__SECRET_KEY"),
+]:
+  if not environment.get(source):
+    raise SystemExit("Missing " + source + "; provision its native age value in root mise.toml")
+  environment[destination] = environment[source]
+environment["GOOSE_DISABLE_KEYRING"] = "1"
+binary = root / "target/goose/compiler/x86_64-unknown-linux-musl/release/goose"
+os.execve(str(binary), [str(binary), "serve", "--platform", "desktop", "--host", "127.0.0.1", "--port", "3284", "--roam"], environment)
+'''
+
+[tasks.goose-run]
+description = "Build and start the workspace Goose daemon without replacing the existing public deployment"
+daemons = ["goose"]
+run = "mise daemons status goose"
+
+[tasks.goose-stop]
+description = "Stop only the workspace Goose daemon"
+run = "mise daemons stop goose"
+
 [tasks.goose-image]
 description = "Package and audit Goose backend and browser images with native mise OCI on Linux"
 depends = ["goose-build"]
@@ -575,8 +633,8 @@ import tomllib
 import yaml
 
 root = Path.cwd()
-with (root / "ansible/roles/goose/defaults/main.yml").open() as stream:
-  defaults = yaml.safe_load(stream)
+with (root / "mise.toml").open("rb") as stream:
+  defaults = __import__("tomllib").load(stream)["vars"]
 with (root / "mise.toml").open("rb") as stream:
   configuration = tomllib.load(stream)
 with (root / "mise.lock").open("rb") as stream:
@@ -667,6 +725,7 @@ from jinja2 import Environment, StrictUndefined
 from jinja2.nativetypes import NativeEnvironment
 from ansible.plugins.filter.core import FilterModule
 import jsonpatch
+import tomllib
 import yaml
 
 for component in ["kubevirt", "containerized-data-importer"]:
@@ -689,9 +748,8 @@ application = list(yaml.safe_load_all(subprocess.check_output(["kubectl", "kusto
 goose = next(item for item in application if item["kind"] == "Deployment" and item["metadata"]["name"] == "goose")
 assert [item["name"] for item in goose["spec"]["template"]["spec"]["containers"]] == ["goose"]
 print("PASS: operator bootstrap preserves the existing Goose container", flush=True)
-role = Path("ansible/roles/goose")
-defaults = yaml.safe_load((role / "defaults/main.yml").read_text())
-expected = Environment(undefined=StrictUndefined).from_string((role / "templates/workstation-root-disk.yaml.j2").read_text()).render(**defaults)
+defaults = tomllib.loads(Path("mise.toml").read_text())["vars"]
+expected = Environment(undefined=StrictUndefined).from_string(Path("kubernetes/apps/goose/workstation-root-disk.yaml.j2").read_text()).render(**defaults)
 root_disk = next(item for item in application if item["kind"] == "DataVolume" and item["metadata"]["name"] == "goose-workstation-root")
 assert yaml.safe_load(expected) == root_disk
 assert root_disk["metadata"]["annotations"]["kustomize.toolkit.fluxcd.io/prune"] == "disabled"
@@ -703,7 +761,7 @@ assert any(item["kind"] == "ConfigMap" and item["metadata"]["name"] == config_re
 cloud_init = yaml.safe_load(next(item["cloudInitNoCloud"]["userData"] for item in volumes if "cloudInitNoCloud" in item))
 assert cloud_init["ssh_pwauth"] is False
 assert cloud_init["users"][0]["uid"] == 1000
-assert "PermitRootLogin no" in cloud_init["write_files"][0]["content"]
+assert "PermitRootLogin no" in next(item["content"] for item in cloud_init["write_files"] if item["path"].endswith("10-goose-workstation.conf"))
 print("PASS: staged VM pins its root disk, preserves existing home data, and resolves bootstrap configuration", flush=True)
 ssh_service = next(item for item in application if item["kind"] == "Service" and item["metadata"]["name"] == "goose-workstation")
 assert ssh_service["spec"]["type"] == "LoadBalancer"
@@ -734,6 +792,204 @@ assert "node.kubernetes.io/exclude-from-external-load-balancers" not in updated_
 assert updated_node["metadata"]["labels"]["preserved-label"] == "value"
 assert "node.kubernetes.io/exclude-from-external-load-balancers" in original_node["metadata"]["labels"]
 print("PASS: exclusion removal preserves other labels and leaves its input unchanged", flush=True)
+'''
+
+[tasks.goose-workstation-check]
+description = "Verify cloud-init's mise-only seed and the guest-owned mise bootstrap"
+run = '''
+#!/usr/bin/env -S ./.venv/bin/python
+from pathlib import Path
+import subprocess
+import tomllib
+import io
+from unittest.mock import patch
+import yaml
+
+configuration = tomllib.loads(Path("mise.toml").read_text())
+tasks = configuration["tasks"]
+virtual_machine = yaml.safe_load(Path("kubernetes/apps/goose/workstation.yaml").read_text())
+volumes = virtual_machine["spec"]["template"]["spec"]["volumes"]
+cloud_init = yaml.safe_load(next(volume["cloudInitNoCloud"]["userData"] for volume in volumes if "cloudInitNoCloud" in volume))
+settings = next(item for item in cloud_init["write_files"] if item["path"] == "/home/goose/.config/mise/config.toml")
+assert tomllib.loads(settings["content"])["settings"]["self_update"]["auto"] is True
+assert settings["owner"] == "goose:goose"
+seed = next(command for command in cloud_init["runcmd"] if "sha256sum --check" in str(command))
+assert seed[:3] == ["sh", "-eu", "-c"]
+assert seed[3].index("sha256sum --check") < seed[3].index("chmod 0755")
+assert "/home/goose/.local/bin/mise" in seed[3] and "curl" in seed[3]
+subprocess.run(["sh", "-n"], input=seed[3], text=True, check=True)
+assert not any("code" in command or "goose-build" in command for command in cloud_init["runcmd"])
+print("PASS: cloud-init only seeds writable, checksum-verified mise with global self-updates", flush=True)
+for name in ["workstation-mise-setup", "workstation-tunnel-login", "workstation-tunnel-setup"]:
+  subprocess.run(["bash", "-n"], input=tasks[name]["run"], text=True, check=True)
+assert "self_update.auto true" in tasks["workstation-mise-setup"]["run"]
+assert "--provider github" in tasks["workstation-tunnel-login"]["run"]
+assert "service install" in tasks["workstation-tunnel-setup"]["run"]
+assert "--accept-server-license-terms" in tasks["workstation-tunnel-setup"]["run"]
+assert "--local" not in tasks["workstation-mise-setup"]["run"]
+assert 'readlink -f "$(command -v mise)"' in tasks["workstation-mise-setup"]["run"]
+assert not any(path.is_file() for path in Path("ansible/roles/goose-workstation").rglob("*"))
+print("PASS: guest software and authenticated tunnel services are owned by mise, not Ansible", flush=True)
+installer = compile(tasks["workstation-vscode-install"]["run"], "workstation-vscode-install", "exec")
+expected = "code " + configuration["vars"]["workstation_vscode_version"] + " (commit " + configuration["vars"]["workstation_vscode_commit"] + ")"
+for output, accepted in [(expected, True), (expected.removeprefix("code "), False), ("code 0.0.0 (commit wrong)", False)]:
+  with patch("pathlib.Path.home", return_value=Path("/fixture")), patch("pathlib.Path.mkdir"), patch("pathlib.Path.exists", return_value=True), patch("subprocess.check_output", return_value=output):
+    try:
+      exec(installer, {})
+    except SystemExit:
+      assert not accepted
+    else:
+      assert accepted
+  print("PASS: VS Code version fixture accepted=" + str(accepted), flush=True)
+with patch("pathlib.Path.mkdir"), patch("pathlib.Path.exists", return_value=False), patch("urllib.request.urlopen", return_value=io.BytesIO(b"invalid archive")), patch("tarfile.open") as extract:
+  try:
+    exec(installer, {})
+  except SystemExit as error:
+    assert "checksum mismatch" in str(error)
+  else:
+    raise AssertionError("An invalid archive must never be extracted")
+  extract.assert_not_called()
+print("PASS: an invalid VS Code checksum prevents extraction", flush=True)
+'''
+
+[tasks.workstation-mise-setup]
+description = "Enable self-updates using a guest-owned mise executable without changing the workspace or tunnel"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$(id -un)" != "goose" || "$(hostname)" != "goose-workstation" ]]; then
+  printf '%s\n' 'Run workstation setup inside goose-workstation as goose.' >&2
+  exit 1
+fi
+install -d "$HOME/.local/bin"
+current_mise=$(readlink -f "$(command -v mise)")
+if [[ "$current_mise" != "$HOME/.local/bin/mise" ]]; then
+  install -m 0755 "$current_mise" "$HOME/.local/bin/mise"
+fi
+sudo -n ln -sfn "$HOME/.local/bin/mise" /usr/local/bin/mise
+"$HOME/.local/bin/mise" settings set self_update.auto true
+'''
+
+[tasks.workstation-vscode-install]
+description = "Install and verify the approved standalone VS Code CLI inside the current user's home"
+run = '''
+#!/usr/bin/env python3
+import hashlib
+from pathlib import Path
+import shutil
+import subprocess
+import tarfile
+import tempfile
+import tomllib
+import urllib.request
+
+configuration = tomllib.loads(Path("mise.toml").read_text())["vars"]
+version = configuration["workstation_vscode_version"]
+commit = configuration["workstation_vscode_commit"]
+directory = Path.home() / ".local/share/vscode-cli" / version
+directory.mkdir(parents=True, exist_ok=True)
+binary = directory / "code"
+if not binary.exists():
+  url = "https://vscode.download.prss.microsoft.com/dbazure/download/stable/" + commit + "/vscode_cli_linux_x64_cli.tar.gz"
+  print("Downloading VS Code CLI " + version, flush=True)
+  with tempfile.TemporaryDirectory(prefix="vscode-cli-") as temporary:
+    archive = Path(temporary) / "cli.tar.gz"
+    with urllib.request.urlopen(url) as response, archive.open("wb") as stream:
+      shutil.copyfileobj(response, stream)
+    with archive.open("rb") as stream:
+      checksum = hashlib.file_digest(stream, "sha256").hexdigest()
+    if checksum != configuration["workstation_vscode_sha256"]:
+      raise SystemExit("VS Code CLI checksum mismatch; refusing extraction")
+    print("Verified VS Code CLI SHA256", flush=True)
+    with tarfile.open(archive) as contents:
+      contents.extractall(directory, filter="data")
+output = subprocess.check_output([str(binary), "--version"], text=True).strip()
+if output != "code " + version + " (commit " + commit + ")":
+  raise SystemExit("Unexpected installed VS Code CLI version: " + output)
+print("Verified " + output, flush=True)
+'''
+
+[tasks.workstation-tunnel-login]
+description = "Authorize the guest's VS Code tunnel directly with GitHub's human device flow"
+depends = ["workstation-vscode-install"]
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+exec "$HOME/.local/share/vscode-cli/{{ vars.workstation_vscode_version }}/code" --cli-data-dir "$HOME/.vscode-cli" tunnel user login --provider github
+'''
+
+[tasks.workstation-tunnel-setup]
+description = "Register the official persistent VS Code user service using the existing GitHub authentication"
+depends = ["workstation-vscode-install"]
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+vscode_executable="$HOME/.local/share/vscode-cli/{{ vars.workstation_vscode_version }}/code"
+account=$("$vscode_executable" --cli-data-dir "$HOME/.vscode-cli" tunnel user show)
+if [[ "$account" != 'logged in with provider GitHub Account' ]]; then
+  printf '%s\n' "$account" 'Run mise run workstation-tunnel-login first.' >&2
+  exit 1
+fi
+sudo -n loginctl enable-linger "$(id -un)"
+"$vscode_executable" --cli-data-dir "$HOME/.vscode-cli" tunnel service install --name '{{ vars.workstation_tunnel_name }}' --accept-server-license-terms
+"$vscode_executable" --cli-data-dir "$HOME/.vscode-cli" tunnel status
+'''
+
+[tasks.workstation-setup]
+description = "Bootstrap guest software entirely with mise; run GitHub tunnel login separately on first use"
+run = "mise run workstation-mise-setup && mise run workspace-setup && mise run workstation-tunnel-setup"
+
+[tasks.workspace-bootstrap-check]
+description = "Regression-test credential-free workspace setup and task-scoped Goose credentials"
+run = '''
+#!/usr/bin/env -S ./.venv/bin/python
+import os
+import tomllib
+from unittest.mock import patch
+
+with open("mise.toml", "rb") as stream:
+  configuration = tomllib.load(stream)
+tasks = configuration["tasks"]
+assert "gcloud" not in configuration["tools"]
+assert configuration["tools"]["asdf:mise-plugins/mise-gcloud"]["depends"] == ["python"]
+print("PASS: workspace installation avoids the broken vfox gcloud backend", flush=True)
+assert "mise run bootstrap" not in tasks["workspace-setup"]["run"]
+assert "vault" not in tasks["python-setup"]["run"]
+assert "python-setup" in tasks["bootstrap"]["depends"]
+print("PASS: workspace setup does not provision infrastructure credentials", flush=True)
+script = compile(tasks["goose-serve"]["run"], "goose-serve", "exec")
+with patch.dict(os.environ, {"GOOSE_AZURE_FOUNDRY_API_KEY": "fixture-api-key", "GOOSE_DESKTOP_SECRET_KEY": "fixture-server-secret"}, clear=True), patch("os.execve") as execute:
+  exec(script, {})
+  executable, arguments, environment = execute.call_args.args
+  assert arguments[arguments.index("--host") + 1] == "127.0.0.1"
+  assert arguments[-1] == "--roam"
+  assert environment["AZURE_FOUNDRY_API_KEY"] == "fixture-api-key"
+  assert environment["GOOSE_SERVER__SECRET_KEY"] == "fixture-server-secret"
+  assert environment["GOOSE_PROVIDER"] == "azure_foundry"
+  assert "GIT_CONFIG_SYSTEM" not in environment
+print("PASS: Goose shares workspace tooling and maps credentials only at launch", flush=True)
+for missing in ["GOOSE_AZURE_FOUNDRY_API_KEY", "GOOSE_DESKTOP_SECRET_KEY"]:
+  fixture = {"GOOSE_AZURE_FOUNDRY_API_KEY": "fixture-api-key", "GOOSE_DESKTOP_SECRET_KEY": "fixture-server-secret"}
+  fixture.pop(missing)
+  with patch.dict(os.environ, fixture, clear=True), patch("os.execve") as execute:
+    try:
+      exec(script, {})
+    except SystemExit as error:
+      assert missing in str(error)
+    else:
+      raise AssertionError("Missing credentials must prevent startup")
+    execute.assert_not_called()
+  print("PASS: missing " + missing + " never starts Goose", flush=True)
+assert configuration["daemons"]["goose"]["ready_http"] == "http://127.0.0.1:3284/status"
+assert configuration["daemons"]["goose"]["init"] == ["mise run goose-build"]
+assert tasks["goose-run"]["daemons"] == ["goose"]
+assert "depends" not in tasks["goose-run"]
+print("PASS: the daemon builds Goose before launching or checking readiness", flush=True)
+assert "ansible" not in tasks["workstation-setup"]["run"]
+assert "goose-run" not in tasks["workstation-setup"]["run"]
+print("PASS: workstation setup stays mise-only and does not unexpectedly start Goose", flush=True)
 '''
 
 [tasks.goose-build-workflow-check]
@@ -851,8 +1107,8 @@ for name in ["backend", "browser"]:
   if name == "backend":
     image_environment = dict(value.split("=", 1) for value in image_configuration["config"]["Env"])
     assert image_environment["RUSTUP_TOOLCHAIN"].endswith("-x86_64-unknown-linux-gnu")
-with (root / "ansible/roles/goose/defaults/main.yml").open() as stream:
-  defaults = yaml.safe_load(stream)
+with (root / "mise.toml").open("rb") as stream:
+  defaults = __import__("tomllib").load(stream)["vars"]
 decrypted = subprocess.check_output(["mise", "run", "sops-decrypt", "--", "kubernetes/infrastructure/harbor/harbor-admin-secret.sops.yaml"], text=True)
 password = yaml.safe_load(decrypted)["stringData"]["admin-password"]
 authentication = base64.b64encode(("admin:" + password).encode()).decode()
@@ -2166,6 +2422,11 @@ ready_http = "http://localhost:8083/"
 # `spacetime dev` (which publishes to http://127.0.0.1:3000). In-memory mode —
 # data is lost on restart, which is fine for dev. No JWT keys, so this is the
 # plain server for tasks that don't need authenticated identity.
+
+[daemons.goose]
+init = ["mise run goose-build"]
+run = "exec mise run goose-serve"
+ready_http = "http://127.0.0.1:3284/status"
 
 [daemons.spacetimedb]
 run = "exec spacetime start --in-memory --listen-addr 127.0.0.1:3000"

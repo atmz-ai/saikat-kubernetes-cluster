@@ -75,12 +75,29 @@ spec:
                   ssh_authorized_keys:
                     - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIM/H7Jp2RgC1xtg1nyzpmhzOTmUz3n+PQPsk83BzUskg saikat-machine-access
               packages:
+                - ca-certificates
+                - curl
+                - git
                 - qemu-guest-agent
               mounts:
                 - [/dev/disk/by-id/virtio-GOOSEHOSTKEY, /mnt/goose-ssh-host, auto, "ro", "0", "0"]
                 - [/dev/disk/by-id/virtio-GOOSEACCESS, /mnt/goose-machine-access, auto, "ro", "0", "0"]
                 - [/dev/disk/by-id/virtio-GOOSECONFIG, /mnt/goose-ssh-config, auto, "ro", "0", "0"]
               write_files:
+                - path: /home/goose/.bashrc
+                  owner: goose:goose
+                  permissions: "0644"
+                  defer: true
+                  append: true
+                  content: |
+                    eval "$(/home/goose/.local/bin/mise activate bash)"
+                - path: /home/goose/.config/mise/config.toml
+                  owner: goose:goose
+                  permissions: "0644"
+                  defer: true
+                  content: |
+                    [settings.self_update]
+                    auto = true
                 - path: /etc/ssh/sshd_config.d/10-goose-workstation.conf
                   permissions: "0644"
                   content: |
@@ -92,6 +109,15 @@ spec:
                     AllowAgentForwarding no
                     HostKey /etc/ssh/ssh_host_ed25519_key
               runcmd:
+                - [install, -d, -o, goose, -g, goose, -m, "0755", /home/goose/.local/bin]
+                - - sh
+                  - -eu
+                  - -c
+                  - |
+                    sudo -u goose curl --fail --location --output /home/goose/.local/bin/mise https://github.com/jdx/mise/releases/download/v2026.10.21/mise-v2026.10.21-linux-x64
+                    printf '%s  %s\n' ccfe12d7a62c6fb9def2a20db1f210f13a51de881f21fd8c85db4b6312405d07 /home/goose/.local/bin/mise | sha256sum --check
+                    chmod 0755 /home/goose/.local/bin/mise
+                    ln -s /home/goose/.local/bin/mise /usr/local/bin/mise
                 - [install, -d, -o, goose, -g, goose, -m, "0700", /home/goose/.ssh]
                 - [install, -d, -o, goose, -g, goose, /home/goose/workspace]
                 - [install, -o, goose, -g, goose, -m, "0600", /mnt/goose-machine-access/ssh-privatekey, /home/goose/.ssh/id_ed25519]
