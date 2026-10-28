@@ -7,7 +7,7 @@ description = "Install workspace tools and build dependencies without changing S
 run = "mise bootstrap packages apply --yes && mise install && mise run python-setup"
 
 [bootstrap]
-description = "Explicitly provision infrastructure credentials and initialize application submodules"
+description = "Provision infrastructure credentials, initialize application submodules, and apply Git dotfiles"
 depends = ["python-setup"]
 run = '''
 #!/usr/bin/env bash
@@ -80,6 +80,21 @@ if [ "$bootstrap_vault_ok" = true ] && [ ! -f ~/.kube/config ]; then
 elif [ -f ~/.kube/config ]; then
   echo '  ✓ Kubeconfig already at ~/.kube/config'
 fi
+
+mise run dotfiles-setup
+'''
+
+[dotfiles-setup]
+description = "Clone or validate ~/.dotfiles and apply its Git configuration without unrelated machine setup"
+env = { GIT_SSH_COMMAND = "ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile='{{config_root}}/kubernetes/apps/goose/known_hosts' -i '{{config_root}}/.saikat-machine-access-ed25519'" }
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+mise bootstrap repos apply --yes
+mise trust "$HOME/.dotfiles/mise.toml"
+mise --no-env --no-hooks -C "$HOME/.dotfiles" dot apply --yes "$HOME/.gitconfig"
+git config --get user.name
+git config --get user.email
 '''
 
 [workspace-bootstrap-check]
@@ -88,6 +103,7 @@ run = '''
 #!/usr/bin/env -S ./.venv/bin/python
 import os
 from pathlib import Path
+import subprocess
 import tomllib
 from unittest.mock import patch
 
@@ -103,6 +119,29 @@ assert "mise run bootstrap" not in tasks["workspace-setup"]["run"]
 assert "vault" not in tasks["python-setup"]["run"]
 assert "python-setup" in tasks["bootstrap"]["depends"]
 print("PASS: workspace setup does not provision infrastructure credentials", flush=True)
+assert configuration["bootstrap"]["repos"]["~/.dotfiles"] == {"url": "git@github.com:saikatdas0790/.dotfiles.git"}
+assert tasks["bootstrap"]["run"].index("mise run dotfiles-setup") > tasks["bootstrap"]["run"].index("cp .saikat-machine-access-ed25519")
+assert "StrictHostKeyChecking=yes" in tasks["dotfiles-setup"]["env"]["GIT_SSH_COMMAND"]
+fixture_functions = """
+mise() {
+  printf 'mise'; printf ' <%s>' "$@"; printf '\\n'
+  if [[ "$*" == "$fixture_failure" ]]; then return 1; fi
+}
+git() {
+  printf 'git'; printf ' <%s>' "$@"; printf '\\n'
+  if [[ "$*" == "$fixture_failure" ]]; then return 1; fi
+}
+"""
+for failure in ["", "bootstrap repos apply --yes", "--no-env --no-hooks -C /fixture/.dotfiles dot apply --yes /fixture/.gitconfig", "config --get user.name"]:
+  result = subprocess.run(["bash", "-c", fixture_functions + tasks["dotfiles-setup"]["run"]], env={"PATH": os.environ["PATH"], "HOME": "/fixture", "fixture_failure": failure}, capture_output=True, text=True)
+  assert (result.returncode == 0) is (failure == ""), result.stderr
+  if failure:
+    assert "git <config> <--get> <user.email>" not in result.stdout
+  else:
+    assert 'mise <--no-env> <--no-hooks> <-C> </fixture/.dotfiles> <dot> <apply> <--yes> </fixture/.gitconfig>' in result.stdout
+    assert "git <config> <--get> <user.name>" in result.stdout
+    assert "git <config> <--get> <user.email>" in result.stdout
+  print("PASS: Git-only dotfiles setup stops on failure=" + repr(failure), flush=True)
 script = compile(tasks["goose-serve"]["run"], "goose-serve", "exec")
 with patch.dict(os.environ, {"GOOSE_AZURE_FOUNDRY_API_KEY": "fixture-api-key", "GOOSE_DESKTOP_SECRET_KEY": "fixture-server-secret"}, clear=True), patch("os.execve") as execute:
   exec(script, {})
