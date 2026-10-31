@@ -6,6 +6,12 @@ Concise architectural rules and constraints for this repository. Follow to maint
 
 **GitOps-first is the default for ALL infrastructure changes.** Every change to cluster state — Kubernetes resources, database config, secrets, passwords, schemas, node configuration — must be made declaratively through Git (Flux reconciles) or Ansible playbooks/roles. The git/Ansible declaration is the source of truth; the live system converges to match it.
 
+**Kubernetes-native configuration before Ansible (Hard Rule).** Use built-in resources
+or operator CRDs reconciled from Git whenever they can express the required behavior.
+Use Ansible only after verifying that Kubernetes-native configuration cannot meet
+the requirement; explain the missing capability and obtain approval for the fallback.
+Keep either path declarative; a scheduling guard is not a substitute for a hard limit.
+
 **Never mutate live production state imperatively** (via `kubectl exec`, SQL clients, SSH commands, `helm install`, etc.) as the primary approach. Imperative mutations are the **exception**, not the rule — used only when a declarative path genuinely doesn't exist (rare), and even then must be documented with rationale and converted to a declarative equivalent as soon as possible. When in doubt: commit to git and let the operator/controller/Ansible reconcile.
 
 ### Strictly Prohibited (no exceptions once cluster is up)
@@ -154,12 +160,12 @@ Modern IDEs and language tooling make long names ergonomic regardless of languag
 
 **Every comment that IS written carries exactly one of four tags, as the first character after the comment marker.** Better Comments colours them and Todo Tree indexes the `TODO` ones, so the tag tells a reader *why* the line is annotated before they read it — and a comment without a tag is a violation, not a stylistic choice:
 
-| Tag | Category | Use for |
-|---|---|---|
-| `*` | Highlight | important info, general notes — the counter-intuitive discovery that cost real time to find |
-| `!` | Alert | warnings / critical notes — the correct action is the opposite of the obvious (an ordering constraint, an operation that looks safe but destroys state, a silent failure mode) |
-| `?` | Query | an open question, something to investigate or confirm before relying on it |
-| `TODO` | Todo | tracked work, something to revisit (the operator-requested follow-up mechanism — why the `todo` lint rule stays disabled) |
+| Tag    | Category  | Use for                                                                                                                                                                        |
+| ------ | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `*`    | Highlight | important info, general notes — the counter-intuitive discovery that cost real time to find                                                                                    |
+| `!`    | Alert     | warnings / critical notes — the correct action is the opposite of the obvious (an ordering constraint, an operation that looks safe but destroys state, a silent failure mode) |
+| `?`    | Query     | an open question, something to investigate or confirm before relying on it                                                                                                     |
+| `TODO` | Todo      | tracked work, something to revisit (the operator-requested follow-up mechanism — why the `todo` lint rule stays disabled)                                                      |
 
 Syntax — the tag sits immediately after the comment marker:
 
@@ -266,10 +272,10 @@ The reference model is **XState** (https://stately.ai/docs — read the docs, no
 
 These are **two separate things** in XState, and conflating them is the most common modelling mistake:
 
-| XState | What it is | Swift/Rust equivalent |
-|---|---|---|
-| `state.value` | the **finite state** — a small, enumerable set of modes, possibly nested (`{ form: 'invalid' }`) | the **enum** (`state`) |
-| `state.context` | **extended state** — a data bag (tokens, ids, counts) that exists across *all* states | the **data struct** (`context`) |
+| XState          | What it is                                                                                       | Swift/Rust equivalent           |
+| --------------- | ------------------------------------------------------------------------------------------------ | ------------------------------- |
+| `state.value`   | the **finite state** — a small, enumerable set of modes, possibly nested (`{ form: 'invalid' }`) | the **enum** (`state`)          |
+| `state.context` | **extended state** — a data bag (tokens, ids, counts) that exists across *all* states            | the **data struct** (`context`) |
 
 So a machine's snapshot is `(state, context)` — one enum saying *where* you are, one struct holding *what you know*. `context` is **immutable**; it is updated only by an `assign` action within a transition, never by direct mutation. **State-specific data belongs inside the enum variant** (via nested/compound states), never as optionals on the shared context that only make sense in some modes.
 
@@ -442,10 +448,10 @@ Rules:
 
 **! None of that makes the superuser Secret the winner for a *running client* — and believing it does is how a six-hour outage started.** Measured on `harbor-db` (2026-10-02), with `enableSuperuserAccess: true` and a correctly-declared `superuserSecret`:
 
-| Credential | TCP auth result |
-|---|---|
+| Credential                       | TCP auth result                                                   |
+| -------------------------------- | ----------------------------------------------------------------- |
 | the `superuserSecret`'s password | **FAILED** — `password authentication failed for user "postgres"` |
-| the `-app` Secret's password | **succeeded** |
+| the `-app` Secret's password     | **succeeded**                                                     |
 
 The superuser Secret's value was never synced into the database, and its password did not match `pg_authid`. So **never assume which of a cluster's `postgres` credentials the server actually accepts** — a `psql` without `-h` cannot tell you either, because it connects over the Unix socket where CNPG trusts any password and will report *both* as valid. Test with `psql -h 127.0.0.1 -U postgres ...` and compare against `pg_authid.rolpassword`.
 

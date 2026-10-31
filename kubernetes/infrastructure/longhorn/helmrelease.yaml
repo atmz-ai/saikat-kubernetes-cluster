@@ -26,18 +26,6 @@ spec:
       # doubling write traffic unnecessarily.
       defaultReplicaCount: 2
 
-      # Reserve 5% of each disk for the OS, kubelet, and containerd image cache.
-      # Kubelet's default imageGCHighThresholdPercent (85%) automatically evicts
-      # unused images before the disk fills — 5% (~48 Gi on 954 Gi disks) is
-      # sufficient headroom alongside automatic GC. Default was 30% (~286 Gi).
-      storageReservedPercentageForDefaultDisk: 5
-
-      # Minimum physical free space that must remain after a volume expansion.
-      # Set to 0 because storageReservedPercentageForDefaultDisk (5%) already
-      # protects the host — this second guard would otherwise block expansions
-      # even when plenty of schedulable space exists. Default was 25%.
-      storageMinimalAvailablePercentage: 0
-
       # Enable the revision counter globally. This controls the --disableRevCounter
       # flag on every engine process. With counter enabled (i.e. disableRevCounter
       # false), a rejoining replica only syncs the delta written while it was down —

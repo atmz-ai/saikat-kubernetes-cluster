@@ -74,6 +74,7 @@ helm = "latest"
 # resolution never falls through to a stale installer-managed binary.
 # `spacetimedb-standalone` stays untouched: `spacetime start` execs it.
 "github:clockworklabs/SpacetimeDB" = { version = "latest", rename_exe = { "spacetimedb-cli" = "spacetime" } }
+jq = "latest"
 kubectl = "latest"
 node = "latest"
 pitchfork = "latest"
