@@ -11,6 +11,8 @@ spec:
   timeout: 10m
   dependsOn:
     - name: infrastructure-longhorn
+    - name: infrastructure-rustfs
+    - name: infrastructure-monitoring
   sourceRef:
     kind: GitRepository
     name: flux-system

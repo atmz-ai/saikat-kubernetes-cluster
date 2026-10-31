@@ -123,6 +123,7 @@ python = "3.14.8"
 #   --s3-list-url-encode       toggle URL-encoded listings, which is more
 #                              reliable for awkward object keys
 rclone = "latest"
+rg = "latest"
 ruff = "latest"
 # rush — cross-platform parallel job runner (Go, single native binary). Added
 # because parallelising shell work on macOS has no good built-in: BSD `xargs`
@@ -170,6 +171,7 @@ s5cmd = "latest"
 sops = "latest"
 sqlite = "latest"
 uv = "latest"
+yq = "latest"
 
 # System packages — project-specific build dependencies (apt on Debian/Ubuntu).
 # Applied with: mise bootstrap packages apply --yes

@@ -4,4 +4,4 @@ resources:
   - namespace.yaml
   - helmrepository.yaml
   - helmrelease.yaml
-  - loki-s3-credentials.sops.yaml
+  - loki-rustfs-credentials.sops.yaml

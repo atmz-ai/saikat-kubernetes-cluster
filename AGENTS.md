@@ -156,6 +156,8 @@ Modern IDEs and language tooling make long names ergonomic regardless of languag
 
 **No legacy domain jargon (Hard Rule):** Do not carry over naming from previous platforms. Call things what they actually are in the current system (e.g. `oauth_subject` / `user_id` for user identifiers, `service_id` for service identifiers, SpacetimeDB `Identity` for database identity). When touching code that uses legacy jargon from a prior platform, rename to the accurate current term in the same change. This prevents conflation and makes the code self-documenting.
 ### Comments Are the Exception, Not the Default (Hard Rule)
+**Hard preference: do not add unnecessary comments. Remove resolved TODO comments without replacing them with findings, incident summaries, or explanatory comments unless explicitly requested.**
+
 **Default to writing no comment. Names and types carry the documentation burden.** We write far too many comments, and a comment is a maintenance liability: it duplicates a decision that already lives in the code, so it drifts, contradicts, and misleads the next reader. Before writing one, ask whether a better name or type would say the same thing — if it would, rename instead of commenting.
 
 **Every comment that IS written carries exactly one of four tags, as the first character after the comment marker.** Better Comments colours them and Todo Tree indexes the `TODO` ones, so the tag tells a reader *why* the line is annotated before they read it — and a comment without a tag is a violation, not a stylistic choice:

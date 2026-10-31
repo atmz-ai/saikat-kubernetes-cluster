@@ -1,5 +1,4 @@
-# TODO adopt native per-volume hard limits once upstream #11666 ships (currently
-# TODO targeted for v1.15.0); use upstream capacity defaults until then.
+# TODO adopt native per-volume hard limits once upstream #11666 ships (currently targeted for v1.15.0); use upstream capacity defaults until then.
 # ! Longhorn v1.12.1 has no total-space hard-limit field; snapshotMaxSize only
 # ! blocks new snapshots and excludes the volume head and removed snapshots.
 # * Upstream capability: https://github.com/longhorn/longhorn/issues/11666

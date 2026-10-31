@@ -7,4 +7,5 @@ resources:
   - credentials.sops.yaml
   - atmz-internal-apps-google-oauth.sops.yaml
   - google-authorization.yaml
+  - loki-bucket.yaml
   - route.yaml

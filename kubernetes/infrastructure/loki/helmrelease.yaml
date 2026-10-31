@@ -32,20 +32,11 @@ spec:
     loki:
       auth_enabled: false
       commonConfig:
+        path_prefix: /var/loki/rustfs
         replication_factor: 1
       compactor:
-        # Compactor runs as part of SingleBinary; retention_enabled must be
-        # set here to activate deletion of chunks older than retention_period.
         retention_enabled: true
-        # TODO Loki storage is not cleaning up: the S3 bucket is at ~380 GiB against a 720h retention.
-        # TODO Prime suspect is this value — it is `filesystem` while chunks live in S3, and retention
-        # TODO deletes are applied through the delete-request store, so chunk deletions may never reach
-        # TODO the bucket. Try `s3`, confirm the compactor actually runs, and watch the bucket size drop.
-        # * Independent of the above: the Longhorn volume for this pod read 431 GiB actual against 50 GiB
-        # * provisioned, and that was NOT the compactor — it was a local snapshot chain from the removed
-        # * daily `snapshot` job. The `snapshot-delete` RecurringJob now purges it. Do not read the two
-        # * numbers as one bug: re-check the bucket after the purge before concluding retention is broken.
-        delete_request_store: filesystem
+        delete_request_store: s3
       limits_config:
         # Required for the Grafana Logs Drilldown plugin's log volume histogram
         volume_enabled: true
@@ -58,29 +49,18 @@ spec:
         reject_old_samples: true
         reject_old_samples_max_age: 168h
       storage:
-        # Hetzner Object Storage (S3-compatible). Chunks and index stored in S3;
-        # the Longhorn PVC is only for WAL, active index, and compactor working
-        # directory, so it can be much smaller than the old 600Gi filesystem volume.
         type: s3
         bucketNames:
-          chunks: saikat-kubernetes-loki-storage
-          ruler: saikat-kubernetes-loki-storage
+          chunks: saikat-kubernetes-loki-log-chunks-index-and-rules
+          ruler: saikat-kubernetes-loki-log-chunks-index-and-rules
         s3:
-          # Endpoint, region, and bucket are plaintext (not secrets). Credentials
-          # are injected via the AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY env vars
-          # from the loki-s3-credentials SOPS Secret, using -config.expand-env=true.
-          endpoint: https://fsn1.your-objectstorage.com
-          region: fsn1
+          endpoint: http://rustfs-svc.rustfs.svc.cluster.local:9000
+          region: us-east-1
           s3ForcePathStyle: true
-          # Credentials use env-var expansion so they never appear in the config file:
-          # https://grafana.com/docs/loki/latest/configure/#use-environment-variables-in-the-configuration
-          accessKeyId: ${AWS_ACCESS_KEY_ID}
-          secretAccessKey: ${AWS_SECRET_ACCESS_KEY}
+          insecure: true
+          accessKeyId: ${RUSTFS_ACCESS_KEY}
+          secretAccessKey: ${RUSTFS_SECRET_KEY}
       schemaConfig:
-        # New schema period starting from the S3 migration date. Existing
-        # filesystem-era data (from 2024-01-01 schema) is not migrated — this
-        # starts fresh in S3. Old data is lost (it was the source of the disk
-        # pressure that took down worker-11/13/26).
         configs:
           - from: "2026-08-20"
             store: tsdb
@@ -92,13 +72,9 @@ spec:
 
     singleBinary:
       replicas: 1
-      # Inject S3 credentials from the SOPS-encrypted Secret as environment
-      # variables. -config.expand-env=true enables ${VAR} substitution in the
-      # Loki config YAML so credentials never appear in the config file:
-      # https://grafana.com/docs/loki/latest/configure/#use-environment-variables-in-the-configuration
       extraEnvFrom:
         - secretRef:
-            name: loki-s3-credentials
+            name: loki-rustfs-credentials
       extraArgs:
         - -config.expand-env=true
       persistence:
@@ -127,12 +103,23 @@ spec:
     backend:
       replicas: 0
 
-    # Disable bundled MinIO — using external S3 (Hetzner Object Storage)
     minio:
       enabled: false
 
-    # Disable self-monitoring to avoid circular dependencies
     monitoring:
+      dashboards:
+        enabled: true
+        namespace: monitoring
+      rules:
+        enabled: true
+        labels:
+          release: kube-prometheus-stack
+      serviceMonitor:
+        enabled: true
+        labels:
+          release: kube-prometheus-stack
+        metricsInstance:
+          enabled: false
       selfMonitoring:
         enabled: false
         grafanaAgent:
