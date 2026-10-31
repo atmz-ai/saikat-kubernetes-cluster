@@ -72,6 +72,37 @@ spec:
 
     singleBinary:
       replicas: 1
+      initContainers:
+        - name: wait-for-rustfs-bucket
+          image: rustfs/rustfs:1.0.1
+          command: [curl]
+          args:
+            - --fail-with-body
+            - --show-error
+            - --connect-timeout
+            - "10"
+            - --max-time
+            - "30"
+            - --retry
+            - "30"
+            - --retry-delay
+            - "2"
+            - --retry-max-time
+            - "300"
+            - --retry-all-errors
+            - --aws-sigv4
+            - aws:amz:us-east-1:s3
+            - --variable
+            - "%RUSTFS_ACCESS_KEY"
+            - --variable
+            - "%RUSTFS_SECRET_KEY"
+            - --expand-user
+            - "{{RUSTFS_ACCESS_KEY}}:{{RUSTFS_SECRET_KEY}}"
+            - --head
+            - http://rustfs-svc.rustfs.svc.cluster.local:9000/saikat-kubernetes-loki-log-chunks-index-and-rules
+          envFrom:
+            - secretRef:
+                name: loki-rustfs-credentials
       extraEnvFrom:
         - secretRef:
             name: loki-rustfs-credentials
