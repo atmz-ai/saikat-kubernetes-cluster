@@ -1,11 +1,5 @@
 import Foundation
 
-/// Social + phone sign-in flows for `AuthClient` — Kotlin
-/// `DefaultAuthClient`'s `signInWithSocial`/`handleOAuthCallback`/
-/// `authenticate`/`phoneAuthLogin`/`verifyPhoneAuth`, kept in an extension
-/// of the same class (not a layer). The browser-auth session
-/// (ASWebAuthenticationSession) is driven by the UI layer, which calls
-/// `socialAuthorizationURL` then `handleOAuthCallbackResult`.
 extension AuthClient {
 
   /// Builds the OAuth authorization URL for the provider — Kotlin
@@ -87,11 +81,6 @@ extension AuthClient {
         redirectScheme: redirectScheme
       )
     } catch {
-      // The token exchange is the step that decides whether a sign-in
-      // attempt succeeded, so the failure event belongs here rather than at
-      // each UI call site (which would be three copies and would miss the
-      // phone path). This handler rethrows, so the existing per-screen error
-      // handling is untouched.
       analytics?.track(.authFailed(provider: currentProvider ?? .google))
       throw error
     }
@@ -117,58 +106,4 @@ extension AuthClient {
     _ = currentUserSubject
   }
 
-  // MARK: - Phone OTP (Kotlin phoneAuthLogin/verifyPhoneAuth)
-
-  /// Starts phone OTP. Stores the challenge as `client_state` — the
-  /// verify call must echo it (Kotlin contract).
-  public func phoneAuthLogin(phoneNumber: String) async throws -> String {
-    let codeVerifier = try PKCE.generateCodeVerifier()
-    let codeChallenge = PKCE.generateCodeChallenge(codeVerifier: codeVerifier)
-    pendingCodeVerifier = codeVerifier
-    currentCodeChallenge = codeChallenge
-
-    switch try await authDataSource.phoneAuthLogin(
-      phoneNumber: phoneNumber,
-      codeChallenge: codeChallenge,
-      redirectScheme: redirectScheme
-    ) {
-    case .success:
-      return codeChallenge
-    case .error(let errorPayload):
-      throw AuthError.oauthFailed(
-        errorDescription: "\(errorPayload.error) - \(errorPayload.errorDescription)"
-      )
-    }
-  }
-
-  /// Verifies the OTP and completes sign-in through the code exchange —
-  /// Kotlin `verifyPhoneAuth`.
-  public func verifyPhoneAuth(phoneNumber: String, code: String) async throws {
-    guard let clientState = currentCodeChallenge else {
-      throw AuthError.oauthFailed(
-        errorDescription: "Phone auth verification failed - no state found"
-      )
-    }
-    switch try await authDataSource.verifyPhoneAuth(
-      phoneNumber: phoneNumber,
-      code: code,
-      clientState: clientState
-    ) {
-    case .success(let idTokenCode, _):
-      defaults.set(phoneNumber, forKey: CachedSessionKey.phoneNumber.rawValue)
-      sessionStore.updatePhoneNumber(phoneNumber)
-      currentProvider = .phone
-      guard let userSubject = sessionStore.userSubject else {
-        throw AuthError.oauthFailed(
-          errorDescription: "Phone auth verification failed - user subject not found"
-        )
-      }
-      try await authenticate(code: idTokenCode, currentUserSubject: userSubject)
-    case .error(let errorPayload):
-      throw AuthError.oauthFailed(
-        errorDescription:
-          "Phone auth verification failed - \(errorPayload.error) - \(errorPayload.errorDescription)"
-      )
-    }
-  }
 }

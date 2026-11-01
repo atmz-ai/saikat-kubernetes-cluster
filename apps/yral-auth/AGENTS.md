@@ -6,6 +6,11 @@
 
 Use the root mise tasks, not starter-template installation commands or an application-local environment file.
 
+The shared application/server library builds as `rlib`; `client/` owns the
+`cdylib` browser hydration entry. Root Cargo workspace Leptos metadata pairs them,
+and build commands select `--project yral-auth`. Do not add `cdylib` to the shared
+library: the static musl server target cannot produce that output.
+
 - `mise run yral-auth-build` builds the server with `release-bin` and the WASM client with `release-lib`, including the production authentication-provider features.
 - `mise run yral-auth-run` starts the release daemon at `http://localhost:8080`; its health endpoint is `/healthz`.
 - `mise run yral-auth-test` runs tests with the authenticated local SpacetimeDB daemon and native mise age secrets.

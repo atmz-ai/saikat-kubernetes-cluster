@@ -16,9 +16,6 @@
 // only a subset of the providers the mobile apps offer. Add:
 //   - Sign in with Apple (oauth flow in src/oauth_provider.rs + the
 //     Apple button on the auth page in src/page/auth.rs)
-//   - WhatsApp OTP login (wire src/context/message_delivery_service/
-//     to the auth page's phone flow once the WhatsApp API key works —
-//     see the whatsapp-api-broken TODO there)
 
 // TODO(ssr-to-client-spa): this app is a cargo-leptos SSR-rendered app
 // (features ssr + hydrate; hydrate_body in lib.rs, the axum server in
@@ -50,13 +47,12 @@ pub mod spacetime;
 pub mod utils;
 
 #[cfg(feature = "hydrate")]
-#[wasm_bindgen::prelude::wasm_bindgen]
 pub fn hydrate() {
-    use crate::app::*;
+    use crate::app::app;
 
     // initializes logging using the `log` crate
     _ = console_log::init_with_level(log::Level::Debug);
     console_error_panic_hook::set_once();
 
-    leptos::mount::hydrate_body(App);
+    leptos::mount::hydrate_body(app);
 }

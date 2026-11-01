@@ -17,7 +17,7 @@ use yral_auth::{
     api::server_impl::{
         handle_oauth_token_grant, handle_oidc_configuration, handle_well_known_jwks, healthz,
     },
-    app::{shell, App},
+    app::{app as authentication_app, shell},
     context::server::{ServerCtx, ServerState},
 };
 
@@ -75,7 +75,7 @@ async fn main() {
     let addr = conf.leptos_options.site_addr;
     let leptos_options = conf.leptos_options;
     // Generate the list of routes in your Leptos App
-    let routes = generate_route_list(App);
+    let routes = generate_route_list(authentication_app);
 
     let ctx = Arc::new(ServerCtx::new().await);
 

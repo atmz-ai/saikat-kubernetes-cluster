@@ -325,6 +325,10 @@ url = "https://github.com/cargo-bins/cargo-binstall/releases/download/v1.26.0/ca
 url_api = "https://api.github.com/repos/cargo-bins/cargo-binstall/releases/assets/650343802"
 provenance = "github-attestations"
 
+[[tools."cargo:cargo-leptos"]]
+version = "0.3.11"
+backend = "cargo:cargo-leptos"
+
 [[tools."cargo:trunk"]]
 version = "0.22.0"
 backend = "cargo:trunk"
@@ -681,30 +685,6 @@ url_api = "https://api.github.com/repos/jdx/pitchfork/releases/assets/653200865"
 checksum = "sha256:5ba2f21573685845ce95a84859a8a6640640ba634c34f4fe466ad88b1ac9f9ba"
 url = "https://github.com/jdx/pitchfork/releases/download/v2.32.0/pitchfork-x86_64-pc-windows-msvc.zip"
 url_api = "https://api.github.com/repos/jdx/pitchfork/releases/assets/653202928"
-
-[[tools.podman]]
-version = "6.1.4"
-backend = "github:podman-container-tools/podman"
-
-[tools.podman."platforms.linux-arm64"]
-checksum = "sha256:1d7c2a3241b56effa68c724359fb30e603a802699b2b7b20fe2fae5ff6819601"
-url = "https://github.com/podman-container-tools/podman/releases/download/v6.1.4/podman-remote-static-linux_arm64.tar.gz"
-url_api = "https://api.github.com/repos/podman-container-tools/podman/releases/assets/634977468"
-
-[tools.podman."platforms.linux-arm64-musl"]
-checksum = "sha256:1d7c2a3241b56effa68c724359fb30e603a802699b2b7b20fe2fae5ff6819601"
-url = "https://github.com/podman-container-tools/podman/releases/download/v6.1.4/podman-remote-static-linux_arm64.tar.gz"
-url_api = "https://api.github.com/repos/podman-container-tools/podman/releases/assets/634977468"
-
-[tools.podman."platforms.linux-x64"]
-checksum = "sha256:af1f85c22214088a0a9986b9c82b4c9b5b74eda8ecaa6c8cca82b1a63f339b4a"
-url = "https://github.com/podman-container-tools/podman/releases/download/v6.1.4/podman-remote-static-linux_amd64.tar.gz"
-url_api = "https://api.github.com/repos/podman-container-tools/podman/releases/assets/634977464"
-
-[tools.podman."platforms.linux-x64-musl"]
-checksum = "sha256:af1f85c22214088a0a9986b9c82b4c9b5b74eda8ecaa6c8cca82b1a63f339b4a"
-url = "https://github.com/podman-container-tools/podman/releases/download/v6.1.4/podman-remote-static-linux_amd64.tar.gz"
-url_api = "https://api.github.com/repos/podman-container-tools/podman/releases/assets/634977464"
 
 [[tools.python]]
 version = "3.14.8"

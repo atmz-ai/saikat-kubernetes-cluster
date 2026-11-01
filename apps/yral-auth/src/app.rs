@@ -1,7 +1,16 @@
-use leptos::prelude::*;
-use leptos_meta::{provide_meta_context, HashedStylesheet, MetaTags, Title};
+use leptos::{
+    html,
+    hydration::{AutoReloadProps, HydrationScriptsProps},
+    prelude::*,
+};
+use leptos_meta::{
+    provide_meta_context, HashedStylesheet, HashedStylesheetProps, MetaTags, Title, TitleProps,
+};
 use leptos_router::{
-    components::{Redirect, Route, Router, Routes},
+    components::{
+        Redirect, RedirectProps, Route, RouteChildren, RouteProps, Router, RouterProps, Routes,
+        RoutesProps,
+    },
     path,
 };
 
@@ -11,85 +20,122 @@ use crate::{
         account::{oauth_callback::OauthCallbackPage, page::AccountPage},
         auth::auth_page,
         error_page::ErrorPage,
-        oauth_login::{oauth_callback::OAuthCallbackPage, oauth_redirector::OAuthRedirectorPage},
+        oauth_login::{oauth_callback::OAuthCallbackPage, oauth_redirector::oauth_redirector_page},
     },
 };
 
-#[cfg(feature = "phone-auth")]
-use crate::page::oauth_login::{
-    phone_auth_login::PhoneAuthLogin, verify_phone_auth::VerifyPhoneAuth,
-};
-
 pub fn shell(options: LeptosOptions) -> impl IntoView {
-    view! {
-        <!DOCTYPE html>
-        <html lang="en">
-            <head>
-                <meta charset="utf-8" />
-                <meta name="viewport" content="width=device-width, initial-scale=1" />
-                <AutoReload options=options.clone() />
-                <HydrationScripts options=options.clone() />
-                // injects a stylesheet into the document <head>
-                // id=leptos means cargo-leptos will hot-reload this stylesheet
-                <HashedStylesheet options=options id="leptos" />
-                <MetaTags />
-            </head>
-            <body>
-                <App />
-            </body>
-        </html>
-    }
+    (
+        leptos::tachys::html::doctype("html"),
+        html::html()
+            .attr("lang", "en")
+            .child(
+                html::head()
+                    .child(html::meta().attr("charset", "utf-8"))
+                    .child(
+                        html::meta()
+                            .attr("name", "viewport")
+                            .attr("content", "width=device-width, initial-scale=1"),
+                    )
+                    .child(AutoReload(
+                        AutoReloadProps::builder().options(options.clone()).build(),
+                    ))
+                    .child(HydrationScripts(
+                        HydrationScriptsProps::builder()
+                            .options(options.clone())
+                            .build(),
+                    ))
+                    .child(HashedStylesheet(
+                        HashedStylesheetProps::builder()
+                            .options(options)
+                            .id("leptos")
+                            .build(),
+                    ))
+                    .child(MetaTags()),
+            )
+            .child(html::body().child(app())),
+    )
 }
 
-#[component]
-pub fn App() -> impl IntoView {
-    // Provides context that manages stylesheets, titles, meta tags, etc.
+pub fn app() -> impl IntoView {
     provide_meta_context();
     provide_client_id_validator();
 
-    view! {
-        // sets the document title
-        <Title text="Yral Authentication" />
+    (
+        Title(TitleProps::builder().text("Yral Authentication").build()),
+        Router(
+            RouterProps::builder()
+                .children(ToChildren::to_children(|| {
+                    html::main().child(Routes(
+                        RoutesProps::builder()
+                            .fallback(|| "Page not found.".into_view())
+                            .children(RouteChildren::to_children(|| {
+                                (
+                                    Route(
+                                        RouteProps::builder()
+                                            .path(path!("/"))
+                                            .view(|| {
+                                                Redirect(
+                                                    RedirectProps::builder()
+                                                        .path("/account")
+                                                        .build(),
+                                                )
+                                            })
+                                            .build(),
+                                    ),
+                                    Route(
+                                        RouteProps::builder()
+                                            .path(path!("/account"))
+                                            .view(AccountPage)
+                                            .build(),
+                                    ),
+                                    Route(
+                                        RouteProps::builder()
+                                            .path(path!("/account/callback"))
+                                            .view(OauthCallbackPage)
+                                            .build(),
+                                    ),
+                                    Route(
+                                        RouteProps::builder()
+                                            .path(path!("/oauth/auth"))
+                                            .view(auth_page)
+                                            .build(),
+                                    ),
+                                    Route(
+                                        RouteProps::builder()
+                                            .path(path!("/oauth_redirector"))
+                                            .view(oauth_redirector_page)
+                                            .build(),
+                                    ),
+                                    Route(
+                                        RouteProps::builder()
+                                            .path(path!("/oauth_callback"))
+                                            .view(OAuthCallbackPage)
+                                            .build(),
+                                    ),
+                                    Route(
+                                        RouteProps::builder()
+                                            .path(path!("/error"))
+                                            .view(ErrorPage)
+                                            .build(),
+                                    ),
+                                )
+                            }))
+                            .build(),
+                    ))
+                }))
+                .build(),
+        ),
+    )
+}
 
-        // content for this welcome page
-        <Router>
-            <main>
-                <Routes fallback=|| "Page not found.".into_view()>
-                    <Route path=path!("/") view=|| view! { <Redirect path="/account" /> } />
-                    <Route path=path!("/account") view=AccountPage />
-                    <Route path=path!("/account/callback") view=OauthCallbackPage />
-                    <Route path=path!("/oauth/auth") view=auth_page />
-                    <Route path=path!("/oauth_redirector") view=OAuthRedirectorPage />
-                    <Route path=path!("/oauth_callback") view=OAuthCallbackPage />
-                    <Route
-                        path=path!("/phone/verify")
-                        view=|| {
-                            #[cfg(feature = "phone-auth")]
-                            {
-                                view! { <VerifyPhoneAuth /> }
-                            }
-                            #[cfg(not(feature = "phone-auth"))]
-                            {
-                                view! { <ErrorPage /> }
-                            }
-                        }
-                    />
-                    <Route
-                        path=path!("/phone/auth")
-                        view=|| {
-                            #[cfg(feature = "phone-auth")]
-                            {
-                                view! { <PhoneAuthLogin /> }
-                            }
-                            #[cfg(not(feature = "phone-auth"))]
-                            {
-                                view! { <ErrorPage /> }
-                            }
-                        }
-                    />
-                    <Route path=path!("/error") view=ErrorPage />
-                </Routes>
-            </main>
-        </Router>
+#[cfg(all(test, feature = "ssr"))]
+mod tests {
+    #[test]
+    fn retained_account_route_is_registered_without_phone_routes() {
+        let routes = leptos_axum::generate_route_list(super::app);
+        let paths = routes.iter().map(|route| route.path()).collect::<Vec<_>>();
+        assert!(paths.contains(&"/account"), "Registered routes: {paths:?}");
+        assert!(!paths.iter().any(|path| path.starts_with("/phone/")));
     }
 }

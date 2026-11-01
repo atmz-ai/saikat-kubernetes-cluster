@@ -7045,6 +7045,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "yral-auth-client"
+version = "0.1.0"
+dependencies = [
+ "wasm-bindgen",
+ "yral-auth",
+]
+
+[[package]]
 name = "yral-database-spacetime-bindings"
 version = "0.1.0"
 dependencies = [

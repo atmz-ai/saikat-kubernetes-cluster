@@ -4,11 +4,12 @@
 description = "Build yral-auth (release + WASM client). Linux/WSL: musl x86_64 (mimics prod). macOS: native arm64."
 dir = "apps/yral-auth"
 run = '''
+#!/usr/bin/env bash
 if [[ "$(uname)" == "Darwin" ]]; then
-  cargo leptos build --release --lib-features release-lib --bin-features release-bin
+  cargo leptos build --project yral-auth --release --lib-features release-lib --bin-features release-bin
 else
   LEPTOS_BIN_TARGET_TRIPLE=x86_64-unknown-linux-musl \
-    cargo leptos build --release --lib-features release-lib --bin-features release-bin
+    cargo leptos build --project yral-auth --release --lib-features release-lib --bin-features release-bin
 fi
 '''
 
@@ -66,6 +67,7 @@ run = ["mise run secrets-check -- JWT_EC_PEM", "cargo test --features ssr --bins
 description = "Build the yral-auth container image locally (container on macOS, podman on Linux)"
 depends = ["container-system-start"]
 run = '''
+#!/usr/bin/env bash
 if [[ "$(uname)" == "Darwin" ]]; then
   exec container build -f apps/yral-auth/Dockerfile.buildkit -t test/yral-auth --platform linux/amd64 --cpus 17 --memory 40gb .
 else

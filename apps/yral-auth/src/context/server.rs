@@ -21,8 +21,6 @@ use openidconnect::core::CoreJsonWebKeySet;
 use openidconnect::ClientSecret;
 use p256::pkcs8::DecodePublicKey;
 
-#[cfg(feature = "phone-auth")]
-use crate::context::message_delivery_service::MessageDeliveryService;
 use crate::{
     consts::AUTH_TOKEN_KID,
     kv::KVStoreImpl,
@@ -141,8 +139,6 @@ pub struct ServerCtx {
     pub jwk_pairs: JwkPairs,
     pub kv_store: KVStoreImpl,
     pub validator: ClientIdValidatorImpl,
-    #[cfg(feature = "phone-auth")]
-    pub message_delivery_service: Box<dyn MessageDeliveryService>,
 }
 
 impl ServerCtx {
@@ -315,38 +311,13 @@ impl ServerCtx {
         //SpacetimeDB KV store
         let kv_store = Self::init_kv_store().await;
 
-        #[cfg(feature = "phone-auth")]
-        {
-            use crate::context::message_delivery_service;
-
-            let message_delivery_service = {
-                let whatsapp_api_key = env::var("WHATSAPP_API_KEY")
-                    .expect("`WHATSAPP_API_KEY` is required for phone auth!");
-                Box::new(
-                    message_delivery_service::WhatsAppMessageDeliveryService::new(whatsapp_api_key),
-                ) as Box<dyn MessageDeliveryService>
-            };
-
-            Self {
-                oauth_http_client,
-                oauth_providers,
-                cookie_key,
-                jwk_pairs: JwkPairs::default(),
-                kv_store, //SpacetimeDB KV store
-                validator: ClientIdValidatorImpl::Const(Default::default()),
-                message_delivery_service,
-            }
-        }
-        #[cfg(not(feature = "phone-auth"))]
-        {
-            Self {
-                oauth_http_client,
-                oauth_providers,
-                cookie_key,
-                jwk_pairs: JwkPairs::default(),
-                kv_store,
-                validator: ClientIdValidatorImpl::Const(Default::default()),
-            }
+        Self {
+            oauth_http_client,
+            oauth_providers,
+            cookie_key,
+            jwk_pairs: JwkPairs::default(),
+            kv_store,
+            validator: ClientIdValidatorImpl::Const(Default::default()),
         }
     }
 

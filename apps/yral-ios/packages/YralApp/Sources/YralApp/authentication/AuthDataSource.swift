@@ -5,7 +5,6 @@ import Foundation
 /// Endpoint table (all on `auth.yral.com` unless noted):
 ///   - POST `oauth/token` (form-urlencoded): anonymous (client_credentials),
 ///     authorization-code exchange, refresh-token grant.
-///   - POST `api/phone_auth_login` (JSON), POST `api/verify_phone_auth` (JSON)
 ///   - POST `api/create_ai_account` (JSON)
 ///   - POST `metadata.yral.com/v2/update_session_as_registered` (JSON, Bearer)
 ///
@@ -19,8 +18,6 @@ import Foundation
 ///     with NO URL-encoding — values are safe (UUIDs, base64url tokens).
 ///   - `redirect_uri` is sent unencoded (`com.yral.iosApp://oauth/callback`).
 ///   - `update_session_as_registered` is fire-and-forget (status NOT checked).
-///   - `verify_phone_auth` returns a 2-string JSON ARRAY on 200 —
-///     `[id_token_code, redirect_uri]` — not an object.
 public struct AuthDataSource: Sendable {
 
   /// Default URLSession — no custom client needed (Kotlin's 30s timeout
@@ -104,101 +101,6 @@ public struct AuthDataSource: Sendable {
     return try TokenResponse.fromJSONBody(String(data: data, encoding: .utf8) ?? "")
   }
 
-  // MARK: - Phone OTP
-
-  /// Starts phone/WhatsApp OTP: the response carries its own PKCE state
-  /// (`client_state` == code challenge — same as the social flow's `state`).
-  public func phoneAuthLogin(
-    phoneNumber: String,
-    codeChallenge: String,
-    redirectScheme: String
-  ) async throws -> PhoneAuthLoginOutcome {
-    let request = try phoneAuthBaseRequest(
-      path: "api/phone_auth_login",
-      phoneNumber: phoneNumber,
-      codeChallenge: codeChallenge,
-      redirectScheme: redirectScheme
-    )
-    // Status handled manually here (Kotlin: expectSuccess = false).
-    let (data, response) = try await session.data(for: request)
-    guard let httpResponse = response as? HTTPURLResponse,
-      httpResponse.statusCode == 200
-    else {
-      return .error(
-        try AuthErrorPayload.fromJSONBody(
-          String(data: data, encoding: .utf8) ?? ""
-        ))
-    }
-    return .success
-  }
-
-  /// Verifies the OTP. On 200 the body is a 2-string JSON ARRAY:
-  /// `[id_token_code, redirect_uri]` — the code then goes through the
-  /// standard authorization-code exchange.
-  public func verifyPhoneAuth(
-    phoneNumber: String,
-    code: String,
-    clientState: String
-  ) async throws -> PhoneAuthVerifyOutcome {
-    var request = URLRequest(
-      url: URL(string: "https://\(AppConfiguration.oauthBaseURL)/api/verify_phone_auth")!)
-    request.httpMethod = "POST"
-    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-    let bodyObject: [String: [String: String]] = [
-      "verify_request": [
-        "phone_number": phoneNumber,
-        "code": code,
-        "client_state": clientState,
-      ]
-    ]
-    request.httpBody = try JSONSerialization.data(withJSONObject: bodyObject)
-    let (data, response) = try await session.data(for: request)
-    guard let httpResponse = response as? HTTPURLResponse,
-      httpResponse.statusCode == 200
-    else {
-      return .error(
-        try AuthErrorPayload.fromJSONBody(
-          String(data: data, encoding: .utf8) ?? ""
-        ))
-    }
-    guard let array = try? JSONSerialization.jsonObject(with: data) as? [String],
-      array.count == 2
-    else {
-      return .error(
-        AuthErrorPayload(
-          error: "Missing all required keys",
-          errorDescription: String(data: data, encoding: .utf8) ?? ""
-        ))
-    }
-    return .success(idTokenCode: array[0], redirectURI: array[1])
-  }
-
-  private func phoneAuthBaseRequest(
-    path: String,
-    phoneNumber: String,
-    codeChallenge: String,
-    redirectScheme: String
-  ) throws -> URLRequest {
-    var request = URLRequest(
-      url: URL(string: "https://\(AppConfiguration.oauthBaseURL)/\(path)")!)
-    request.httpMethod = "POST"
-    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-    let bodyObject: [String: Any] = [
-      "auth_client_query": [
-        "response_type": "code",
-        "client_id": Self.clientID,
-        "redirect_uri": Self.redirectURI(scheme: redirectScheme),
-        "state": codeChallenge,
-        "code_challenge": codeChallenge,
-        "code_challenge_method": "S256",
-        "login_hint": "",
-      ],
-      "phone_number": phoneNumber,
-    ]
-    request.httpBody = try JSONSerialization.data(withJSONObject: bodyObject)
-    return request
-  }
-
   // MARK: - AI account creation (AI identity)
 
   /// Mints a delegated AI identity under the caller. No Bearer header —
@@ -280,35 +182,4 @@ public struct TokenResponse: Equatable, Sendable {
       tokenType: try requireString("token_type")
     )
   }
-}
-
-/// `{"error": "…", "error_description": "…"}` error payload shape.
-public struct AuthErrorPayload: Equatable, Sendable {
-  public let error: String
-  public let errorDescription: String
-
-  static func fromJSONBody(_ body: String) throws -> AuthErrorPayload {
-    let data = Data(body.utf8)
-    guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-      let error = object["error"] as? String
-    else {
-      return AuthErrorPayload(error: "unknown_error", errorDescription: body)
-    }
-    return AuthErrorPayload(
-      error: error,
-      errorDescription: object["error_description"] as? String ?? ""
-    )
-  }
-}
-
-/// `phone_auth_login` outcome (unit success or typed error).
-public enum PhoneAuthLoginOutcome: Equatable, Sendable {
-  case success
-  case error(AuthErrorPayload)
-}
-
-/// `verify_phone_auth` outcome — success carries the auth code + redirect URI.
-public enum PhoneAuthVerifyOutcome: Equatable, Sendable {
-  case success(idTokenCode: String, redirectURI: String)
-  case error(AuthErrorPayload)
 }

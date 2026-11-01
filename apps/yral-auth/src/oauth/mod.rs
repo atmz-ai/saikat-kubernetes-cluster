@@ -21,8 +21,6 @@ pub enum SupportedOAuthProviders {
     Google,
     #[cfg(feature = "apple-oauth")]
     Apple,
-    #[cfg(feature = "phone-auth")]
-    Phone,
 }
 
 impl Display for SupportedOAuthProviders {
@@ -32,8 +30,6 @@ impl Display for SupportedOAuthProviders {
             Self::Google => write!(f, "google"),
             #[cfg(feature = "apple-oauth")]
             Self::Apple => write!(f, "apple"),
-            #[cfg(feature = "phone-auth")]
-            Self::Phone => write!(f, "phone"),
             #[allow(unreachable_patterns)]
             _ => write!(f, "unsupported OAuth provider"),
         }
@@ -49,10 +45,41 @@ impl FromStr for SupportedOAuthProviders {
             "google" => Ok(Self::Google),
             #[cfg(feature = "apple-oauth")]
             "apple" => Ok(Self::Apple),
-            #[cfg(feature = "phone-auth")]
-            "phone" => Ok(Self::Phone),
             _ => Err(AuthErrorKind::InvalidProvider(s.to_string())),
         }
+    }
+}
+
+#[cfg(test)]
+mod provider_tests {
+    use super::SupportedOAuthProviders;
+    use crate::error::AuthErrorKind;
+
+    #[test]
+    fn retired_phone_provider_is_rejected() {
+        assert!(matches!(
+            "phone".parse::<SupportedOAuthProviders>(),
+            Err(AuthErrorKind::InvalidProvider(provider)) if provider == "phone"
+        ));
+        assert!(serde_json::from_str::<SupportedOAuthProviders>("\"Phone\"").is_err());
+    }
+
+    #[cfg(feature = "google-oauth")]
+    #[test]
+    fn google_provider_remains_supported() {
+        assert_eq!(
+            "google".parse::<SupportedOAuthProviders>().unwrap(),
+            SupportedOAuthProviders::Google
+        );
+    }
+
+    #[cfg(feature = "apple-oauth")]
+    #[test]
+    fn apple_provider_remains_supported() {
+        assert_eq!(
+            "apple".parse::<SupportedOAuthProviders>().unwrap(),
+            SupportedOAuthProviders::Apple
+        );
     }
 }
 
@@ -234,13 +261,6 @@ impl From<AuthErrorKind> for AuthCodeErrorKind {
             AuthErrorKind::InvalidLoginHint => Self::InvalidRequest,
             AuthErrorKind::InvalidProvider(_) => Self::ServerError,
             AuthErrorKind::Banned => Self::AccessDenied,
-            AuthErrorKind::InvalidPhoneNumber => Self::InvalidRequest,
-            AuthErrorKind::OtpCookieNotFound => Self::InvalidRequest,
-            AuthErrorKind::InvalidOtp => Self::InvalidRequest,
-            AuthErrorKind::ExpiredOtp => Self::InvalidRequest,
-            AuthErrorKind::PhoneMismatch => Self::InvalidRequest,
-            AuthErrorKind::AuthClientCookieNotFound => Self::InvalidRequest,
-            AuthErrorKind::InvalidOtpToken(_) => Self::InvalidRequest,
         }
     }
 }

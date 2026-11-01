@@ -27,22 +27,8 @@ pub enum AuthErrorKind {
     InvalidProvider(String),
     #[error("Invalid login hint")]
     InvalidLoginHint,
-    #[error("Invalid phone number")]
-    InvalidPhoneNumber,
     #[error("User has been banned")]
     Banned,
-    #[error("OTP cookie not found")]
-    OtpCookieNotFound,
-    #[error("Invalid OTP code")]
-    InvalidOtp,
-    #[error("Expired OTP")]
-    ExpiredOtp,
-    #[error("Phone number mismatch")]
-    PhoneMismatch,
-    #[error("Auth client cookie not found")]
-    AuthClientCookieNotFound,
-    #[error("Invalid OTP token: {0}")]
-    InvalidOtpToken(String),
 }
 
 use serde::de::{self, Deserializer, Visitor};
@@ -65,14 +51,7 @@ impl serde::Serialize for AuthErrorKind {
             AuthErrorKind::InvalidCodeChallenge(_) => "InvalidCodeChallenge",
             AuthErrorKind::InvalidProvider(_) => "InvalidProvider",
             AuthErrorKind::InvalidLoginHint => "InvalidLoginHint",
-            AuthErrorKind::InvalidPhoneNumber => "InvalidPhoneNumber",
             AuthErrorKind::Banned => "Banned",
-            AuthErrorKind::OtpCookieNotFound => "OtpCookieNotFound",
-            AuthErrorKind::InvalidOtp => "InvalidOtp",
-            AuthErrorKind::ExpiredOtp => "ExpiredOtp",
-            AuthErrorKind::PhoneMismatch => "PhoneMismatch",
-            AuthErrorKind::AuthClientCookieNotFound => "AuthClientCookieNotFound",
-            AuthErrorKind::InvalidOtpToken(_) => "InvalidOtpToken",
         };
         serializer.serialize_str(name)
     }
@@ -110,14 +89,7 @@ impl<'de> serde::Deserialize<'de> for AuthErrorKind {
                     }
                     "InvalidProvider" => Ok(AuthErrorKind::InvalidProvider(String::new())),
                     "InvalidLoginHint" => Ok(AuthErrorKind::InvalidLoginHint),
-                    "InvalidPhoneNumber" => Ok(AuthErrorKind::InvalidPhoneNumber),
                     "Banned" => Ok(AuthErrorKind::Banned),
-                    "OtpCookieNotFound" => Ok(AuthErrorKind::OtpCookieNotFound),
-                    "InvalidOtp" => Ok(AuthErrorKind::InvalidOtp),
-                    "ExpiredOtp" => Ok(AuthErrorKind::ExpiredOtp),
-                    "PhoneMismatch" => Ok(AuthErrorKind::PhoneMismatch),
-                    "AuthClientCookieNotFound" => Ok(AuthErrorKind::AuthClientCookieNotFound),
-                    "InvalidOtpToken" => Ok(AuthErrorKind::InvalidOtpToken(String::new())),
                     _ => Err(E::unknown_variant(
                         v,
                         &[
@@ -131,14 +103,7 @@ impl<'de> serde::Deserialize<'de> for AuthErrorKind {
                             "InvalidCodeChallenge",
                             "InvalidProvider",
                             "InvalidLoginHint",
-                            "InvalidPhoneNumber",
                             "Banned",
-                            "OtpCookieNotFound",
-                            "InvalidOtp",
-                            "ExpiredOtp",
-                            "PhoneMismatch",
-                            "AuthClientCookieNotFound",
-                            "InvalidOtpToken",
                         ],
                     )),
                 }
@@ -201,17 +166,10 @@ impl AuthErrorKind {
             | AuthErrorKind::InvalidCodeChallenge(_)
             | AuthErrorKind::InvalidProvider(_)
             | AuthErrorKind::InvalidLoginHint
-            | AuthErrorKind::InvalidPhoneNumber
             | AuthErrorKind::UnauthorizedClient(_)
             | AuthErrorKind::UnauthorizedRedirectUri(_)
             | AuthErrorKind::InvalidResponseType(_)
-            | AuthErrorKind::MissingParam(_)
-            | AuthErrorKind::InvalidOtp
-            | AuthErrorKind::ExpiredOtp
-            | AuthErrorKind::PhoneMismatch
-            | AuthErrorKind::AuthClientCookieNotFound
-            | AuthErrorKind::OtpCookieNotFound
-            | AuthErrorKind::InvalidOtpToken(_) => axum::http::StatusCode::BAD_REQUEST,
+            | AuthErrorKind::MissingParam(_) => axum::http::StatusCode::BAD_REQUEST,
 
             AuthErrorKind::Banned => axum::http::StatusCode::FORBIDDEN,
             AuthErrorKind::Unexpected(_) => axum::http::StatusCode::INTERNAL_SERVER_ERROR,

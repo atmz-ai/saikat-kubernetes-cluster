@@ -3,12 +3,31 @@ resolver = "3"
 members = [
   "apps/my-website",
   "apps/yral-auth",
+  "apps/yral-auth/client",
   "apps/yral-database-spacetime",
   "apps/yral-database-spacetime/bindings",
   "apps/yral-metadata/client",
   "apps/yral-metadata/server",
   "apps/yral-metadata/types",
 ]
+
+[[workspace.metadata.leptos]]
+name = "yral-auth"
+bin-package = "yral-auth"
+lib-package = "yral-auth-client"
+bin-target = "yral-auth"
+output-name = "yral-auth"
+site-root = "target/site"
+site-pkg-dir = "pkg"
+tailwind-input-file = "apps/yral-auth/style/tailwind.css"
+assets-dir = "apps/yral-auth/public"
+site-addr = "127.0.0.1:3000"
+reload-port = 3001
+browserquery = "defaults"
+bin-features = ["release-bin"]
+lib-features = ["release-lib"]
+lib-profile-release = "wasm-release"
+hash-files = false
 
 [workspace.dependencies]
 anyhow = "1.0.103"
@@ -78,6 +97,7 @@ utoipa-swagger-ui = "10.0.2"
 uuid = "1.26.0"
 wasm-bindgen = "0.2.130"
 web-time = "1.0.0"
+yral-auth = { path = "apps/yral-auth" }
 yral-database-spacetime-bindings = { package = "yral-database-spacetime-bindings", path = "apps/yral-database-spacetime/bindings" }
 
 # Size-optimized profile for WASM client bundles (used by all Leptos apps).

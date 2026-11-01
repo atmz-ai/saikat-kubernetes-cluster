@@ -2,13 +2,7 @@
 use crate::components::apple_symbol::{AppleSymbol, AppleSymbolProps};
 #[cfg(feature = "google-oauth")]
 use crate::components::google_symbol::{GoogleSymbol, GoogleSymbolProps};
-#[cfg(feature = "phone-auth")]
-use crate::components::whatsapp_symbol::{WhatsAppSymbol, WhatsAppSymbolProps};
-#[cfg(any(
-    feature = "phone-auth",
-    feature = "google-oauth",
-    feature = "apple-oauth"
-))]
+#[cfg(any(feature = "google-oauth", feature = "apple-oauth"))]
 use crate::components::yral_symbol::{YralSymbol, YralSymbolProps};
 use crate::{
     components::spinner::Spinner,
@@ -20,28 +14,16 @@ use crate::{
     },
 };
 use base64::{prelude::BASE64_URL_SAFE, Engine};
-#[cfg(any(
-    feature = "phone-auth",
-    feature = "google-oauth",
-    feature = "apple-oauth"
-))]
+#[cfg(any(feature = "google-oauth", feature = "apple-oauth"))]
 use leptos::ev;
 use leptos::{children::ToChildren, either::Either, html, prelude::*};
-#[cfg(not(any(
-    feature = "phone-auth",
-    feature = "google-oauth",
-    feature = "apple-oauth"
-)))]
+#[cfg(not(any(feature = "google-oauth", feature = "apple-oauth")))]
 use leptos_router::{
     components::{Redirect, RedirectProps},
     hooks::use_query,
     params::{Params, ParamsError},
 };
-#[cfg(any(
-    feature = "phone-auth",
-    feature = "google-oauth",
-    feature = "apple-oauth"
-))]
+#[cfg(any(feature = "google-oauth", feature = "apple-oauth"))]
 use leptos_router::{
     components::{Redirect, RedirectProps},
     hooks::{use_navigate, use_query},
@@ -195,16 +177,11 @@ pub fn auth_page() -> impl IntoView {
                         let auth = auth_query.await;
                         match auth {
                             Ok(AuthKind::Default(auth)) => {
-                                #[cfg(any(
-                                    feature = "phone-auth",
-                                    feature = "google-oauth",
-                                    feature = "apple-oauth"
-                                ))]
+                                #[cfg(any(feature = "google-oauth", feature = "apple-oauth"))]
                                 {
                                     Either::Left(login_content(auth))
                                 }
                                 #[cfg(not(any(
-                                    feature = "phone-auth",
                                     feature = "google-oauth",
                                     feature = "apple-oauth"
                                 )))]
@@ -228,11 +205,7 @@ pub fn auth_page() -> impl IntoView {
         ))
 }
 
-#[cfg(any(
-    feature = "phone-auth",
-    feature = "google-oauth",
-    feature = "apple-oauth"
-))]
+#[cfg(any(feature = "google-oauth", feature = "apple-oauth"))]
 pub fn login_content(auth: Box<AuthQuery>) -> impl IntoView {
     let auth_store = StoredValue::new(auth);
     let login_buttons = build_login_buttons(auth_store);
@@ -256,49 +229,10 @@ pub fn login_content(auth: Box<AuthQuery>) -> impl IntoView {
         )
 }
 
-#[cfg(any(
-    feature = "phone-auth",
-    feature = "google-oauth",
-    feature = "apple-oauth"
-))]
+#[cfg(any(feature = "google-oauth", feature = "apple-oauth"))]
 fn build_login_buttons(auth_store: StoredValue<Box<AuthQuery>>) -> Vec<AnyView> {
-    // TODO(auth-page-all-providers, 2026-09-01): navigating to
-    // auth.yral.com in a BROWSER lands on `/account` (page/account/
-    // page.rs) — the self-service account page — which renders a single
-    // hardcoded `GoogleLoginButton` (provider=google pinned in its
-    // oauth_login_url), NOT this three-button login page. This page
-    // (oauth/auth without a provider param) DOES render Continue with
-    // WhatsApp / Google / Apple (verified in the deployed WASM), but
-    // nothing links to it. Fix: add the WhatsApp + Apple buttons to the
-    // /account page too (or make /account delegate to this page's
-    // build_login_buttons instead of its own hardcoded button).
-    // ALSO: /account's self-service flow sends code_challenge =
-    // base64(32 zero bytes) — placeholder PKCE with zero entropy; give
-    // it a real verifier/challenge pair before relying on it.
+    // TODO add Apple sign-in to /account and replace its placeholder PKCE challenge.
     let mut login_buttons: Vec<AnyView> = Vec::new();
-
-    #[cfg(feature = "phone-auth")]
-    login_buttons.push(
-        login_button(
-            auth_store,
-            SupportedOAuthProviders::Phone,
-            "flex flex-row justify-center cursor-pointer items-center justify-between gap-1 rounded-full bg-white pr-4 hover:bg-neutral-200",
-            {
-                let icon_wrapper = html::div()
-                    .attr("class", "grid grid-cols-1 place-items-center pl-2 py-2 rounded-full")
-                    .child(WhatsAppSymbol(
-                        WhatsAppSymbolProps::builder()
-                            .class("text-xl rounded-full")
-                            .build(),
-                    ));
-                let label = html::span()
-                    .attr("class", "text-neutral-900")
-                    .child("Continue with Whatsapp");
-                (icon_wrapper, label)
-            },
-        )
-        .into_any(),
-    );
 
     #[cfg(feature = "google-oauth")]
     login_buttons.push(
@@ -347,11 +281,7 @@ fn build_login_buttons(auth_store: StoredValue<Box<AuthQuery>>) -> Vec<AnyView> 
     login_buttons
 }
 
-#[cfg(any(
-    feature = "phone-auth",
-    feature = "google-oauth",
-    feature = "apple-oauth"
-))]
+#[cfg(any(feature = "google-oauth", feature = "apple-oauth"))]
 pub fn login_button(
     auth: StoredValue<Box<AuthQuery>>,
     provider: SupportedOAuthProviders,

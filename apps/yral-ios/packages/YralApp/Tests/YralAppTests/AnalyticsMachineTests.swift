@@ -218,7 +218,7 @@ struct AnalyticsMachineTests {
   @Test("loginSuccess carries the auth journey")
   func loginSuccessCarriesJourney() {
     #expect(
-      AnalyticsEvent.loginSuccess(provider: .phone).properties == ["auth_journey": "phone"])
+      AnalyticsEvent.loginSuccess(provider: .google).properties == ["auth_journey": "google"])
   }
 
   @Test("a deliberate logout omits the cause, an expiry includes it")

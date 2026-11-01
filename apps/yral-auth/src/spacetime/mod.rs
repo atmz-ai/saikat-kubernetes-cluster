@@ -19,7 +19,7 @@
 //!
 //! ## No vendor lock-in
 //!
-//! User auth details (Google/Apple/WhatsApp OAuth) live in yral-auth —
+//! * User auth details (Google/Apple OAuth) live in yral-auth —
 //! fully under your control. The JWT is signed by yral-auth's own ES256 key.
 //! If you migrate from Maincloud to self-hosted SpacetimeDB, the same JWTs
 //! still work — just point clients at the new server URL.

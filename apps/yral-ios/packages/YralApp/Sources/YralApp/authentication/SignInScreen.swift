@@ -4,32 +4,11 @@ import SwiftUI
   import AuthenticationServices
 #endif
 
-/// Sign-up / sign-in screen — SwiftUI port of Kotlin `SignupView` in its
-/// default `LoginMode.BOTH` shape: headline, phone section (country
-/// picker + number + continue button), terms-of-service consent, "or"
-/// divider, and the Google/Apple icon tiles.
-///
-/// No view model — screen state lives HERE as @State; the auth actions
-/// call `AuthClient` directly (inline by default; the resend countdown
-/// is a 15-second Task beside the state it drives).
 public struct SignInScreen: View {
 
-  // MARK: - Screen state (no view model — colocated @State)
-
-  @State private var selectedCountry: Country?
-  @State private var phoneNumber = ""
-  @State private var phoneValidationError: String?
-  @State private var isRequestingOTP = false
-  @State private var sentToPhoneNumber: String?
-  @State private var resendTimerSeconds: Int?
-  @State private var resendTimerTask: Task<Void, Never>?
   @State private var socialAuthError: String?
-  @State private var isCountrySelectorShown = false
 
   @Environment(\.openURL) private var openURL
-
-  /// Kotlin `OTP_RESEND_TIMER_SECONDS`.
-  private let otpResendTimerSeconds = 15
 
   private let authClient: AuthClient
 
@@ -52,10 +31,8 @@ public struct SignInScreen: View {
         .frame(maxWidth: .infinity)
 
         VStack(spacing: 20) {
-          phoneSection
-          termsOfServiceText
-          orDivider
           socialSection
+          termsOfServiceText
         }
 
         if let socialAuthError {
@@ -73,168 +50,7 @@ public struct SignInScreen: View {
       #if canImport(UIKit)
         .toolbar(.hidden, for: .navigationBar)
       #endif
-      .navigationDestination(
-        isPresented: Binding(
-          get: { sentToPhoneNumber != nil },
-          set: {
-            if !$0 {
-              sentToPhoneNumber = nil
-              resetOTPScreenState()
-            }
-          }
-        )
-      ) {
-        if let phoneNumber = sentToPhoneNumber {
-          OtpVerificationScreen(
-            authClient: authClient,
-            sentToPhoneNumber: phoneNumber,
-            onResend: { Task { await requestOTP(for: phoneNumber) } },
-            resendTimerSeconds: resendTimerSeconds
-          )
-        }
-      }
-      .navigationDestination(isPresented: $isCountrySelectorShown) {
-        CountrySelectorScreen(
-          onSelect: { country in
-            selectedCountry = country
-            isCountrySelectorShown = false
-          },
-          onBack: { isCountrySelectorShown = false }
-        )
-      }
     }
-    .onAppear(perform: detectDefaultCountry)
-  }
-
-  // MARK: - Country detection (Kotlin LoginViewModel init)
-
-  /// Kotlin init: English-language devices default to India (temporary
-  /// until server-side geo); others use the device region; US fallback.
-  private func detectDefaultCountry() {
-    guard selectedCountry == nil else { return }
-    let deviceLanguage = (Locale.current.language.languageCode?.identifier ?? "")
-      .lowercased()
-    // `region.identifier` (iOS 16+) — `regionCode` is deprecated. The
-    // language and region are independent, so `region` is read directly
-    // rather than via the deprecated string accessor.
-    let regionCode =
-      deviceLanguage == "en"
-      ? "IN"
-      : Locale.current.region?.identifier
-    selectedCountry =
-      regionCode.flatMap { CountriesDataSource.country(byCode: $0) }
-      ?? CountriesDataSource.country(byCode: "US")
-  }
-
-  // MARK: - Phone section (Kotlin PhoneSignupSection)
-
-  private var phoneSection: some View {
-    VStack(spacing: 12) {
-      HStack(spacing: 8) {
-        CountryPickerButtonComponent(country: selectedCountry) {
-          isCountrySelectorShown = true
-        }
-
-        PhoneInputRowComponent(
-          nationalNumber: $phoneNumber,
-          selectedCountry: selectedCountry,
-          isError: phoneValidationError != nil
-        )
-      }
-
-      if let validationError = phoneValidationError {
-        Text(validationError)
-          .font(.footnote)
-          .foregroundStyle(.pink)
-          .frame(maxWidth: .infinity, alignment: .leading)
-      }
-
-      Button {
-        Task { await requestOTP() }
-      } label: {
-        Text(isRequestingOTP ? "Sending code…" : "Continue")
-          .font(.headline)
-          .frame(maxWidth: .infinity)
-          .padding(.vertical, 14)
-      }
-      .buttonStyle(.borderedProminent)
-      .tint(.pink)
-      .disabled(isRequestingOTP)
-    }
-  }
-
-  // MARK: - OTP request (Kotlin onPhoneLoginClicked)
-
-  /// Kotlin guard chain: country missing → "select country"; blank →
-  /// "enter phone number"; invalid → "invalid phone number format".
-  /// Success → navigate to the OTP screen + start the resend countdown.
-  private func requestOTP() async {
-    guard let country = selectedCountry else {
-      phoneValidationError = "Please select country"
-      return
-    }
-    if phoneNumber.allSatisfy(\.isWhitespace) {
-      phoneValidationError = "Please enter phone number"
-      return
-    }
-    guard
-      PhoneValidator.isValid(
-        nationalNumber: phoneNumber, regionCode: country.code
-      )
-    else {
-      phoneValidationError = "Invalid phone number format"
-      return
-    }
-
-    let formattedNumber = PhoneValidator.formatE164(
-      nationalNumber: phoneNumber, regionCode: country.code
-    )
-    isRequestingOTP = true
-    phoneValidationError = nil
-    defer { isRequestingOTP = false }
-
-    do {
-      _ = try await authClient.phoneAuthLogin(phoneNumber: formattedNumber)
-      sentToPhoneNumber = formattedNumber
-      startResendTimer()
-    } catch {
-      phoneValidationError = "Failed to send verification code"
-    }
-  }
-
-  /// Resend for an already-verified-shape number (from the OTP screen).
-  private func requestOTP(for formattedNumber: String) async {
-    guard resendTimerSeconds == nil else { return }
-    do {
-      _ = try await authClient.phoneAuthLogin(phoneNumber: formattedNumber)
-      startResendTimer()
-    } catch {
-      // Kotlin restarts the timer on a failed resend too (no
-      // rapid-fire retries).
-      startResendTimer()
-    }
-  }
-
-  /// Kotlin `startResendTimer`: 15 → 0 countdown; nil = resend enabled.
-  private func startResendTimer() {
-    resendTimerTask?.cancel()
-    resendTimerSeconds = otpResendTimerSeconds
-    resendTimerTask = Task {
-      for seconds in stride(from: otpResendTimerSeconds, through: 0, by: -1) {
-        guard !Task.isCancelled else { return }
-        resendTimerSeconds = seconds
-        if seconds > 0 {
-          try? await Task.sleep(for: .seconds(1))
-        }
-      }
-      resendTimerSeconds = nil
-    }
-  }
-
-  private func resetOTPScreenState() {
-    resendTimerTask?.cancel()
-    resendTimerTask = nil
-    resendTimerSeconds = nil
   }
 
   // MARK: - Terms consent (Kotlin TermsOfServiceText)
@@ -259,17 +75,6 @@ public struct SignInScreen: View {
         openURL(termsURL)
       }
     }
-  }
-
-  // MARK: - "or" divider (Kotlin OrDivider)
-
-  private var orDivider: some View {
-    HStack(spacing: 12) {
-      Rectangle().fill(.separator).frame(height: 1)
-      Text("or").font(.subheadline).foregroundStyle(.tertiary)
-      Rectangle().fill(.separator).frame(height: 1)
-    }
-    .padding(.vertical, 8)
   }
 
   // MARK: - Social section (Kotlin SocialSignupSection — icon tiles)

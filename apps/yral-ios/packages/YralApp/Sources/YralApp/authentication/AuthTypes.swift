@@ -1,10 +1,8 @@
 import Foundation
 
-/// Social providers — port of Kotlin `SocialProvider`.
 public enum SocialProvider: String, Sendable {
   case google
   case apple
-  case phone
 
   /// Wire value of the OAuth `provider` query parameter.
   public var wireValue: String { rawValue }
