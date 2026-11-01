@@ -472,4 +472,4 @@ data:
               severity: info
               namespace: monitoring
               synthetic_test: "true"
-            isPaused: true
+            isPaused: false
