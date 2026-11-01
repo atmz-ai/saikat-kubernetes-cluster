@@ -443,3 +443,33 @@ data:
             labels:
               severity: critical
             isPaused: false
+
+          - uid: grafana-google-chat-synthetic-test
+            title: Grafana Google Chat Synthetic Test
+            condition: A
+            data:
+              - refId: A
+                relativeTimeRange:
+                  from: 0
+                  to: 0
+                datasourceUid: __expr__
+                model:
+                  datasource:
+                    type: __expr__
+                    uid: __expr__
+                  type: math
+                  expression: "1 == 1"
+                  refId: A
+                  intervalMs: 1000
+                  maxDataPoints: 43200
+            noDataState: NoData
+            execErrState: Error
+            for: 0m
+            annotations:
+              summary: "SYNTHETIC TEST: Grafana to Google Chat (20261101)"
+              description: "Intentional delivery test, not a production incident. Verification identifier: grafana-google-chat-synthetic-20261101."
+            labels:
+              severity: info
+              namespace: monitoring
+              synthetic_test: "true"
+            isPaused: true
