@@ -30,6 +30,8 @@ pub fn generate_code_grant_jwt(
     .expect("Failed to encode JWT")
 }
 
+// TODO verify issued JWTs include a kid header matching the published JWKS key ID.
+// TODO also iss, sub, aud, exp, iat
 fn jwt_header() -> jsonwebtoken::Header {
     let mut header = jsonwebtoken::Header::new(jsonwebtoken::Algorithm::ES256);
     header.kid = Some(AUTH_TOKEN_KID.to_string());
