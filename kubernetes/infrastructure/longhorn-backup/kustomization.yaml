@@ -1,9 +1,35 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-# Longhorn backup configuration — depends on infrastructure-longhorn for CRDs.
-# Contains S3 backup target credentials, BackupTarget CR, and RecurringJobs
-# (weekly S3 backup + snapshot-delete, which purges local snapshots).
 resources:
   - s3-credentials.sops.yaml
+  - ../loki/loki-rustfs-credentials.sops.yaml
   - backuptarget.yaml
   - recurringjobs.yaml
+patches:
+  # ! Decrypt the patch source before renaming its authenticated secret keys.
+  - path: ../loki/loki-rustfs-credentials.sops.yaml
+    target:
+      kind: Secret
+      name: loki-rustfs-credentials
+  - target:
+      kind: Secret
+      name: loki-rustfs-credentials
+    patch: |-
+      - op: replace
+        path: /metadata/name
+        value: longhorn-rustfs-credentials
+      - op: replace
+        path: /metadata/namespace
+        value: longhorn-system
+      - op: move
+        from: /stringData/RUSTFS_ACCESS_KEY
+        path: /stringData/AWS_ACCESS_KEY_ID
+      - op: move
+        from: /stringData/RUSTFS_SECRET_KEY
+        path: /stringData/AWS_SECRET_ACCESS_KEY
+      - op: add
+        path: /stringData/AWS_ENDPOINTS
+        value: http://rustfs-svc.rustfs.svc.cluster.local:9000
+      - op: add
+        path: /stringData/VIRTUAL_HOSTED_STYLE
+        value: "false"

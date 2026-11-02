@@ -2,6 +2,116 @@
 description = "Regenerate the PowerDNS zone artifacts from the pdns_zones list (ansible/inventory/group_vars/all/vars.yml)"
 run = "./.venv/bin/ansible-playbook ansible/playbooks/operations/update-dns-zone-config.yml"
 
+[backup-configuration-checks]
+description = "Regression-check backup manifests, pinned charts, recovery schemas, and deployment dependencies"
+run = '''
+#!/usr/bin/env -S ./.venv/bin/python -u
+import json
+import re
+import subprocess
+import tempfile
+from pathlib import Path
+
+import jsonschema
+import yaml
+
+rendered = {}
+for owner in ("rustfs", "velero", "longhorn", "longhorn-backup", "cloudnative-pg", "harbor", "external-dns"):
+    result = subprocess.run(
+        ["kubectl", "kustomize", "--load-restrictor", "LoadRestrictionsNone", "kubernetes/infrastructure/" + owner],
+        capture_output=True, text=True,
+    )
+    if result.stderr:
+        print(result.stderr)
+    result.check_returncode()
+    rendered[owner] = [resource for resource in yaml.safe_load_all(result.stdout) if resource]
+    print("PASS: rendered", owner)
+
+assert not rendered["velero"]
+print("PASS: Velero retirement resource set is empty")
+
+for owner in ("longhorn-backup",):
+    declaration = yaml.safe_load(Path("kubernetes/infrastructure", owner, "kustomization.yaml").read_text())
+    assert declaration["patches"][0]["path"] == "../loki/loki-rustfs-credentials.sops.yaml"
+    secret_name = "longhorn-rustfs-credentials"
+    secret = next(resource for resource in rendered[owner] if resource["kind"] == "Secret" and resource["metadata"]["name"] == secret_name)
+    assert {"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"} <= set(secret["stringData"])
+    print("PASS:", owner, "decrypts shared credentials before authenticated key renaming")
+
+jobs = [resource for resource in rendered["longhorn-backup"] if resource["kind"] == "RecurringJob"]
+backup = next(job for job in jobs if job["spec"]["task"] == "backup")
+assert backup["spec"]["cron"] == "0 2 * * *"
+assert backup["spec"]["retain"] == 7
+assert all(job["spec"]["task"] not in ("snapshot", "snapshot-force-create", "snapshot-delete") for job in jobs)
+assert next(job for job in jobs if job["spec"]["task"] == "snapshot-cleanup")["spec"]["retain"] == 0
+target = next(resource for resource in rendered["longhorn-backup"] if resource["kind"] == "BackupTarget" and resource["metadata"]["name"] == "default")
+settings = next(resource for resource in rendered["longhorn"] if resource["kind"] == "HelmRelease")["spec"]["values"]["defaultSettings"]
+assert target["spec"]["backupTargetURL"] == settings["backupTarget"]
+assert target["spec"]["credentialSecret"] == settings["backupTargetCredentialSecret"]
+print("PASS: Longhorn daily S3 backups retain recovery points without a local snapshot-history job")
+
+provisioner = next(resource for resource in rendered["rustfs"] if resource["kind"] == "Job" and resource["metadata"]["name"] == "rustfs-cluster-backup-buckets-1")
+script = provisioner["spec"]["template"]["spec"]["containers"][0]["args"][0]
+subprocess.run(["sh", "-n"], input=script, text=True, check=True)
+buckets = set(re.findall(r"saikat-kubernetes-cluster-[a-z-]+", script))
+assert len(buckets) == 2 and all(3 <= len(bucket) <= 63 for bucket in buckets)
+assert target["spec"]["backupTargetURL"].split("/")[2].split("@")[0] in buckets
+print("PASS: bucket names, provisioner syntax, and backup destinations agree")
+
+with tempfile.TemporaryDirectory(prefix="backup-chart-checks-") as directory:
+    charts = (
+        ("plugin-barman-cloud", "https://github.com/cloudnative-pg/charts/releases/download/plugin-barman-cloud-v0.8.1/plugin-barman-cloud-0.8.1.tgz", "cnpg-system", "plugin-barman-cloud-0.8.1.tgz"),
+    )
+    for name, url, namespace, filename in charts:
+        subprocess.run(
+            ["curl", "--fail", "--location", "--retry", "3", "--connect-timeout", "15", "--max-time", "180", "--output", str(Path(directory, filename)), url],
+            check=True,
+        )
+        for enabled in (True,):
+            chart_values = {}
+            result = subprocess.run(
+                ["helm", "template", name, str(Path(directory, filename)), "--namespace", namespace, "--include-crds", "-f", "-"],
+                input=json.dumps(chart_values), capture_output=True, text=True,
+            )
+            if result.stderr:
+                print(result.stderr)
+            result.check_returncode()
+            chart_resources = [resource for resource in yaml.safe_load_all(result.stdout) if resource]
+            if name == "plugin-barman-cloud":
+                definition = next(resource for resource in chart_resources if resource["kind"] == "CustomResourceDefinition" and resource["metadata"]["name"] == "objectstores.barmancloud.cnpg.io")
+                schema = next(version for version in definition["spec"]["versions"] if version["name"] == "v1")["schema"]["openAPIV3Schema"]
+                destinations = []
+                for owner, application_role in (("harbor", "harbor"), ("external-dns", "pdns")):
+                    cluster = next(resource for resource in rendered[owner] if resource["kind"] == "Cluster")
+                    store = next(resource for resource in rendered[owner] if resource["kind"] == "ObjectStore")
+                    scheduled = next(resource for resource in rendered[owner] if resource["kind"] == "ScheduledBackup")
+                    jsonschema.validate(store, schema)
+                    assert cluster["spec"]["plugins"][0]["isWALArchiver"] is True
+                    assert cluster["spec"]["plugins"][0]["parameters"]["barmanObjectName"] == store["metadata"]["name"]
+                    assert scheduled["spec"]["cluster"]["name"] == cluster["metadata"]["name"]
+                    assert scheduled["spec"]["method"] == "plugin" and len(scheduled["spec"]["schedule"].split()) == 6
+                    assert cluster["spec"]["bootstrap"]["initdb"]["owner"] == application_role
+                    assert not cluster["spec"].get("enableSuperuserAccess", False)
+                    destination = store["spec"]["configuration"]["destinationPath"]
+                    assert destination.split("/")[2] in buckets
+                    destinations.append(destination)
+                    print("PASS:", owner, "published ObjectStore schema, daily base backup, WAL archiving, and application role")
+                assert len(set(destinations)) == 2
+
+graph = {}
+for path in Path("kubernetes/clusters/yral-k8s").glob("*.yaml"):
+    for resource in yaml.safe_load_all(path.read_text()):
+        if resource and resource.get("apiVersion", "").startswith("kustomize.toolkit.fluxcd.io/"):
+            graph[resource["metadata"]["name"]] = [dependency["name"] for dependency in resource.get("spec", {}).get("dependsOn", [])]
+for starting in graph:
+    pending = [(starting, [])]
+    while pending:
+        current, ancestry = pending.pop()
+        assert current not in ancestry, "Dependency cycle: " + " -> ".join(ancestry + [current])
+        pending.extend((dependency, ancestry + [current]) for dependency in graph.get(current, []))
+print("PASS: Flux backup dependencies have no cycles")
+'''
+
 # ── API version hygiene ─────────────────────────────────────────────────────
 # Report manifests whose apiVersion+kind the cluster no longer SERVES.
 #

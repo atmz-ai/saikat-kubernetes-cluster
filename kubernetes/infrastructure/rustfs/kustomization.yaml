@@ -8,4 +8,5 @@ resources:
   - atmz-internal-apps-google-oauth.sops.yaml
   - google-authorization.yaml
   - loki-bucket.yaml
+  - backup-buckets.yaml
   - route.yaml

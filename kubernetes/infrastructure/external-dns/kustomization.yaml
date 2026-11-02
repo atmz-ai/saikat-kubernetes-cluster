@@ -79,6 +79,8 @@ resources:
   # For a from-scratch rebuild, delete the Job so Flux recreates it — see the
   # rebuild note in pdns-db-seed.yaml.
   - cnpg-cluster.yaml
+  - postgresql-backups.yaml
+  - ../loki/loki-rustfs-credentials.sops.yaml
   - pdns-db-schema.yaml
   - pdns-db-grants.yaml
   - pdns-zone-snapshot.yaml
@@ -111,6 +113,16 @@ resources:
 # listing it under `resources` fails with "missing Resource metadata". The target
 # lives here (stable) while the operations are generated per zone.
 patches:
+  - target:
+      kind: Secret
+      name: loki-rustfs-credentials
+    patch: |-
+      - op: replace
+        path: /metadata/name
+        value: postgresql-rustfs-credentials
+      - op: replace
+        path: /metadata/namespace
+        value: external-dns
   - path: external-dns-zones-patch.yaml
     target:
       kind: Deployment

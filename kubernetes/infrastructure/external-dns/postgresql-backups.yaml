@@ -1,0 +1,32 @@
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: postgresql-rustfs-backup-store
+  namespace: external-dns
+spec:
+  retentionPolicy: 30d
+  configuration:
+    destinationPath: s3://saikat-kubernetes-cluster-postgresql-base-backups-and-wal/powerdns
+    endpointURL: http://rustfs-svc.rustfs.svc.cluster.local:9000
+    s3Credentials:
+      accessKeyId:
+        name: postgresql-rustfs-credentials
+        key: RUSTFS_ACCESS_KEY
+      secretAccessKey:
+        name: postgresql-rustfs-credentials
+        key: RUSTFS_SECRET_KEY
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: powerdns-daily-base-backup
+  namespace: external-dns
+spec:
+  schedule: "0 30 1 * * *"
+  immediate: true
+  backupOwnerReference: self
+  cluster:
+    name: pdns-db
+  method: plugin
+  pluginConfiguration:
+    name: barman-cloud.cloudnative-pg.io

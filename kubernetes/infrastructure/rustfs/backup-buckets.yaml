@@ -1,0 +1,51 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: rustfs-cluster-backup-buckets-1
+  namespace: rustfs
+spec:
+  backoffLimit: 6
+  activeDeadlineSeconds: 600
+  template:
+    spec:
+      automountServiceAccountToken: false
+      restartPolicy: OnFailure
+      containers:
+        - name: provision-cluster-backup-buckets
+          image: rustfs/rustfs:1.0.1
+          command: [/bin/sh, -ec]
+          args:
+            - |
+              for bucket in \
+                saikat-kubernetes-cluster-longhorn-volume-snapshot-backups \
+                saikat-kubernetes-cluster-postgresql-base-backups-and-wal
+              do
+                bucket_url="http://rustfs-svc:9000/$bucket"
+                printf 'Checking backup bucket %s\n' "$bucket_url"
+                status=$(curl --show-error --connect-timeout 10 --max-time 60 \
+                  --aws-sigv4 aws:amz:us-east-1:s3 \
+                  --variable '%RUSTFS_ACCESS_KEY' --variable '%RUSTFS_SECRET_KEY' \
+                  --expand-user '{{RUSTFS_ACCESS_KEY}}:{{RUSTFS_SECRET_KEY}}' \
+                  --head --output /dev/null --write-out '%{http_code}' "$bucket_url")
+                case "$status" in
+                  200) printf 'Backup bucket already exists: %s\n' "$bucket" ;;
+                  404)
+                    printf 'Creating backup bucket: %s\n' "$bucket"
+                    curl --fail-with-body --connect-timeout 10 --max-time 60 \
+                      --aws-sigv4 aws:amz:us-east-1:s3 \
+                      --variable '%RUSTFS_ACCESS_KEY' --variable '%RUSTFS_SECRET_KEY' \
+                      --expand-user '{{RUSTFS_ACCESS_KEY}}:{{RUSTFS_SECRET_KEY}}' \
+                      --request PUT "$bucket_url"
+                    ;;
+                  *) printf 'Bucket check failed with HTTP %s\n' "$status" >&2; exit 1 ;;
+                esac
+                printf 'Verifying backup bucket: %s\n' "$bucket"
+                curl --fail-with-body --connect-timeout 10 --max-time 60 \
+                  --aws-sigv4 aws:amz:us-east-1:s3 \
+                  --variable '%RUSTFS_ACCESS_KEY' --variable '%RUSTFS_SECRET_KEY' \
+                  --expand-user '{{RUSTFS_ACCESS_KEY}}:{{RUSTFS_SECRET_KEY}}' \
+                  --head "$bucket_url"
+              done
+          envFrom:
+            - secretRef:
+                name: rustfs-credentials

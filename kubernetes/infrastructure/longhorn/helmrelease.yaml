@@ -81,12 +81,8 @@ spec:
       # distinguish scheduled maintenance from genuine node failures.
       staleReplicaTimeout: 90
 
-      # S3 backup target on Hetzner Object Storage.
-      # A /longhorn prefix separates these backups from Velero's in the same bucket.
-      # Credential secret keys: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_ENDPOINTS,
-      # VIRTUAL_HOSTED_STYLE (false = path-style addressing required by Hetzner).
-      backupTarget: "s3://yral-bare-metal-kubernetes-cluster-control-plane-backup@hel1/longhorn"
-      backupTargetCredentialSecret: "longhorn-s3-backup-credentials"
+      backupTarget: "s3://saikat-kubernetes-cluster-longhorn-volume-snapshot-backups@us-east-1/"
+      backupTargetCredentialSecret: "longhorn-rustfs-credentials"
 
     persistence:
       # Disable the chart's auto-generated default StorageClass — we ship our own

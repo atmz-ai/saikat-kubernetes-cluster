@@ -19,3 +19,5 @@ spec:
   dependsOn:
     - name: infrastructure-cilium
     - name: infrastructure-cert-manager
+    - name: infrastructure-cloudnative-pg
+    - name: infrastructure-rustfs

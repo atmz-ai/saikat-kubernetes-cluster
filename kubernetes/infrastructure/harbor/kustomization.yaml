@@ -20,3 +20,13 @@ resources:
   # ! Removing this file from the list would also drop the ConfigMap that hook needs.
   - harbor-db-grants.yaml
   - cnpg-cluster.yaml
+  - postgresql-backups.yaml
+  - ../loki/loki-rustfs-credentials.sops.yaml
+patches:
+  - target:
+      kind: Secret
+      name: loki-rustfs-credentials
+    patch: |-
+      - op: replace
+        path: /metadata/name
+        value: postgresql-rustfs-credentials

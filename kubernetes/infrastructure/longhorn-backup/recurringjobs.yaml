@@ -1,63 +1,29 @@
 ---
-# Weekly S3 backup — full incremental backup to Hetzner Object Storage.
-# Kept for 8 weeks (2 months); runs at 02:00 UTC every Sunday.
-# groups: [default] applies to every volume that has no explicit recurring job
-# selector set (i.e. all current volumes).
-# ! This is the only copy that survives losing the node holding a volume. Local
-# ! snapshots never did — deleting them is lossless, but never drop this job.
 apiVersion: longhorn.io/v1beta2
 kind: RecurringJob
 metadata:
-  name: weekly-backup
+  name: daily-volume-backup
   namespace: longhorn-system
 spec:
-  cron: "0 2 * * 0"
+  cron: "0 2 * * *"
   task: backup
   groups:
     - default
-  retain: 8
+  retain: 7
   concurrency: 2
   labels: {}
 ---
-# * No local snapshots accumulate on any volume. The former daily `snapshot` job is what pushed Loki
-# * (431 GiB on a 50 GiB volume) and Prometheus (218 GiB on 100 GiB) 4-8x past their provisioned size.
-# * A volume that size also cannot be copied to a fresh replica over the Helsinki<->India link anywhere
-# * near promptly, which is where the replica churn below comes from.
-# *
-# * `snapshot-delete` is the documented task that removes and purges all kinds of snapshots exceeding the
-# * retention count — it clears the backlog the old snapshot job left behind, then holds every volume at
-# * `retain`. retain is 2, not 1, because Longhorn needs two snapshots to coalesce and rebuild; the two
-# * newest are small incremental deltas, so the bulk of the space is reclaimed either way.
-# *
-# * ! snapshot-delete drops snapshots a `backup` may be mid-upload on. Weekly backup runs Sun 02:00, so
-# * ! the steady-state cron stays well clear of it.
-# * ! Loki (pvc-728ed435, 431 GiB on a 50 GiB volume) purges slowly, and the cause is replica placement,
-# * ! not this job. A leftover eviction ticket on worker-35's disk (from an interrupted `remove-node`)
-# * ! pushed Longhorn to relocate Loki's replica onto saikat-azure-central-india-2 -- a surplus second
-# * ! replica on a volume whose numberOfReplicas is 1. That replica has to copy 431 GiB over the
-# * ! Helsinki<->India link before anything else can proceed, and while it is `isRebuilding`, snapshot
-# * ! removal is refused outright: `cannot remove a snapshot because tcp://<india-ip>:10160 is
-# * ! rebuilding`. It does progress (~75% and climbing at ~1-2%/10 min), so it is slow rather than stuck.
-# * Clearing the stale ticket stopped the rebuild churn but does NOT cull the surplus replica -- Longhorn
-# * finishes an in-flight rebuild regardless of desired count, and nothing in the logs asks for the
-# * replica to be removed. So the purge stays blocked until this rebuild completes on its own.
-# * Every other volume purged cleanly -- 143 -> 47 snapshots, 9 -> 2 per volume, all back under
-# * provisioned. Prometheus was blocked the same way and cleared itself once its India replica finished
-# * rebuilding (18:12): healthy and reclaiming, 218 -> 190 GiB.
-# * ! Check for a stale eviction ticket before any future `remove-node`: it leaves
-# * ! evictionRequested=true on the disk, which is invisible in `kubectl get nodes` and silently forces
-# * ! WAN relocations long after the removal attempt failed.
-# * The every-minute cron was the one-off backlog purge; daily is the steady-state schedule.
+# ! Backup uploads need their source snapshot; purge only removable and system layers.
 apiVersion: longhorn.io/v1beta2
 kind: RecurringJob
 metadata:
-  name: snapshot-delete
+  name: snapshot-cleanup
   namespace: longhorn-system
 spec:
-  cron: "0 3 * * *"
-  task: snapshot-delete
+  cron: "0 4 * * *"
+  task: snapshot-cleanup
   groups:
     - default
-  retain: 2
+  retain: 0
   concurrency: 2
   labels: {}
