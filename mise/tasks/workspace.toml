@@ -92,7 +92,11 @@ run = '''
 set -euo pipefail
 mise bootstrap repos apply --yes
 mise trust "$HOME/.dotfiles/mise.toml"
-mise --no-env --no-hooks -C "$HOME/.dotfiles" dot apply --yes "$HOME/.gitconfig"
+dotfile_arguments=(--yes "$HOME/.gitconfig")
+if [[ "${GITHUB_ACTIONS:-false}" == "true" ]]; then
+  dotfile_arguments+=(--force)
+fi
+mise --no-env --no-hooks -C "$HOME/.dotfiles" dot apply "${dotfile_arguments[@]}"
 git config --get user.name
 git config --get user.email
 '''
@@ -132,16 +136,24 @@ git() {
   if [[ "$*" == "$fixture_failure" ]]; then return 1; fi
 }
 """
-for failure in ["", "bootstrap repos apply --yes", "--no-env --no-hooks -C /fixture/.dotfiles dot apply --yes /fixture/.gitconfig", "config --get user.name"]:
-  result = subprocess.run(["bash", "-c", fixture_functions + tasks["dotfiles-setup"]["run"]], env={"PATH": os.environ["PATH"], "HOME": "/fixture", "fixture_failure": failure}, capture_output=True, text=True)
-  assert (result.returncode == 0) is (failure == ""), result.stderr
-  if failure:
-    assert "git <config> <--get> <user.email>" not in result.stdout
-  else:
-    assert 'mise <--no-env> <--no-hooks> <-C> </fixture/.dotfiles> <dot> <apply> <--yes> </fixture/.gitconfig>' in result.stdout
-    assert "git <config> <--get> <user.name>" in result.stdout
-    assert "git <config> <--get> <user.email>" in result.stdout
-  print("PASS: Git-only dotfiles setup stops on failure=" + repr(failure), flush=True)
+for github_actions in [None, "false", "true"]:
+  apply_command = "--no-env --no-hooks -C /fixture/.dotfiles dot apply --yes /fixture/.gitconfig"
+  if github_actions == "true":
+    apply_command += " --force"
+  for failure in ["", "bootstrap repos apply --yes", apply_command, "config --get user.name"]:
+    environment = {"PATH": os.environ["PATH"], "HOME": "/fixture", "fixture_failure": failure}
+    if github_actions is not None:
+      environment["GITHUB_ACTIONS"] = github_actions
+    result = subprocess.run(["bash", "-c", fixture_functions + tasks["dotfiles-setup"]["run"]], env=environment, capture_output=True, text=True)
+    assert (result.returncode == 0) is (failure == ""), result.stderr
+    if failure:
+      assert "git <config> <--get> <user.email>" not in result.stdout
+    else:
+      assert ('<--force>' in result.stdout) is (github_actions == "true")
+      assert 'mise <--no-env> <--no-hooks> <-C> </fixture/.dotfiles> <dot> <apply> <--yes> </fixture/.gitconfig>' in result.stdout
+      assert "git <config> <--get> <user.name>" in result.stdout
+      assert "git <config> <--get> <user.email>" in result.stdout
+    print("PASS: Git-only dotfiles setup with GITHUB_ACTIONS=" + repr(github_actions) + ", failure=" + repr(failure), flush=True)
 script = compile(tasks["goose-serve"]["run"], "goose-serve", "exec")
 with patch.dict(os.environ, {"GOOSE_AZURE_FOUNDRY_API_KEY": "fixture-api-key", "GOOSE_DESKTOP_SECRET_KEY": "fixture-server-secret"}, clear=True), patch("os.execve") as execute:
   exec(script, {})
