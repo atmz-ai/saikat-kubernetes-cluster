@@ -90,6 +90,7 @@ with tempfile.TemporaryDirectory(prefix="backup-chart-checks-") as directory:
                     assert cluster["spec"]["plugins"][0]["parameters"]["barmanObjectName"] == store["metadata"]["name"]
                     assert scheduled["spec"]["cluster"]["name"] == cluster["metadata"]["name"]
                     assert scheduled["spec"]["method"] == "plugin" and len(scheduled["spec"]["schedule"].split()) == 6
+                    assert not scheduled["spec"].get("immediate", False)
                     assert cluster["spec"]["bootstrap"]["initdb"]["owner"] == application_role
                     assert not cluster["spec"].get("enableSuperuserAccess", False)
                     destination = store["spec"]["configuration"]["destinationPath"]
