@@ -51,6 +51,16 @@ assert target["spec"]["backupTargetURL"] == settings["backupTarget"]
 assert target["spec"]["credentialSecret"] == settings["backupTargetCredentialSecret"]
 print("PASS: Longhorn daily S3 backups retain recovery points without a local snapshot-history job")
 
+for resource in rendered["longhorn-backup"]:
+    if resource["kind"] == "Backup":
+        result = subprocess.run(
+            ["kubectl", "get", "snapshots.longhorn.io", resource["spec"]["snapshotName"], "-n", resource["metadata"]["namespace"], "-o", "json"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 0, "Deploy the source Snapshot before its Backup; Longhorn checks it during dry-run"
+        assert json.loads(result.stdout)["status"]["readyToUse"] is True
+        print("PASS: Longhorn Backup admission source exists and is ready")
+
 provisioner = next(resource for resource in rendered["rustfs"] if resource["kind"] == "Job" and resource["metadata"]["name"] == "rustfs-cluster-backup-buckets-1")
 script = provisioner["spec"]["template"]["spec"]["containers"][0]["args"][0]
 subprocess.run(["sh", "-n"], input=script, text=True, check=True)
