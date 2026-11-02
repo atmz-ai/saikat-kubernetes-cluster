@@ -102,7 +102,7 @@ spec:
               topologyKey: kubernetes.io/hostname
       containers:
         - name: powerdns
-          image: docker.io/powerdns/pdns-auth-52:latest
+          image: docker.io/powerdns/pdns-auth-52:latest@sha256:cd9b058c35b478c71039926b4a7e68efc30d3d87419234df4b45a4b6c148c8c6
           args:
             # No --gpgsql-*/--api-key flags: the image's pdns_server-startup wrapper
             # renders those from the environment (see pdns-config.yaml). Passing them
