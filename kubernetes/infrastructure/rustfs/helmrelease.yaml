@@ -29,6 +29,7 @@ spec:
     drivesPerNode: 1
     image:
       rustfs:
+        repository: rustfs/rustfs
         tag: "1.0.1"
     ingress:
       enabled: false

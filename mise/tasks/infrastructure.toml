@@ -2,6 +2,69 @@
 description = "Regenerate the PowerDNS zone artifacts from the pdns_zones list (ansible/inventory/group_vars/all/vars.yml)"
 run = "./.venv/bin/ansible-playbook ansible/playbooks/operations/update-dns-zone-config.yml"
 
+[renovate-configuration-checks]
+description = "Validate Renovate schema, image extraction, floating-tag tracking, and manual merging"
+run = '''
+#!/usr/bin/env -S ./.venv/bin/python -u
+import json
+import subprocess
+import urllib.request
+from pathlib import Path
+
+import jsonschema
+import yaml
+
+configuration = json.loads(Path("renovate.json").read_text())
+with urllib.request.urlopen(configuration["$schema"], timeout=30) as response:
+    schema = json.load(response)
+jsonschema.validate(configuration, schema)
+print("PASS: Renovate configuration matches the published schema")
+
+release = next(
+    resource for resource in yaml.safe_load_all(Path("kubernetes/infrastructure/rustfs/helmrelease.yaml").read_text())
+    if resource["kind"] == "HelmRelease"
+)
+image = release["spec"]["values"]["image"]["rustfs"]
+assert image["repository"] == "rustfs/rustfs"
+assert isinstance(image["tag"], str) and image["tag"]
+print("PASS: RustFS declares its image repository and tag together")
+
+subprocess.run(["node", "--input-type=module", "-e", r"""
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+
+const configuration = JSON.parse(fs.readFileSync('renovate.json', 'utf8'));
+const manager = configuration.customManagers.find(manager => manager.customType === 'jsonata');
+assert.equal(manager.fileFormat, 'yaml');
+assert.equal(manager.datasourceTemplate, 'docker');
+assert.equal(manager.versioningTemplate, 'docker');
+for (const owner of [configuration.flux, configuration.kubernetes, manager]) {
+    const patterns = owner.managerFilePatterns.map(pattern => new RegExp(pattern.slice(1, -1)));
+    for (const path of ['kubernetes/infrastructure/rustfs/helmrelease.yaml', 'new-service/arbitrary.yml', 'another/previously-unknown.yaml']) {
+        assert(patterns.some(pattern => pattern.test(path)));
+    }
+    assert(!patterns.some(pattern => pattern.test('new-service/notes.md')));
+}
+assert(!configuration.customManagers.some(manager => manager.depNameTemplate === 'rustfs/rustfs'));
+console.log('PASS: existing and previously unknown YAML paths are discovered without per-image rules');
+
+assert.equal(configuration.automerge, false);
+assert(!configuration.packageRules.some(rule => rule.automerge === true));
+assert.equal(configuration.schedule, undefined);
+console.log('PASS: manual merging and unrestricted PR timing');
+
+const floating = configuration.packageRules.find(rule => rule.pinDigests === true);
+assert.deepEqual(floating.matchDatasources, ['docker']);
+const floatingPattern = new RegExp(floating.matchCurrentValue.slice(1, -1));
+for (const tag of ['latest', 'alpine']) assert(floatingPattern.test(tag));
+for (const tag of ['1.0.1', 'v0.37.0', '20261102050204-5a17bbdf']) assert(!floatingPattern.test(tag));
+const privateImages = configuration.packageRules.find(rule => rule.enabled === false);
+assert(new RegExp(privateImages.matchDepNames[0].slice(1, -1)).test('harbor.yral.com/yral-auth/yral-auth'));
+assert(!new RegExp(privateImages.matchDepNames[0].slice(1, -1)).test('rustfs/rustfs'));
+console.log('PASS: floating public images get digest PRs; Flux-owned private images remain untouched');
+"""], check=True)
+'''
+
 [backup-configuration-checks]
 description = "Regression-check backup manifests, pinned charts, recovery schemas, and deployment dependencies"
 run = '''

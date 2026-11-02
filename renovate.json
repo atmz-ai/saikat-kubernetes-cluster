@@ -4,9 +4,6 @@
         "config:recommended"
     ],
     "timezone": "UTC",
-    "schedule": [
-        "on sunday"
-    ],
     "prConcurrentLimit": 20,
     "prHourlyLimit": 0,
     "automerge": false,
@@ -17,15 +14,28 @@
     "prFooter": "⚠️ **Per [AGENTS.md](../blob/main/AGENTS.md#component-versioning-policy): do not merge until the upgrade procedure has been reviewed and the version explicitly confirmed.** For Kubernetes infrastructure changes, follow the upgrade order: CPs one at a time → workers one at a time → add-ons individually.",
     "flux": {
         "managerFilePatterns": [
-            "/kubernetes/.+\\.yaml$/"
+            "/\\.ya?ml$/"
         ]
     },
     "kubernetes": {
         "managerFilePatterns": [
-            "/kubernetes/.+\\.yaml$/"
+            "/\\.ya?ml$/"
         ]
     },
     "customManagers": [
+        {
+            "description": "Discover repository/tag image objects at any YAML nesting depth",
+            "customType": "jsonata",
+            "fileFormat": "yaml",
+            "managerFilePatterns": [
+                "/\\.ya?ml$/"
+            ],
+            "matchStrings": [
+                "**[$type(repository) = 'string' and repository != '' and (($type(tag) = 'string' and tag != '') or ($type(version) = 'string' and version != ''))].{'depName': ($type(registry) = 'string' and registry != '' ? registry & '/' : '') & repository, 'currentValue': tag ? tag : version}"
+            ],
+            "datasourceTemplate": "docker",
+            "versioningTemplate": "docker"
+        },
         {
             "description": "cert-manager release URL in kustomization resources list",
             "customType": "regex",
@@ -100,6 +110,24 @@
         }
     ],
     "packageRules": [
+        {
+            "description": "Track rebuilt public floating image tags through reviewed digest PRs",
+            "matchDatasources": [
+                "docker"
+            ],
+            "matchCurrentValue": "/^(latest|alpine)$/",
+            "pinDigests": true
+        },
+        {
+            "description": "Private application images are built and updated by Flux, not upstream release dependencies",
+            "matchDatasources": [
+                "docker"
+            ],
+            "matchDepNames": [
+                "/^harbor\\.yral\\.com\\//"
+            ],
+            "enabled": false
+        },
         {
             "description": "Group the two cert-manager version references (URL + acmesolver image) into one PR",
             "matchFileNames": [

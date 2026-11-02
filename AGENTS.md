@@ -99,6 +99,9 @@ When using a tool or library for the first time (or encountering a non-trivial c
 - Downgrade only if latest incompatible with current K8s (document reason).
 - Upgrade order: one CP at a time → workers → add-ons, one component at a time.
 
+### Dependency Update Discovery
+**New image declarations must be automatically discoverable without per-image changes to `renovate.json`.** Prefer built-in managers and generic structured-data discovery. Use complete `image: repository:tag` references, or declare `repository` alongside `tag`/`version` in Helm image objects; never leave a tag-only override whose repository exists only in chart defaults. Do not add image-specific extractors. Keep automatic merging disabled: bots propose release-update PRs, and the operator reviews and merges them. Validate additions with `mise run renovate-configuration-checks`. Flux retains ownership of internally built application image updates.
+
 ### Latest Stable Preference
 When making changes to a codebase (fixing bugs, migrating APIs, adding features), strive to bump all affected dependencies to their latest stable versions. If a change breaks a dependent, upgrade the dependent too — don't pin to an older version to avoid the migration. This keeps the codebase current and reduces accumulated technical debt. Always verify compilation locally before pushing.
 
