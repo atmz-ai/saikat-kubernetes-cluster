@@ -16,7 +16,7 @@ import jsonschema
 import yaml
 
 rendered = {}
-for owner in ("rustfs", "velero", "longhorn", "longhorn-backup", "cloudnative-pg", "harbor", "external-dns"):
+for owner in ("rustfs", "longhorn", "longhorn-backup", "cloudnative-pg", "harbor", "external-dns"):
     result = subprocess.run(
         ["kubectl", "kustomize", "--load-restrictor", "LoadRestrictionsNone", "kubernetes/infrastructure/" + owner],
         capture_output=True, text=True,
@@ -27,8 +27,9 @@ for owner in ("rustfs", "velero", "longhorn", "longhorn-backup", "cloudnative-pg
     rendered[owner] = [resource for resource in yaml.safe_load_all(result.stdout) if resource]
     print("PASS: rendered", owner)
 
-assert not rendered["velero"]
-print("PASS: Velero retirement resource set is empty")
+entrypoint = yaml.safe_load(Path("kubernetes/clusters/yral-k8s/kustomization.yaml").read_text())
+assert "infrastructure-velero.yaml" not in entrypoint["resources"]
+print("PASS: Velero is absent from the reconciliation entrypoint")
 
 for owner in ("longhorn-backup",):
     declaration = yaml.safe_load(Path("kubernetes/infrastructure", owner, "kustomization.yaml").read_text())
@@ -91,6 +92,10 @@ with tempfile.TemporaryDirectory(prefix="backup-chart-checks-") as directory:
                     assert scheduled["spec"]["cluster"]["name"] == cluster["metadata"]["name"]
                     assert scheduled["spec"]["method"] == "plugin" and len(scheduled["spec"]["schedule"].split()) == 6
                     assert not scheduled["spec"].get("immediate", False)
+                    labels = cluster["spec"]["inheritedMetadata"]["labels"]
+                    assert labels["recurring-job.longhorn.io/source"] == "enabled"
+                    assert labels["recurring-job-group.longhorn.io/default"] == "disabled"
+                    assert labels["recurring-job.longhorn.io/postgresql-snapshot-cleanup"] == "enabled"
                     assert cluster["spec"]["bootstrap"]["initdb"]["owner"] == application_role
                     assert not cluster["spec"].get("enableSuperuserAccess", False)
                     destination = store["spec"]["configuration"]["destinationPath"]

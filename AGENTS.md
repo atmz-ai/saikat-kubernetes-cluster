@@ -475,7 +475,12 @@ The superuser Secret's value was never synced into the database, and its passwor
 - Verify ownership directly before wiring the client: `SELECT tablename, tableowner FROM pg_tables WHERE schemaname='public';`. Sequence names are easy to miss — list them from the live database rather than guessing.
 
 ### Backups
-Velero only (full cluster DR, 30-day self-managed `ttl: 720h`). Named prefix `velero/` in the bucket. No bucket lifecycle policy (Velero GC handles it).
+Use Longhorn S3 volume backups for workloads without application-native recovery,
+and the CloudNativePG Barman Cloud plugin for PostgreSQL base backups and WAL
+archiving. Schedules and retention belong in the owning manifests. Velero is
+retired; do not reintroduce it without approval. RustFS runs inside this cluster
+on separate data disks, so this policy provides localized recovery, not an
+independent off-cluster disaster-recovery copy.
 
 ### Networking & Exposure Model
 - Everything exposed via Cilium Gateway (Gateway + HTTPRoutes or TLSRoutes).

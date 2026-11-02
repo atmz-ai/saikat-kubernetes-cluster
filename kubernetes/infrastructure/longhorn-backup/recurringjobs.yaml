@@ -27,3 +27,16 @@ spec:
   retain: 0
   concurrency: 2
   labels: {}
+---
+apiVersion: longhorn.io/v1beta2
+kind: RecurringJob
+metadata:
+  name: postgresql-snapshot-cleanup
+  namespace: longhorn-system
+spec:
+  cron: "0 4 * * *"
+  task: snapshot-cleanup
+  groups: []
+  retain: 0
+  concurrency: 2
+  labels: {}

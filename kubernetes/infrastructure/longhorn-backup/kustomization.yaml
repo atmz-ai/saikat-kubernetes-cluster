@@ -5,6 +5,7 @@ resources:
   - ../loki/loki-rustfs-credentials.sops.yaml
   - backuptarget.yaml
   - recurringjobs.yaml
+  - backup-validation.yaml
 patches:
   # ! Decrypt the patch source before renaming its authenticated secret keys.
   - path: ../loki/loki-rustfs-credentials.sops.yaml

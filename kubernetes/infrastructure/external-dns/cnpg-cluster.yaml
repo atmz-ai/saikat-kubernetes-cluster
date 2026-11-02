@@ -55,6 +55,11 @@ metadata:
 spec:
   instances: 3
   imageName: ghcr.io/cloudnative-pg/postgresql:18.4
+  inheritedMetadata:
+    labels:
+      recurring-job.longhorn.io/source: enabled
+      recurring-job.longhorn.io/postgresql-snapshot-cleanup: enabled
+      recurring-job-group.longhorn.io/default: disabled
   plugins:
     - name: barman-cloud.cloudnative-pg.io
       isWALArchiver: true
