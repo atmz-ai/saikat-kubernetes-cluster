@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: event-archive-verification-1
+  name: event-archive-verification-2
   namespace: kafka-connect
 spec:
   backoffLimit: 2
