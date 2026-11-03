@@ -7,6 +7,8 @@
     "prConcurrentLimit": 20,
     "prHourlyLimit": 0,
     "automerge": false,
+    "minimumReleaseAge": "4 days",
+    "minimumReleaseAgeBehaviour": "timestamp-required",
     "rebaseWhen": "behind-base-branch",
     "labels": [
         "dependencies"

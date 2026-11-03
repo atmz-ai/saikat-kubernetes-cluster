@@ -1,4 +1,7 @@
 {
+    "better-todo-tree.tree.scanMode": "workspace",
+    "better-todo-tree.tree.showBadges": true,
+    "better-todo-tree.tree.showCountsInTree": true,
     "rust-analyzer.linkedProjects": [
         "./Cargo.toml",
     ],
@@ -11,7 +14,4 @@
     "vs-kubernetes": {
         "vs-kubernetes.crd-code-completion": "enabled"
     },
-    "better-todo-tree.tree.scanMode": "workspace",
-    "better-todo-tree.tree.showBadges": true,
-    "better-todo-tree.tree.showCountsInTree": true,
 }
