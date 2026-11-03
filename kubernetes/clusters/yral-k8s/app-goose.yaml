@@ -7,6 +7,7 @@ spec:
   interval: 1m
   path: ./kubernetes/apps/goose
   prune: true
+  suspend: false
   timeout: 10m
   sourceRef:
     kind: GitRepository
@@ -15,39 +16,3 @@ spec:
     provider: sops
     secretRef:
       name: sops-age
-  dependsOn:
-    - name: networking
-    - name: infrastructure-longhorn
-    - name: infrastructure-harbor
-    - name: infrastructure-kubevirt
-    - name: infrastructure-containerized-data-importer
-  healthChecks:
-    - apiVersion: apps/v1
-      kind: Deployment
-      name: goose
-      namespace: goose
-    - apiVersion: apps/v1
-      kind: Deployment
-      name: goose-browser
-      namespace: goose
-    - apiVersion: kubevirt.io/v1
-      kind: VirtualMachineInstance
-      name: goose-workstation
-      namespace: goose
-    - apiVersion: cdi.kubevirt.io/v1beta1
-      kind: DataVolume
-      name: goose-workstation-root
-      namespace: goose
-    - apiVersion: v1
-      kind: PersistentVolumeClaim
-      name: goose-home
-      namespace: goose
-  healthCheckExprs:
-    - apiVersion: kubevirt.io/v1
-      kind: VirtualMachineInstance
-      current: >-
-        status.phase == 'Running' &&
-        status.conditions.exists(condition, condition.type == 'Ready' && condition.status == 'True')
-    - apiVersion: cdi.kubevirt.io/v1beta1
-      kind: DataVolume
-      current: status.phase == 'Succeeded'

@@ -6,20 +6,6 @@ age.ssh_identity_files = [".saikat-machine-access-ed25519"]
 age.strict = false
 # * Imported age payloads use unpadded Base64; padding is not part of ciphertext.
 
-[vars]
-goose_version = "1.56.0"
-goose_browser_revision = "a85b99bb83d11177b70d28f8a0f5d2bfd7929144"
-goose_base_image = "ghcr.io/aaif-goose/goose@sha256:8d482beae2921550a0b58521e20fc9240263b577549042111bca571f003ac520"
-goose_backend_base_image = "mcr.microsoft.com/devcontainers/base@sha256:6ee2b4097c75d33e9a94d941577a3286e5d629434fba384688b06daeeaaeac99"
-goose_image_repository = "harbor.yral.com/library/goose"
-goose_virtual_machine_image_release = "26.04"
-goose_virtual_machine_image_build = "20261016"
-goose_virtual_machine_image_sha256 = "5645d0318ad21f643ebb1ac4567514620e9893380b07b0201fda163baa5b7eb5"
-workstation_vscode_version = "1.143.1"
-workstation_vscode_commit = "e646868227c3e3a9e3f24277c8c7220be42c0be7"
-workstation_vscode_sha256 = "22da21dfa7051bf3a0f048cd7e875c4fe582ddd3e8451cd17a725d199029a9fe"
-workstation_tunnel_name = "goose-workstation"
-
 [tools]
 age = "latest"
 # binaryen (wasm-opt) PINNED to 131 — do NOT let `mise upgrade --bump` float
@@ -276,8 +262,6 @@ YRAL_APPLE_TEAM_ID = "2UL556KNXC"
 
 CLUSTER_GITHUB_TOKEN = { age = "YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IHNzaC1lZDI1NTE5IG5QMTlMdyB2SElId3NsRUk5ZkFsSW1ua3JpVzBmZWZ4cFU5KzFrRmZFRTJSOGlBc2wwCnJUUHJtUWRCcVVHZnI3cXM2d2NoaXhpL1pja254Tk5ydDV4OGswVG90cTgKLT4gMyk3LWdyZWFzZSAzIGdlK25mZ0QKN2wvUC9LYVRURk9VUzk3KzdRZk9weWVTaE4ra1lBaGZzUlEvNVFSU1ZBCi0tLSAveVJrNFFmdFl0TnZKanpFeFNIenFzcXdzRWtOeDFXYllYd2JVZ2czZFhrCrlke0xMBDlp3063E6GnKUYV0gAT0iTTwHsGtpcg0UC3MOsaJRZdxzRJxvYKNDOMjToXPT7Jg873l2+d6I/O38PBT4jLLATjNeKyHGnhAm4bG9qNDbRp+mP4vpCJqDYIGnOnkBI48bfUCLAzWo3xETbF3L+SSG4O9YYbVpH5" }
 BTC_REWARDS_GCHAT_WEBHOOK_URL = ""
-GOOSE_AZURE_FOUNDRY_API_KEY = { age = "YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IHNzaC1lZDI1NTE5IG5QMTlMdyBybGZ2YlpkOS9vUFFZUmowUkdxOWY5cFdWWHZwZ3poUGx5SWtJcmp3UGtFClE2VVQwTVFTZEN5RWM1WE5vWmM4MGRRVFFueWFXMmR3MlVQblc2WmprNjgKLT4gZlBvUGU1LWdyZWFzZSByTVcgM1FRQyggMSogS24KcWl1dFBMcmxHckpTM29OZW5lUGlZUk9wZWhuay9NL1Z1RUtWdER5ZHNQVjViSEZ3R3R6Z2E0Z3hyME1POXJkcgpHWVdKK0w0Z2xicklwKzVTNU5FeFlJWGV0cGVpdENJU0s4LzdFMkUKLS0tIFFEMlJXQXRHTlFONDZFMTlWSU9hOHFyaEk3MnV4VFkzSCtaWUlYYUg3RFkKWgeQjU2TPH1FIdL7FXP1MgJKWyngVcUSHRCaZdUdLpUlfW/4K0SilISdyMq8Rd9f2UN289J71NHUYyeE56Fd29MhmIbmq50BwsDRFCj9FE9yo3nM2CVzg0Oygc839/bJ5QFLPeu+SAzMuV+C/hQ4yfo0ae4" }
-GOOSE_DESKTOP_SECRET_KEY = { age = "YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IHNzaC1lZDI1NTE5IG5QMTlMdyBDWWNvMVc1S3FnS3ZiQVVFVVhLZXd6OHQ0SDBUUUhtN0tsSi9jSExEL3p3Ckd5cGhFWDB3RE8wQnNiN2FpZDRtL0xHMi8xLzhvcnFLUHBSSjNMMkZRdDQKLT4gclRPOmx+fW0tZ3JlYXNlIFx3XVRfIEAgM2tsZD1xQmUKaC95TzBuM1NBcy9wMklqQ3hscUE1VFVEdmJXSXgxZ2xHb3NKN01QMnhhNjRQYkViUVMvanQ5dkt2Q2NRRHFEQwptdHdNekdoeWVrYk1LeXRBWENaVTRLUXdBNDhmdEtPOEUzVFVjUHkwSTZlQTZpT040cDF3dlArak1GTHdBUlp1CgotLS0gSVlWUGNSR0F5emNxVUZtbERxMHAwZTRCaytRWXRWRVltSkdERkRmZzkySQpwuK9iV1f1mwoZiIxpXyIWrmlvzbNSOPSmkBXAz6/y/ycDLv/TekWL+vuIC44hvtw4imAQXVm20NI27R6v1l/cxwZ28CuIar1nxkIj3m/pzMBnmn8qG0fQ1E7QUUTp9JQ" }
 
 [env.CLUSTER_CLOUDFLARE_API_TOKEN]
 age = "YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IHNzaC1lZDI1NTE5IG5QMTlMdyAvMlZCY1ZqV1l4bElTOWdnRU0yYlQ3Yks2ZytiVDRzaThZSWhPYkZxUjBBCkFSWWhOOVBwRWtIWHhMRXN2YVVhTWkzcXZ0ejAyL2VFTDBMdnUzbzZxczQKLT4gVC1ncmVhc2UgMF5iZyEKVDVCQkV3dkFGQWdybTdUbnIydTZGOGZIRVdqSEcwUmtCUGUxV0dqL21ZL0s4eEZhCi0tLSBIeUNIZlpjSHZtdHJDUnIwYVlJMkt4YXV1ZUNOS1pHVU5yQm5OQlhOVldjCiWpPd1hjcfUH0b8rkNJ03WlfsQ+qTWrmLSDjWhhajt2e+831J8WEvqF4xWvohHWUmCUIgBmuskBa7A2ZtksTIfZT35ovnEEiw"
@@ -352,7 +336,6 @@ age = "YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IHNzaC1lZDI1NTE5IG5QMTlMdyAxYkF3d3BNZjZtQ
 [task_config]
 includes = [
   "mise/tasks/ansible.toml",
-  "mise/tasks/goose.toml",
   "mise/tasks/infrastructure.toml",
   "mise/tasks/my-website.toml",
   "mise/tasks/s3.toml",
@@ -422,11 +405,6 @@ ready_http = "http://localhost:8083/"
 # `spacetime dev` (which publishes to http://127.0.0.1:3000). In-memory mode —
 # data is lost on restart, which is fine for dev. No JWT keys, so this is the
 # plain server for tasks that don't need authenticated identity.
-
-[daemons.goose]
-init = ["mise run goose-build"]
-run = "exec mise run goose-serve"
-ready_http = "http://127.0.0.1:3284/status"
 
 [daemons.spacetimedb]
 run = "exec spacetime start --in-memory --listen-addr 127.0.0.1:3000"

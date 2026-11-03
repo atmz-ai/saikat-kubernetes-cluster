@@ -86,7 +86,7 @@ mise run dotfiles-setup
 
 [dotfiles-setup]
 description = "Clone or validate ~/.dotfiles and apply its Git configuration without unrelated machine setup"
-env = { GIT_SSH_COMMAND = "ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile='{{config_root}}/kubernetes/apps/goose/known_hosts' -i '{{config_root}}/.saikat-machine-access-ed25519'" }
+env = { GIT_SSH_COMMAND = "ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile='{{config_root}}/mise/github-known-hosts' -i '{{config_root}}/.saikat-machine-access-ed25519'" }
 run = '''
 #!/usr/bin/env bash
 set -euo pipefail
@@ -102,14 +102,13 @@ git config --get user.email
 '''
 
 [workspace-bootstrap-check]
-description = "Regression-test credential-free workspace setup and task-scoped Goose credentials"
+description = "Regression-test credential-free workspace setup and Git-only dotfiles bootstrap"
 run = '''
 #!/usr/bin/env -S ./.venv/bin/python
 import os
 from pathlib import Path
 import subprocess
 import tomllib
-from unittest.mock import patch
 
 with open("mise.toml", "rb") as stream:
   configuration = tomllib.load(stream)
@@ -154,37 +153,14 @@ for github_actions in [None, "false", "true"]:
       assert "git <config> <--get> <user.name>" in result.stdout
       assert "git <config> <--get> <user.email>" in result.stdout
     print("PASS: Git-only dotfiles setup with GITHUB_ACTIONS=" + repr(github_actions) + ", failure=" + repr(failure), flush=True)
-script = compile(tasks["goose-serve"]["run"], "goose-serve", "exec")
-with patch.dict(os.environ, {"GOOSE_AZURE_FOUNDRY_API_KEY": "fixture-api-key", "GOOSE_DESKTOP_SECRET_KEY": "fixture-server-secret"}, clear=True), patch("os.execve") as execute:
-  exec(script, {})
-  executable, arguments, environment = execute.call_args.args
-  assert arguments[arguments.index("--host") + 1] == "127.0.0.1"
-  assert arguments[-1] == "--roam"
-  assert environment["AZURE_FOUNDRY_API_KEY"] == "fixture-api-key"
-  assert environment["GOOSE_SERVER__SECRET_KEY"] == "fixture-server-secret"
-  assert environment["GOOSE_PROVIDER"] == "azure_foundry"
-  assert "GIT_CONFIG_SYSTEM" not in environment
-print("PASS: Goose shares workspace tooling and maps credentials only at launch", flush=True)
-for missing in ["GOOSE_AZURE_FOUNDRY_API_KEY", "GOOSE_DESKTOP_SECRET_KEY"]:
-  fixture = {"GOOSE_AZURE_FOUNDRY_API_KEY": "fixture-api-key", "GOOSE_DESKTOP_SECRET_KEY": "fixture-server-secret"}
-  fixture.pop(missing)
-  with patch.dict(os.environ, fixture, clear=True), patch("os.execve") as execute:
-    try:
-      exec(script, {})
-    except SystemExit as error:
-      assert missing in str(error)
-    else:
-      raise AssertionError("Missing credentials must prevent startup")
-    execute.assert_not_called()
-  print("PASS: missing " + missing + " never starts Goose", flush=True)
-assert configuration["daemons"]["goose"]["ready_http"] == "http://127.0.0.1:3284/status"
-assert configuration["daemons"]["goose"]["init"] == ["mise run goose-build"]
-assert tasks["goose-run"]["daemons"] == ["goose"]
-assert "depends" not in tasks["goose-run"]
-print("PASS: the daemon builds Goose before launching or checking readiness", flush=True)
-assert "ansible" not in tasks["workstation-setup"]["run"]
-assert "goose-run" not in tasks["workstation-setup"]["run"]
-print("PASS: workstation setup stays mise-only and does not unexpectedly start Goose", flush=True)
+assert not any(name.startswith(("goose_", "workstation_")) for name in configuration.get("vars", {}))
+assert not any(name.startswith(("goose-", "workstation-")) for name in tasks)
+assert not any(name.startswith("GOOSE_") for name in configuration["env"])
+assert "goose" not in configuration["daemons"]
+assert "mise/github-known-hosts" in tasks["dotfiles-setup"]["env"]["GIT_SSH_COMMAND"]
+fingerprint = subprocess.check_output(["ssh-keygen", "-lf", "mise/github-known-hosts"], text=True)
+assert "SHA256:+DiY3wvvV6TuJJhbpZisF/zLDA0zPMSvHdkr4UvCOqU" in fingerprint
+print("PASS: retired tooling is absent and shared bootstrap retains pinned GitHub trust", flush=True)
 '''
 
 [setup]

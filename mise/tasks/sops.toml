@@ -30,8 +30,8 @@ run = '''
 import subprocess
 import yaml
 
-plaintext = "apiVersion: v1\nkind: Secret\nmetadata:\n  name: sops-stream-test\n  namespace: goose\nstringData:\n  value: nonsecret-test-value\n"
-encrypted = subprocess.run(["mise", "run", "sops-encrypt-stdin", "--", "kubernetes/apps/goose/test.sops.yaml"], input=plaintext, text=True, stdout=subprocess.PIPE, check=True).stdout
+plaintext = "apiVersion: v1\nkind: Secret\nmetadata:\n  name: sops-stream-test\n  namespace: default\nstringData:\n  value: nonsecret-test-value\n"
+encrypted = subprocess.run(["mise", "run", "sops-encrypt-stdin", "--", "kubernetes/test.sops.yaml"], input=plaintext, text=True, stdout=subprocess.PIPE, check=True).stdout
 document = yaml.safe_load(encrypted)
 assert document["metadata"]["name"] == "sops-stream-test"
 assert document["stringData"]["value"].startswith("ENC[")
