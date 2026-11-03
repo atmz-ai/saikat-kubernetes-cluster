@@ -17,6 +17,7 @@ assert configuration["aws.access.key.id"] == "${secrets:rustfs/rustfs-credential
 assert configuration["aws.secret.access.key"] == "${secrets:rustfs/rustfs-credentials:RUSTFS_SECRET_KEY}"
 assert configuration["format.bytearray.extension"] == ".txt"
 assert configuration["format.bytearray.separator"] == "\n"
+assert configuration["rotate.schedule.interval.ms"] == "300000"
 print("PASS: generic archive receives new events without replaying historical offsets or embedding credentials")
 
 worker = yaml.safe_load(Path("kubernetes/infrastructure/kafka-connect/connect.yaml").read_text())

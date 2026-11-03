@@ -1,0 +1,30 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: event-archive-verification-1
+  namespace: kafka-connect
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 120
+  template:
+    spec:
+      automountServiceAccountToken: false
+      restartPolicy: OnFailure
+      containers:
+        - name: send-verification-event
+          image: rustfs/rustfs:1.0.1
+          command: [/bin/sh, -ec]
+          args:
+            - |
+              verification_identifier=$(cat /proc/sys/kernel/random/uuid)
+              printf 'Sending event-archive-verification event %s\n' "$verification_identifier"
+              curl --fail-with-body --connect-timeout 10 --max-time 60 \
+                --get http://snowplow-collector.snowplow.svc.cluster.local:9090/i \
+                --data-urlencode e=pv \
+                --data-urlencode p=web \
+                --data-urlencode tv=event-archive-verification-1.0 \
+                --data-urlencode aid=event-archive-verification \
+                --data-urlencode "eid=$verification_identifier" \
+                --data-urlencode url=https://example.com/event-archive-verification \
+                --data-urlencode page=event-archive-verification \
+                --output /dev/null --write-out 'Collector response: HTTP %{http_code}\n'
