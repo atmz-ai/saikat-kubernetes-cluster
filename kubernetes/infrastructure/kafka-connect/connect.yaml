@@ -29,7 +29,7 @@ spec:
   replicas: 2
   # Built by .github/workflows/build-kafka-connect-plugins.yml
   # Base: quay.io/strimzi/kafka:0.50.1-kafka-4.1.1 + Confluent S3 connector JAR
-  image: ghcr.io/dolr-ai/kafka-connect-plugins:latest
+  image: ghcr.io/dolr-ai/kafka-connect-plugins:latest@sha256:2e194973608496018bc421c4405729f2162315701142e45ddc623bfe2da27e23
   bootstrapServers: kafka-cluster-kafka-bootstrap.kafka.svc.cluster.local:9092
 
   # v1 API top-level fields (replacing deprecated spec.config equivalents)
