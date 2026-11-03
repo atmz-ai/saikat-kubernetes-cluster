@@ -70,20 +70,6 @@ spec:
                   matchLabels:
                     strimzi.io/cluster: connect-cluster
                 topologyKey: kubernetes.io/hostname
-    connectContainer:
-      env:
-        # Hetzner S3 credentials for the S3 Sink connector
-        - name: AWS_ACCESS_KEY_ID
-          valueFrom:
-            secretKeyRef:
-              name: connect-credentials
-              key: aws-access-key-id
-        - name: AWS_SECRET_ACCESS_KEY
-          valueFrom:
-            secretKeyRef:
-              name: connect-credentials
-              key: aws-secret-access-key
-
   metricsConfig:
     # JMX Prometheus exporter — Strimzi opens port 9404 (named "prometheus") on
     # each Connect worker pod so Prometheus can scrape connector/task metrics.

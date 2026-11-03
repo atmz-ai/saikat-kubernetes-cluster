@@ -21,6 +21,8 @@ assert configuration["rotate.schedule.interval.ms"] == "300000"
 print("PASS: generic archive receives new events without replaying historical offsets or embedding credentials")
 
 worker = yaml.safe_load(Path("kubernetes/infrastructure/kafka-connect/connect.yaml").read_text())
+assert "connectContainer" not in worker["spec"]["template"]
+assert not Path("kubernetes/infrastructure/kafka-connect/connector-s3-sink.yaml").exists()
 assert "secrets" in worker["spec"]["config"]["config.providers"].split(",")
 assert worker["spec"]["config"]["config.providers.secrets.class"] == "io.strimzi.kafka.KubernetesSecretConfigProvider"
 role, binding = yaml.safe_load_all(Path("kubernetes/infrastructure/rustfs/event-archive-credentials-access.yaml").read_text())

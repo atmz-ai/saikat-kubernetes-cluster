@@ -4,8 +4,6 @@ kind: Kustomization
 resources:
   - namespace.yaml
   - connect.yaml
-  - connector-s3-sink.yaml
   - connector-event-archive.yaml
-  - event-archive-verification.yaml
   - connect-credentials.sops.yaml
   - kafka-connect-metrics-config.yaml
