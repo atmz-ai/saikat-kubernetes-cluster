@@ -330,7 +330,7 @@ version = "0.3.11"
 backend = "cargo:cargo-leptos"
 
 [[tools."cargo:trunk"]]
-version = "0.22.0"
+version = "0.22.1"
 backend = "cargo:trunk"
 
 [[tools.eza]]
