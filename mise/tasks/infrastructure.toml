@@ -171,8 +171,11 @@ for resource in rendered["longhorn-backup"]:
             capture_output=True, text=True,
         )
         assert result.returncode == 0, "Deploy the source Snapshot before its Backup; Longhorn checks it during dry-run"
-        assert json.loads(result.stdout)["status"]["readyToUse"] is True
-        print("PASS: Longhorn Backup admission source exists and is ready")
+        source_snapshot = json.loads(result.stdout)
+        assert source_snapshot["status"]["readyToUse"] is True
+        assert resource["metadata"]["labels"]["backup-volume"] == source_snapshot["spec"]["volume"]
+        assert resource["metadata"]["labels"]["backup-target"] == target["metadata"]["name"]
+        print("PASS: Longhorn Backup admission source is ready and volume and internal target labels match")
 
 provisioner = next(resource for resource in rendered["rustfs"] if resource["kind"] == "Job" and resource["metadata"]["name"] == "rustfs-cluster-backup-buckets-1")
 script = provisioner["spec"]["template"]["spec"]["containers"][0]["args"][0]

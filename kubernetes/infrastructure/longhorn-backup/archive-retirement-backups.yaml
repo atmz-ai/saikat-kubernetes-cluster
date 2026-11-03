@@ -1,0 +1,11 @@
+apiVersion: longhorn.io/v1beta2
+kind: Backup
+metadata:
+  name: backup-archive-retirement-availability-monitor
+  namespace: longhorn-system
+  labels:
+    backup-target: default
+    backup-volume: pvc-ddf4a3e5-fb07-44c4-b7c7-499a7db850cc
+spec:
+  backupMode: incremental
+  snapshotName: daily-vo-0996a956-afd1-4024-b5af-66bc73bbc2b4
