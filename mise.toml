@@ -8,17 +8,9 @@ age.strict = false
 
 [tools]
 age = "latest"
-# binaryen (wasm-opt) PINNED to 131 — do NOT let `mise upgrade --bump` float
-# this ("latest" resolves to 132, which is broken; see below). SpacetimeDB
-# bundles no wasm-opt, so `spacetime build` optimises with whatever `wasm-opt`
-# is on PATH — i.e. this version. 132's output breaks the SpacetimeDB 2.10
-# wasm parser: `spacetime build` still SUCCEEDS (it only optimises), but the
-# publish pre-publish check rejects the module with "failed to parse
-# WebAssembly module: invalid leading byte (0x7e) for external kind", while
-# the un-optimized wasm parses fine (isolated via --bin-path). Re-verified
-# failing against 2.10.0 — `mise run spacetime-run` reproduces it locally via
-# the local server's pre-publish check, so no Maincloud access is needed.
-# Bump only together with a verified `spacetime build` + publish cycle.
+# ! Keep 131: on 20261103, Binaryen 133 built successfully but SpacetimeDB 2.14.0
+# ! rejected local schema inspection with "invalid leading byte (0x7e) for external kind".
+# ! The same module published locally with 131; require a local build/publish check before bumping.
 "aqua:WebAssembly/binaryen" = "131"
 # aws-cli — the S3 client for Hetzner Object Storage. Its credentials are the
 # * HETZNER_S3_* values in [env], including the age-encrypted secret, which each

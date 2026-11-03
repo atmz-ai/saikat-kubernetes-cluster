@@ -1,3 +1,50 @@
+[event-archive-configuration-checks]
+description = "Validate the new-events-only archive destination, runtime credentials, and bucket provisioning"
+run = '''
+#!/usr/bin/env -S ./.venv/bin/python -u
+import os
+from pathlib import Path
+import subprocess
+import yaml
+
+connector = yaml.safe_load(Path("kubernetes/infrastructure/kafka-connect/connector-event-archive.yaml").read_text())
+configuration = connector["spec"]["config"]
+assert connector["metadata"]["name"] == "enriched-event-archive"
+assert configuration["consumer.override.auto.offset.reset"] == "latest"
+assert configuration["s3.bucket.name"] == "enriched-event-archive"
+assert configuration["store.url"] == "http://rustfs-svc.rustfs.svc.cluster.local:9000"
+assert configuration["aws.access.key.id"] == "${secrets:rustfs/rustfs-credentials:RUSTFS_ACCESS_KEY}"
+assert configuration["aws.secret.access.key"] == "${secrets:rustfs/rustfs-credentials:RUSTFS_SECRET_KEY}"
+assert configuration["format.bytearray.extension"] == ".txt"
+assert configuration["format.bytearray.separator"] == "\n"
+print("PASS: generic archive receives new events without replaying historical offsets or embedding credentials")
+
+worker = yaml.safe_load(Path("kubernetes/infrastructure/kafka-connect/connect.yaml").read_text())
+assert "secrets" in worker["spec"]["config"]["config.providers"].split(",")
+assert worker["spec"]["config"]["config.providers.secrets.class"] == "io.strimzi.kafka.KubernetesSecretConfigProvider"
+role, binding = yaml.safe_load_all(Path("kubernetes/infrastructure/rustfs/event-archive-credentials-access.yaml").read_text())
+assert role["rules"] == [{"apiGroups": [""], "resources": ["secrets"], "resourceNames": ["rustfs-credentials"], "verbs": ["get"]}]
+assert binding["subjects"] == [{"kind": "ServiceAccount", "name": "connect-cluster-connect", "namespace": "kafka-connect"}]
+assert binding["roleRef"]["name"] == role["metadata"]["name"]
+deployment = yaml.safe_load(Path("kubernetes/clusters/yral-k8s/infrastructure-kafka-connect.yaml").read_text())
+assert {"name": "infrastructure-rustfs"} in deployment["spec"]["dependsOn"]
+print("PASS: runtime Secret access is scoped and bucket provisioning precedes connector deployment")
+
+job = yaml.safe_load(Path("kubernetes/infrastructure/rustfs/event-archive-bucket.yaml").read_text())
+script = job["spec"]["template"]["spec"]["containers"][0]["args"][0]
+subprocess.run(["sh", "-n"], input=script, text=True, check=True)
+fixture = 'curl() { case "$*" in *--write-out*) printf "%s" "$fixture_status" ;; *) printf "REQUEST %s\\n" "$*" ;; esac; }\n'
+for status, succeeds, creates in [("200", True, False), ("404", True, True), ("500", False, False)]:
+    result = subprocess.run(["sh", "-ec", fixture + script], env={"PATH": os.environ["PATH"], "fixture_status": status}, capture_output=True, text=True)
+    assert (result.returncode == 0) == succeeds, result.stderr
+    assert ("--request PUT" in result.stdout) == creates
+    if succeeds:
+        assert "Verifying event archive bucket" in result.stdout
+    else:
+        assert "HTTP 500" in result.stderr
+    print("PASS: bucket provisioning status=" + status + ", succeeds=" + str(succeeds) + ", creates=" + str(creates))
+'''
+
 [dns-generate]
 description = "Regenerate the PowerDNS zone artifacts from the pdns_zones list (ansible/inventory/group_vars/all/vars.yml)"
 run = "./.venv/bin/ansible-playbook ansible/playbooks/operations/update-dns-zone-config.yml"

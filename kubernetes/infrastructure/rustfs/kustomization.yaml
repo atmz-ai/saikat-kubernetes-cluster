@@ -9,4 +9,6 @@ resources:
   - google-authorization.yaml
   - loki-bucket.yaml
   - backup-buckets.yaml
+  - event-archive-bucket.yaml
+  - event-archive-credentials-access.yaml
   - route.yaml

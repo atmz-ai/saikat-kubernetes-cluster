@@ -50,8 +50,9 @@ spec:
   config:
     # Apache Kafka native EnvVarConfigProvider — allows connector configs to
     # reference ${env:VAR_NAME} (e.g. S3 credentials in the S3 sink connector).
-    config.providers: env
+    config.providers: env,secrets
     config.providers.env.class: org.apache.kafka.common.config.provider.EnvVarConfigProvider
+    config.providers.secrets.class: io.strimzi.kafka.KubernetesSecretConfigProvider
     # Replication for Connect internal topics
     config.storage.replication.factor: 3
     offset.storage.replication.factor: 3
