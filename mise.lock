@@ -244,32 +244,32 @@ version = "591.0.0"
 backend = "asdf:mise-plugins/mise-gcloud"
 
 [[tools.aws-cli]]
-version = "2.38.5"
+version = "2.39.3"
 backend = "aqua:aws/aws-cli"
 
 [tools.aws-cli."platforms.linux-arm64"]
-checksum = "sha256:07711a936e9d271045ab937d2c2c5390c25f419e4ba9e25adb9e996031e3f6be"
-url = "https://awscli.amazonaws.com/awscli-exe-linux-aarch64-2.38.5.zip"
+checksum = "sha256:f6eb845fbacb11bee87de3f5fbe8043773cbe89d0414607b44b71e216eb9226b"
+url = "https://awscli.amazonaws.com/awscli-exe-linux-aarch64-2.39.3.zip"
 
 [tools.aws-cli."platforms.linux-arm64-musl"]
-checksum = "sha256:07711a936e9d271045ab937d2c2c5390c25f419e4ba9e25adb9e996031e3f6be"
-url = "https://awscli.amazonaws.com/awscli-exe-linux-aarch64-2.38.5.zip"
+checksum = "sha256:f6eb845fbacb11bee87de3f5fbe8043773cbe89d0414607b44b71e216eb9226b"
+url = "https://awscli.amazonaws.com/awscli-exe-linux-aarch64-2.39.3.zip"
 
 [tools.aws-cli."platforms.linux-x64"]
-checksum = "blake3:57ff61a49c4f3ea209a9468a4fffdade33d2051808895597bf30e799bd74cd02"
-url = "https://awscli.amazonaws.com/awscli-exe-linux-x86_64-2.38.5.zip"
+checksum = "sha256:14cb35809ad7547dd3c69fa9899a3975fbd850b6a6791f3fe264856490cd9a63"
+url = "https://awscli.amazonaws.com/awscli-exe-linux-x86_64-2.39.3.zip"
 
 [tools.aws-cli."platforms.linux-x64-musl"]
-checksum = "sha256:5def7d1b7e55d892f9a381bb2cb2081a685712464be0d36d5d706af0ac48d0d3"
-url = "https://awscli.amazonaws.com/awscli-exe-linux-x86_64-2.38.5.zip"
+checksum = "sha256:14cb35809ad7547dd3c69fa9899a3975fbd850b6a6791f3fe264856490cd9a63"
+url = "https://awscli.amazonaws.com/awscli-exe-linux-x86_64-2.39.3.zip"
 
 [tools.aws-cli."platforms.macos-arm64"]
-checksum = "blake3:acd515063717a9fead293b22e8a686527e1e183c3f06a653b2a29d66d273ed42"
-url = "https://awscli.amazonaws.com/AWSCLIV2-2.38.5.pkg"
+checksum = "sha256:f9014f2edc9d4f40cb1f6662f1ec6d0f2d89d60d9d452f830008d9d92ca49f22"
+url = "https://awscli.amazonaws.com/AWSCLIV2-2.39.3.pkg"
 
 [tools.aws-cli."platforms.macos-x64"]
-checksum = "sha256:4cb957d1f79c7264ef5a0f3a509ce477bbfd23c91eee888493a9dfff445a8d7c"
-url = "https://awscli.amazonaws.com/AWSCLIV2-2.38.5.pkg"
+checksum = "sha256:f9014f2edc9d4f40cb1f6662f1ec6d0f2d89d60d9d452f830008d9d92ca49f22"
+url = "https://awscli.amazonaws.com/AWSCLIV2-2.39.3.pkg"
 
 [[tools.azure-cli]]
 version = "2.91.0"
