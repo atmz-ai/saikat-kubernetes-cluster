@@ -119,7 +119,7 @@ spec:
       # ? chart 0.45.0's Headlamp is unverified — check the logs and the sidebar after
       # ? the first reconcile rather than assuming it loads.
       - name: headlamp-longhorn-plugin
-        image: gsoci.azurecr.io/giantswarm/headlamp-longhorn:0.1.12
+        image: gsoci.azurecr.io/giantswarm/headlamp-longhorn:0.1.24
         command:
           - /bin/sh
           - -c
