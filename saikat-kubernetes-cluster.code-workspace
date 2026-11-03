@@ -1,0 +1,21 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../private"
+		},
+		{
+			"path": "../../.dotfiles"
+		}
+	],
+	"settings": {
+		"rust-analyzer.linkedProjects": [
+			"./Cargo.toml"
+		],
+		"better-todo-tree.tree.scanMode": "workspace",
+		"better-todo-tree.tree.showBadges": true,
+		"better-todo-tree.tree.showCountsInTree": true
+	}
+}
