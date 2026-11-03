@@ -4,4 +4,4 @@
 # Renovate will open a PR when a new patch or minor version is released.
 # To act on a minor-version bump (e.g., 1.35 → 1.36), follow the manual upgrade procedure:
 #   run upgrade-node.yml (one node at a time; control plane or worker by `node_role`).
-kubernetes_version: "1.37.0"
+kubernetes_version: "1.37.2"
