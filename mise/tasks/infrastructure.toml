@@ -129,7 +129,7 @@ import jsonschema
 import yaml
 
 rendered = {}
-for owner in ("rustfs", "longhorn", "longhorn-backup", "cloudnative-pg", "harbor", "external-dns"):
+for owner in ("rustfs", "longhorn", "longhorn-backup", "cloudnative-pg", "harbor", "external-dns", "uptime-kuma"):
     result = subprocess.run(
         ["kubectl", "kustomize", "--load-restrictor", "LoadRestrictionsNone", "kubernetes/infrastructure/" + owner],
         capture_output=True, text=True,
@@ -163,6 +163,15 @@ settings = next(resource for resource in rendered["longhorn"] if resource["kind"
 assert target["spec"]["backupTargetURL"] == settings["backupTarget"]
 assert target["spec"]["credentialSecret"] == settings["backupTargetCredentialSecret"]
 print("PASS: Longhorn daily S3 backups retain recovery points without a local snapshot-history job")
+
+monitor_claim = next(resource for resource in rendered["uptime-kuma"] if resource["kind"] == "PersistentVolumeClaim")
+assert monitor_claim["spec"]["storageClassName"] == "longhorn"
+monitor_labels = monitor_claim["metadata"]["labels"]
+assert monitor_labels["recurring-job.longhorn.io/source"] == "enabled"
+assert monitor_labels["recurring-job-group.longhorn.io/default"] == "disabled"
+assert monitor_labels["recurring-job.longhorn.io/snapshot-cleanup"] == "enabled"
+assert {key for key, value in monitor_labels.items() if key.startswith("recurring-job.longhorn.io/") and value == "enabled"} == {"recurring-job.longhorn.io/source", "recurring-job.longhorn.io/snapshot-cleanup"}
+print("PASS: disposable uptime monitor retains replicated storage and snapshot cleanup without recurring backups")
 
 for resource in rendered["longhorn-backup"]:
     if resource["kind"] == "Backup":
