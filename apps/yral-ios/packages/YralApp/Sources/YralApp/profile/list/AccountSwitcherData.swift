@@ -1,25 +1,5 @@
 import Foundation
 
-/// Account-switcher data for `AuthClient` — feature-local (the switcher
-/// lives in `profile/list/`); this extension carries its loading +
-/// overlay logic so `AuthClientPersistence.swift` stays within lint
-/// bounds.
-///
-/// The switcher's list has three layers, each best-effort:
-///   1. INSTANT local rows — subjects from the JWT-seeded
-///      `AIIdentitiesStore`, pseudonym-name fallbacks, GobGob avatars.
-///   2. AVATAR overlay — one batch read of ALL row subjects (main +
-///      bots) from the SpacetimeDB profile table overlays the DURABLE
-///      hosted URLs (written at creation). The main row gets its OWN
-///      picture — never the active bot's (the double-avatar bug).
-///   3. NAME overlay — one creator call (`GET /api/v1/creator/
-///      influencers`, `id == subject` verified live) overlays the
-///      bots' real names. The profile table carries no displayable
-///      name, and the locally stored username exists only on the
-///      creating device — without this overlay every device but the
-///      creating one shows pseudonyms.
-/// Nothing is duplicated into local storage; the remote stores are the
-/// sources of truth. A failed overlay keeps the previous layer's rows.
 extension AuthClient {
 
   /// The switcher's instant local list — main account (from
@@ -31,14 +11,11 @@ extension AuthClient {
       return nil
     }
     let activeSubject = sessionStore.userSubject
-    // Main row: its OWN session pic when the main account is the
-    // active one; the GobGob fallback otherwise (never the active
-    // bot's picture — that was the double-avatar bug).
     let mainAvatarURL: String
-    if mainSubject == activeSubject, let sessionPic = sessionStore.profilePic {
-      mainAvatarURL = sessionPic
+    if mainSubject == activeSubject, let sessionPictureURL = sessionStore.profilePic {
+      mainAvatarURL = ProfilePicture.resolveURL(sessionPictureURL)
     } else {
-      mainAvatarURL = ProfilePicture.url(fromSubject: mainSubject)
+      mainAvatarURL = ""
     }
     let mainEntry = AccountSwitcherEntry(
       subject: mainSubject,
@@ -57,17 +34,10 @@ extension AuthClient {
       .map { entry in
         AccountSwitcherEntry(
           subject: entry.subject,
-          // Stored username (creation device only) when we have
-          // it; deterministic pseudonym fallback otherwise. The
-          // creator-name overlay replaces pseudonyms with the
-          // real names once loaded.
           username: UsernameGenerator.resolveUsername(
             preferred: entry.username, subject: entry.subject
           ) ?? entry.subject,
-          // GobGob deterministic fallback — `refreshedAccountSwitcherEntries()`
-          // overlays the hosted URL from the profile table when
-          // the switcher is opened.
-          avatarURL: ProfilePicture.url(fromSubject: entry.subject),
+          avatarURL: "",
           isBot: true,
           isActive: entry.subject == activeSubject
         )
@@ -75,9 +45,6 @@ extension AuthClient {
     return AccountSwitcherEntries(mainAccount: mainEntry, aiAccounts: botEntries)
   }
 
-  /// The switcher's list with live data — `accountSwitcherEntries()`
-  /// (instant local fallbacks) upgraded by the avatar overlay (batch
-  /// profile read) and the name overlay (creator API).
   func refreshedAccountSwitcherEntries() async -> AccountSwitcherEntries? {
     guard var entries = accountSwitcherEntries() else { return nil }
     // Overlay 1 — avatars: ALL rows in one batch read (main + bots),
@@ -99,30 +66,10 @@ extension AuthClient {
         let mainPicture = mainProfile.profilePicture,
         !mainPicture.url.isEmpty
       {
-        entries.mainAccount.avatarURL = mainPicture.url
+        entries.mainAccount.avatarURL = ProfilePicture.resolveURL(mainPicture.url)
       }
     } catch {
-      // Best-effort overlay — GobGob fallback rows stay. The
-      // failure still reaches Crashlytics (non-fatal).
       CrashReporter.record(error, context: "switcher-avatar-overlay")
-    }
-    // Overlay 2 — real bot names from the creator API.
-    if let idToken = keychain.string(forKey: .idToken) {
-      do {
-        let creators = try await influencerDataSource?.listMyInfluencers(
-          idToken: idToken
-        )
-        if let creators {
-          entries.aiAccounts = Self.applyRealNames(
-            to: entries.aiAccounts,
-            from: creators
-          )
-        }
-      } catch {
-        // Best-effort overlay — pseudonym fallback stays; the
-        // failure still reaches Crashlytics (non-fatal).
-        CrashReporter.record(error, context: "switcher-name-overlay")
-      }
     }
     return entries
   }
@@ -137,35 +84,15 @@ extension AuthClient {
   ) -> [AccountSwitcherEntry] {
     let pictureURLsBySubject: [String: String] = Dictionary(
       uniqueKeysWithValues: profiles.compactMap { profile -> (String, String)? in
-        guard let picture = profile.profilePicture,
-          !picture.url.isEmpty
-        else { return nil }
-        return (profile.oauthSubject, picture.url)
+        let pictureURL = ProfilePicture.resolveURL(profile.profilePicture?.url)
+        guard !pictureURL.isEmpty else { return nil }
+        return (profile.oauthSubject, pictureURL)
       }
     )
     return entries.map { entry in
       guard let hostedURL = pictureURLsBySubject[entry.subject] else { return entry }
       var refreshed = entry
       refreshed.avatarURL = hostedURL
-      return refreshed
-    }
-  }
-
-  /// Pure — overlay the creator API's real names onto the switcher
-  /// rows. Rows without a creator record keep their fallback name.
-  nonisolated static func applyRealNames(
-    to entries: [AccountSwitcherEntry],
-    from influencers: [CreatorInfluencer]
-  ) -> [AccountSwitcherEntry] {
-    let namesBySubject = Dictionary(
-      uniqueKeysWithValues: influencers.map { ($0.subject, $0.name) }
-    )
-    return entries.map { entry in
-      guard let realName = namesBySubject[entry.subject],
-        !realName.isEmpty
-      else { return entry }
-      var refreshed = entry
-      refreshed.username = realName
       return refreshed
     }
   }
@@ -178,15 +105,9 @@ extension AuthClient {
   ///
   /// `avatarURL`: the tapped switcher row's URL — after
   /// `refreshedAccountSwitcherEntries()` this is the bot's HOSTED
-  /// avatar from the profile table (durable Storj URL). Falls back to
-  /// the GobGob deterministic URL when absent (offline switch, main
-  /// account, or a bot whose write never landed).
+  /// avatar from the profile table (durable Storj URL). Missing or
+  /// retired URLs use the native placeholder.
   ///
-  /// `username`: the tapped row's display name — after the name
-  /// overlay this is the bot's REAL name from the creator API. It
-  /// feeds the session + PROFILE_PIC-cache so the Settings/Profile
-  /// headers show it too (the local store only knows names on the
-  /// creating device). Falls back to the stored/pseudonym name.
   func switchToAccount(
     subject: String,
     avatarURL: String? = nil,
@@ -210,14 +131,12 @@ extension AuthClient {
       botUsername = botUsername ?? match.username
     }
 
-    let profilePic =
-      avatarURL
-      ?? ProfilePicture.url(fromSubject: subject)
+    let profilePictureURL = ProfilePicture.resolveURL(avatarURL)
     // Live/stored username when present; deterministic pseudonym
     // fallback otherwise.
     let session = Session(
       userSubject: subject,
-      profilePic: profilePic,
+      profilePic: profilePictureURL,
       username: UsernameGenerator.resolveUsername(
         preferred: botUsername, subject: subject
       ),
@@ -227,7 +146,7 @@ extension AuthClient {
     sessionStore.send(.sessionEstablished(session))
     cacheSession(
       userSubject: subject,
-      profilePic: profilePic,
+      profilePic: profilePictureURL,
       username: botUsername,
       isAIAccount: isBot
     )

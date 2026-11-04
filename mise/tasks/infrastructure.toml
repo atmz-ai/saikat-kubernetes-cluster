@@ -23,8 +23,14 @@ print("PASS: generic archive receives new events without replaying historical of
 worker = yaml.safe_load(Path("kubernetes/infrastructure/kafka-connect/connect.yaml").read_text())
 assert "connectContainer" not in worker["spec"]["template"]
 assert not Path("kubernetes/infrastructure/kafka-connect/connector-s3-sink.yaml").exists()
-assert "secrets" in worker["spec"]["config"]["config.providers"].split(",")
+assert worker["spec"]["config"]["config.providers"] == "secrets"
+assert "config.providers.env.class" not in worker["spec"]["config"]
 assert worker["spec"]["config"]["config.providers.secrets.class"] == "io.strimzi.kafka.KubernetesSecretConfigProvider"
+credentials = yaml.safe_load(Path("kubernetes/infrastructure/kafka-connect/connect-credentials.sops.yaml").read_text())
+assert set(credentials["stringData"]) == {"kafka-connect-password", "kafka-connect-jaas-config"}
+assert all(value.startswith("ENC[") for value in credentials["stringData"].values())
+assert worker["spec"]["authentication"]["passwordSecret"] == {"secretName": "connect-credentials", "password": "kafka-connect-password"}
+print("PASS: retired environment credentials are absent and encrypted Kafka authentication is retained")
 role, binding = yaml.safe_load_all(Path("kubernetes/infrastructure/rustfs/event-archive-credentials-access.yaml").read_text())
 assert role["rules"] == [{"apiGroups": [""], "resources": ["secrets"], "resourceNames": ["rustfs-credentials"], "verbs": ["get"]}]
 assert binding["subjects"] == [{"kind": "ServiceAccount", "name": "connect-cluster-connect", "namespace": "kafka-connect"}]

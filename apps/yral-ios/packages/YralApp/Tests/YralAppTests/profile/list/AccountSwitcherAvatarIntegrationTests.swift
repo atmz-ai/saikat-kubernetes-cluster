@@ -9,7 +9,7 @@ import Testing
 ///
 /// The contract under test: the switcher rows must carry the bot's
 /// DURABLE hosted avatar URL (the Storj link written to the SpacetimeDB
-/// profile table at creation), not the GobGob deterministic fallback.
+/// profile table at creation), not an unavailable default avatar.
 ///
 /// Level: the real `AuthClient` + real `AIIdentitiesStore` + real
 /// `SpacetimeDBRemoteDataSource`, with HTTP stubbed at the Apple-native
@@ -47,7 +47,7 @@ struct AccountSwitcherAvatarIntegrationTests {
 
     let recorder = RequestRecorder()
     ChannelURLProtocol.register(
-      Fixtures.serveProfilesAndNames(
+      Fixtures.serveProfilesOnly(
         profilesBody: Fixtures.profilesResponseBody(rows: [
           Fixtures.profileWireRow(
             subject: Fixtures.firstBotSubject,
@@ -58,10 +58,6 @@ struct AccountSwitcherAvatarIntegrationTests {
             avatarURL: Fixtures.secondBotHostedAvatar
           ),
         ]),
-        namesBody: Fixtures.creatorNamesResponseBody(entries: [
-          (subject: Fixtures.firstBotSubject, name: "dekuizuku"),
-          (subject: Fixtures.secondBotSubject, name: "uraraka"),
-        ]),
         recorder: recorder
       ),
       forChannel: channel
@@ -69,16 +65,14 @@ struct AccountSwitcherAvatarIntegrationTests {
 
     let entries = await client.refreshedAccountSwitcherEntries()
 
-    // THE assertion — the device-reported bug: rows must show the
-    // durable URLs written at creation, not the GobGob fallback.
     let avatarsBySubject = Dictionary(
       uniqueKeysWithValues: (entries?.aiAccounts ?? []).map { ($0.subject, $0.avatarURL) }
     )
     #expect(avatarsBySubject[Fixtures.firstBotSubject] == Fixtures.firstBotHostedAvatar)
     #expect(avatarsBySubject[Fixtures.secondBotSubject] == Fixtures.secondBotHostedAvatar)
 
-    // Exactly TWO calls: the profiles batch + the creator listing.
-    #expect(recorder.requests.count == 2)
+    #expect(recorder.requests.count == 1)
+    #expect(recorder.requests.allSatisfy { $0.url?.host == AppConfiguration.spacetimeDBBaseURL })
     guard
       let profileCall = recorder.requests.first(where: {
         $0.url?.path.contains("/call/get_users_profile_details") == true
@@ -96,8 +90,12 @@ struct AccountSwitcherAvatarIntegrationTests {
     #expect(profileBody.contains(Fixtures.secondBotSubject))
   }
 
-  @Test("blank profile rows keep the GobGob fallback (bot whose write never landed)")
-  func blankProfileRowKeepsFallback() async throws {
+  @Test("missing and retired profile avatars use placeholders", arguments: [
+    nil,
+    "",
+    "https://prakash-yral.hel1.your-objectstorage.com/gobgob/gob.77.png",
+  ] as [String?])
+  func unavailableAvatarUsesPlaceholder(_ avatarURL: String?) async throws {
     let keychain = KeychainStore(service: "switcher-avatar-tests-\(UUID().uuidString)")
     defer { keychain.removeAll() }
     let defaults = Fixtures.freshDefaults()
@@ -113,15 +111,14 @@ struct AccountSwitcherAvatarIntegrationTests {
     // One bot with its real picture, one with a None picture (the
     // pre-wire-fix creations left the table row blank).
     ChannelURLProtocol.register(
-      Fixtures.serveProfilesAndNames(
+      Fixtures.serveProfilesOnly(
         profilesBody: Fixtures.profilesResponseBody(rows: [
           Fixtures.profileWireRow(
             subject: Fixtures.firstBotSubject,
             avatarURL: Fixtures.firstBotHostedAvatar
           ),
-          Fixtures.profileWireRow(subject: Fixtures.secondBotSubject, avatarURL: nil),
+          Fixtures.profileWireRow(subject: Fixtures.secondBotSubject, avatarURL: avatarURL),
         ]),
-        namesBody: Fixtures.creatorNamesResponseBody(entries: []),
         recorder: recorder
       ),
       forChannel: channel
@@ -133,19 +130,14 @@ struct AccountSwitcherAvatarIntegrationTests {
       uniqueKeysWithValues: (entries?.aiAccounts ?? []).map { ($0.subject, $0.avatarURL) }
     )
     #expect(avatarsBySubject[Fixtures.firstBotSubject] == Fixtures.firstBotHostedAvatar)
-    // The GobGob fallback — deterministic per-subject, and (after
-    // the sign-trap fix) always a real avatar index.
-    #expect(
-      avatarsBySubject[Fixtures.secondBotSubject]
-        == ProfilePicture.url(fromSubject: Fixtures.secondBotSubject)
-    )
+    #expect(avatarsBySubject[Fixtures.secondBotSubject] == "")
     #expect(
       avatarsBySubject[Fixtures.secondBotSubject]
         != Fixtures.secondBotHostedAvatar
     )
   }
 
-  @Test("network failure keeps the GobGob fallback rows (offline-safe)")
+  @Test("network failure keeps native avatar placeholders")
   func networkFailureKeepsFallbacks() async throws {
     let keychain = KeychainStore(service: "switcher-avatar-tests-\(UUID().uuidString)")
     defer { keychain.removeAll() }
@@ -169,14 +161,8 @@ struct AccountSwitcherAvatarIntegrationTests {
     let avatarsBySubject = Dictionary(
       uniqueKeysWithValues: (entries?.aiAccounts ?? []).map { ($0.subject, $0.avatarURL) }
     )
-    #expect(
-      avatarsBySubject[Fixtures.firstBotSubject]
-        == ProfilePicture.url(fromSubject: Fixtures.firstBotSubject)
-    )
-    #expect(
-      avatarsBySubject[Fixtures.secondBotSubject]
-        == ProfilePicture.url(fromSubject: Fixtures.secondBotSubject)
-    )
+    #expect(avatarsBySubject[Fixtures.firstBotSubject] == "")
+    #expect(avatarsBySubject[Fixtures.secondBotSubject] == "")
   }
 
 }

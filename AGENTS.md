@@ -251,7 +251,7 @@ When `#[cfg]` feature gates cause a variable/function/import to be unused in som
 
 **The generated bindings ARE the source of truth for the SpacetimeDB API.** `mise run spacetime-publish` regenerates them (build → publish → `spacetime-generate`) on every deploy, so `apps/yral-database-spacetime/bindings/src/generated/` always mirrors the last-deployed schema — never cross-check bindings against other callers, and never treat an existing client (e.g. the frozen Kotlin app) as more current than the bindings. For HTTP services the OpenAPI spec / handler source holds the same role.
 
-**API bindings come from the live contract, generated, never hand-curated (Hard Rule).** For any HTTP service we call, generate typed bindings from the service's OWN OpenAPI spec (yral-rishi-agent: `https://agent.rishi.yral.com/openapi.json` → swift-openapi-generator in the consuming app's SPM target). The spec is consumed VERBATIM — no filtering to "only the endpoints we use today" and no hand-written subsets; the full API generates so future features have the whole context. The spec file in the target is a byte-verbatim SNAPSHOT of the live endpoint (never hand-edited), kept current by a build hook (`mise run yral-ios-sync-rishi-openapi` runs before every build/test via `depends`; offline builds fall back to the committed snapshot). Spec DEFECTS (untyped responses, missing security declarations) are fixed by a PR to the service's repo — not patched locally — so the contract improves for every consumer.
+**API bindings come from the live contract, generated, never hand-curated (Hard Rule).** For any HTTP service we call, generate typed bindings from the service's OWN OpenAPI spec. The spec is consumed VERBATIM — no filtering to "only the endpoints we use today" and no hand-written subsets; the full API generates so future features have the whole context. Keep byte-verbatim committed contract snapshots current through the consuming service's build workflow. Spec DEFECTS (untyped responses, missing security declarations) are fixed in the owning service — not patched locally — so the contract improves for every consumer.
 
 **Surface upstream API errors verbatim — never bury them in generic custom messages (Hard Rule).** In ALL API-consumer code (Swift data sources, Rust service clients, reducers calling external services, CLI wrappers), error paths must carry the upstream status code AND response body through to the user-facing error — the API's own words ("Name 'X' is already taken", FastAPI's `detail` array, the provider's error JSON) are the message. Never replace them with invented generic text like "unexpected response (spec drift)" or "something went wrong": it misclassifies real server failures as contract bugs and sends diagnosis to the wrong layer (observed: a live HTTP 500 from LLM generation was reported as "spec drift" — the iOS `undocumented()` mapping discarded the status and body the generated client already carried). Rules: (1) error types propagate `statusCode` + `body`, (2) response bodies are surfaced verbatim (cap buffering, e.g. 1 MB), (3) custom text is a FALLBACK only when the upstream body is unreadable, and it must include the status code, (4) `LocalizedError`/display mappings prefer the upstream body first. Handled errors are ALSO reported to the app's crash reporter — see the iOS AGENTS.md Firebase section for the Crashlytics rule and `CrashReporter` facade.
 
@@ -542,6 +542,9 @@ DNS is self-hosted, not Cloudflare. PowerDNS Authoritative runs from `kubernetes
   after approval of the text. The user performs that action.
 - This applies to email, Google Chat, SMS and ticketing; it does not authorize
   other changes to the outbound system or bypass production mutation restrictions.
+- Rishi issue drafts belong in the matching `Ole-Ole-AI` repository:
+  `oleole-api` for service/API work and `swarm-infra` for shared infrastructure.
+  Do not file them in the retired `dolr-ai/yral-rishi-agent` repository.
 
 ### Local Environment & Parity
 The root `mise.toml` is the single source of truth for tool versions, plaintext environment values, age-encrypted local secrets, and daemon definitions. Task definitions live in owner-scoped `mise/tasks/<owner>.toml` files, selected explicitly by root `[task_config].includes`. Do not add per-application tooling or secret configuration files. Keep application-specific values beside their existing root declarations.
@@ -653,13 +656,6 @@ For any external service the repo calls (SpacetimeDB Maincloud, third-party APIs
 - **Locally:** plaintext values and native age-encrypted secrets both live in root `mise.toml [env]`.
 - **In-cluster:** plaintext → k8s `ConfigMap`; secrets → SOPS-encrypted `*.sops.yaml`. **Only provision cluster config if a service in our cluster actually calls the external service.** External clients (mobile apps, out-of-workspace backends) carry their own config and do not consume our cluster ConfigMaps/SOPS.
 - Wire config into the consuming app through its existing mechanism, with mise providing local process environments.
-
-**Investigating yral-rishi-agent errors — Sentry first (read-only).** The agent reports every unhandled exception and ERROR log to the self-hosted Sentry at `https://sentry.rishi.yral.com` (SDK init in `apps/yral-rishi-agent/infra/sentry.py`: FastAPI/Starlette integrations, `attach_stacktrace=True`, error-level logs as events). When the agent's API misbehaves (HTTP 500s, generation failures), query it instead of guessing:
-- Token: mise's age-decrypted `SENTRY_RISHI_API_TOKEN`, read-scoped; do not display it.
-- Scope: org `sentry`, project `yral-rishi-agent` (id 4); `yral-chat-ai` (id 2) also exists.
-- Pattern, in a mise-activated shell: `curl -H "Authorization: Bearer $SENTRY_RISHI_API_TOKEN" "https://sentry.rishi.yral.com/api/0/organizations/sentry/issues/?project=4&query=<terms>&statsPeriod=14d"` → `.../issues/<id>/events/latest/` for the full stack trace + request. Sentry issue titles carry the exception type; group by `sort=freq` for the loudest failures.
-- This path found a live bug end-to-end in four queries (Sentry #602: `ResponseValidationError` on `reason: null` → GitHub issue → upstream fix #510), with no SSH access to the swarm.
-- Server fixes land in `apps/yral-rishi-agent` (upstream `dolr-ai/yral-rishi-agent`, auto-deploys on merge to main; verify with a read-only probe of `/health` and `/openapi.json` before re-testing a client against it).
 
 ### Inventory
 

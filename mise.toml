@@ -12,29 +12,6 @@ age = "latest"
 # ! rejected local schema inspection with "invalid leading byte (0x7e) for external kind".
 # ! The same module published locally with 131; require a local build/publish check before bumping.
 "aqua:WebAssembly/binaryen" = "131"
-# aws-cli — the S3 client for Hetzner Object Storage. Its credentials are the
-# * HETZNER_S3_* values in [env], including the age-encrypted secret, which each
-# s3-* task maps into AWS_* in its own `env` table. Hetzner's Object Storage is
-# S3-compatible, so any S3 client would do; aws-cli is chosen because it needs
-# no config file once those two variables are set.
-#
-# ! The mapping is per-task ON PURPOSE. Setting AWS_* globally would shadow the
-# ! real AWS credentials for every command in the repo — see the note on
-# ! HETZNER_S3_* in [env] for the measured failure.
-#
-# NOTE the default endpoint is a SINGLE location (fsn1). Buckets live in the
-# location they were created in, and this account has buckets in more than one
-# (fsn1 / hel1 ...), so a listing against the default shows only that
-# location's buckets. To reach another location pass `--endpoint-url
-# https://<loc>.your-objectstorage.com` with the same credentials. The etcd
-# backup role does exactly this with hel1 (see ansible/inventory/hosts.yml),
-# which is why its endpoint differs from HETZNER_S3_ENDPOINT.
-# Read-only by default — do not mutate buckets from a shell (repo rule: the
-# declarative source is Ansible/git; see AGENTS.md "Immutable GitOps"). The one
-# carve-out is `mise run s3-abort-multipart-uploads`, which clears orphaned
-# multipart uploads on a decommissioned bucket: those are not declared state
-# (invisible to every listing, owned by no operator, present in no git source)
-# and they leak billable storage and block the bucket's deletion.
 aws-cli = "latest"
 azure-cli = "latest"
 cargo-binstall = "latest"
@@ -77,42 +54,8 @@ pitchfork = "latest"
 #   what every `-image` task's `--platform linux/amd64` requires.
 #
 python = "3.14.8"
-# rclone — third S3 client, for the operations neither of the others covers:
-# `purge` (remove a prefix AND the bucket in one step), `backend
-# list-multipart-uploads` / `backend cleanup` (orphaned upload parts, which are
-# invisible to `ls` but still billed), and `backend cleanup-hidden` (old object
-# versions on a versioned bucket). aws-cli covers bucket-level admin and s5cmd
-# covers bulk object ops; rclone's value here is the backend-command surface
-# plus its native `Hetzner` provider profile.
-#
-# For Hetzner use `--s3-provider Hetzner` — rclone's docs list Hetzner as a
-# first-class provider (regions hel1/fsn1/nbg1), so no `Other` fallback is
-# * Credentials come from the same HETZNER_S3_* age values as aws-cli,
-# mapped into AWS_* by the task that runs rclone; `--s3-endpoint` replaces
-# `--endpoint-url`.
-#
-# Two knobs worth knowing when a bucket misbehaves (both are documented rclone
-# flags, and both change the server-side code path — useful when one listing or
-# delete implementation is at fault rather than the data):
-#   --s3-list-version 1        use ListObjects v1 instead of v2 (rclone defaults
-#                              to auto-detecting; v1 is a different code path)
-#   --s3-list-url-encode       toggle URL-encoded listings, which is more
-#                              reliable for awkward object keys
-rclone = "latest"
 rg = "latest"
 ruff = "latest"
-# rush — cross-platform parallel job runner (Go, single native binary). Added
-# because parallelising shell work on macOS has no good built-in: BSD `xargs`
-# has NO -d flag (so tab-separated input can't be split safely) and GNU
-# `parallel` isn't in the mise registry at all. rush supports -d for an
-# explicit field delimiter and -j for worker count, which is what makes it
-# safe for TSV input instead of relying on whitespace splitting.
-#
-# Usage pattern for N-field TSV records ({1}/{2} are the fields per record):
-#   rush -j 64 -d '\t' 'cmd {1} {2}' < records.tsv
-# (see the mise.toml note on the three S3 clients above for why these
-# bulk-S3 maintenance jobs exist at all)
-rush = "latest"
 # Rust — latest STABLE via mise.lock resolution (committed lock pins the
 # exact resolved version per `mise lock`, so builds stay reproducible while
 # `mise run setup` on a fresh checkout pulls the newest stable).
@@ -130,20 +73,6 @@ rush = "latest"
   "rust-src",
   "rust-analyzer",
 ] }
-# s5cmd — bulk object operations against Hetzner Object Storage. Kept ALONGSIDE
-# aws-cli because they cover different halves of the API and neither does both:
-#   aws-cli → bucket-level admin (ls, versioning, policies) and one-off reads.
-#   s5cmd   → many-object operations (delete/copy/sync over 10^4–10^6 keys).
-# `aws s3 rm --recursive` issues ONE DELETE per object, so emptying a bucket
-# with ~190K objects is ~190K sequential round trips. s5cmd batches through the
-# S3 DeleteObjects API (1000 keys per request) and runs a large worker pool, so
-# the same bucket empties in a fraction of the time. Use it for bucket cleanup
-# and any bulk transfer; use aws-cli for anything bucket-scoped.
-#
-# Same credentials as aws-cli — the s3-* task that runs it maps HETZNER_S3_*
-# into AWS_*, and it takes the location endpoint via --endpoint-url exactly like
-# aws-cli (see the aws-cli note above for why the location matters).
-s5cmd = "latest"
 sops = "latest"
 sqlite = "latest"
 uv = "latest"
@@ -178,28 +107,6 @@ PAGER = "cat"
 CARGO_HOME = "{{env.HOME}}/.cargo"
 RUSTUP_HOME = "{{env.HOME}}/.rustup"
 CARGO_BINSTALL_DIR = "{{env.HOME}}/.local/share/cargo-binstall"
-# ── Hetzner Object Storage (S3-compatible) ─────────────────────────────────
-# ! These are deliberately NOT named AWS_* . aws-cli gives real environment
-# ! variables precedence over EVERY other credential source — including an
-# ! `aws login` session and ~/.aws/credentials — so repo-wide AWS_* vars broke
-# ! all real AWS access: every `aws` call made inside this repo was redirected
-# ! at Hetzner and, when the encrypted secret was unavailable,
-# ! absent from a bare shell, failed with "Partial credentials found in env,
-# ! missing: AWS_SECRET_ACCESS_KEY" before it ever reached the login provider.
-# ! Verified with `aws sts get-caller-identity` both ways.
-# !
-# ! So the values are named for what they are, and each s3-* task maps them
-# ! into AWS_* via its own `env` table — scoped to that task only. Nothing
-# ! global is named AWS_* any more; that is the whole point of the split.
-# * HETZNER_S3_ACCESS_KEY_ID is a public access key id, not a secret.
-# * HETZNER_S3_SECRET_ACCESS_KEY is age-encrypted below and mapped per task.
-# !
-HETZNER_S3_ACCESS_KEY_ID = "XO5X9A1W8AMHY3DSTKMS"
-# Default location endpoint. Buckets live where they were CREATED
-# (fsn1 / hel1 / nbg1 ...), so this is a fallback only — pass the bucket's real
-# location as the task's endpoint argument or `url` variable.
-HETZNER_S3_ENDPOINT = "https://fsn1.your-objectstorage.com"
-HETZNER_S3_REGION = "fsn1"
 KUBECONFIG = "{{env.HOME}}/.kube/config"
 # SpacetimeDB Maincloud (SaaS) — DB identity/name for the yral-database-spacetime
 # module. The Maincloud base URL is fixed; the DB name matches `spacetime.json`.
@@ -257,9 +164,6 @@ BTC_REWARDS_GCHAT_WEBHOOK_URL = ""
 
 [env.CLUSTER_CLOUDFLARE_API_TOKEN]
 age = "YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IHNzaC1lZDI1NTE5IG5QMTlMdyAvMlZCY1ZqV1l4bElTOWdnRU0yYlQ3Yks2ZytiVDRzaThZSWhPYkZxUjBBCkFSWWhOOVBwRWtIWHhMRXN2YVVhTWkzcXZ0ejAyL2VFTDBMdnUzbzZxczQKLT4gVC1ncmVhc2UgMF5iZyEKVDVCQkV3dkFGQWdybTdUbnIydTZGOGZIRVdqSEcwUmtCUGUxV0dqL21ZL0s4eEZhCi0tLSBIeUNIZlpjSHZtdHJDUnIwYVlJMkt4YXV1ZUNOS1pHVU5yQm5OQlhOVldjCiWpPd1hjcfUH0b8rkNJ03WlfsQ+qTWrmLSDjWhhajt2e+831J8WEvqF4xWvohHWUmCUIgBmuskBa7A2ZtksTIfZT35ovnEEiw"
-
-[env.HETZNER_S3_SECRET_ACCESS_KEY]
-age = "YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IHNzaC1lZDI1NTE5IG5QMTlMdyBUWmVjRGFnMjZtZFhHRFhtR3VJZzJZQUljUWJ2L2o4Tlg3ZDNVeWFpT1FrCjhjOVZHeUNLMnF5ODh3OFU4dUlhYWo5RDFkU2dIZ2xYU0owUnVUa2dMbXMKLT4gOmI2OX4oVywtZ3JlYXNlIEUiKHtgQSBbUVpIIiApfD0hCjlrR0tmVnlRQmZIUExQelFUd3NCbTB4cUZ0cm4wVzAzb3FwVGVwZStIT0dBUmFORGt5U0pYRC9DYTZVbkhKNm4KeVNINi8xcTNHWXJ1YlVEQWI4K2N2d2xNbWE2V0JYZXZrVThwY2l4dVJnUDdHWVlEMDhKSHN1cTlBS29ydE1GagpJQQotLS0gcXM4YUZjcFJUNDJEUUhKRmFqSEVmRkxFVjRtSFU3VWVnTi9SKzlmOGZzawrc+ALNlmXvcH3OecixYxvyinSZAbatsH9Nx6l6iNBrE9PR/AozEiT+jjWkllCpX1eEIkxsrprikjWuTzOaQiIIz9kOlmYkC7U"
 
 [env.ACTIONS_IDENTITY_PEM]
 age = "YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IHNzaC1lZDI1NTE5IG5QMTlMdyBmUGRxQmRxSUlsR2g0YnZQWXd5SFlpS1p1ZjI5cUdxQnEzb1R2dkVLU3hnCkxjcGwxOHNhM3k0NXVHZnZRaTZhVDlhL3F3cktVSnFHZGU5cUtrQTZDQzAKLT4gQEZmby1ncmVhc2UgLlZRRApZZXVCWG5pcW5yN3FUMTI5SklLbEgzKzZHN1k2NUdJQkh2d2pqTStvbE92eUM2UFRheDk1dzl6djE1V1E4cEJyCmV3RG0wYmV6Nng3Qzc0S1Q0WnliRWRPNWpIMlpzTHZKQ2VsdFJrS2h1QWNaUVVybUVDSENIQVVsTlBOYlpxZUwKRHcKLS0tIDhaT3lGWEJzTkRXWDBUMmtoWU9pMjBuZnFtK0dXSTI1OTlSRzhpZEZRbjAKJimqfeRdW8fUehnQ9Z74DuB7oU0yBpqSClIwEyKapK5LhkMjcc/G7Rq6MXBJ/MpPitxbNaZwgV4jKjaIRYGAAkT+gUOcxMTQqeW7qFlzEPnLTbgQrGjpv3MoI4y76qVqK0iTcEWANSYRefxWx+V7TInvePWJavd+oOnziFO/ZlLctl1Wa9/QnmueLj37YnNGf0obrQJYMwOSwYl0ZWOrsg526yzyC/+KmxP6khSjJY3rMfNp9ooVNSD3/J+y57Tq7y2qutglVl3LMblNs9U3470EItHq4Hs9/WneSnSpwgbl/8ZMu5yK3iDOWIHDSrer2/RVDy7QuVe/TfPBHS4"
@@ -319,9 +223,6 @@ age = "YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IHNzaC1lZDI1NTE5IG5QMTlMdyArQXVMN0U2U2FYd
 [env.YRAL_IOS_FIREBASE_PLIST_BASE64]
 age = "YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IHNzaC1lZDI1NTE5IG5QMTlMdyBGc21tRE03UFZCYXNWM0tvSjZMejZ3NHNqMWRYQ00xYjJlYlliVWZqbnpVCm1jdGFzWFNESTlEaklqKzN5Y09Qa2hKU3lvekxqdmxVWmdjVWRZaGF5aEEKLT4gMjYtZ3JlYXNlIGhsCklvRGVxeE42L293Ci0tLSBlNE1GeGtCRkk4Yi96OHBocHBEM1AyOVBxakhVSWhGVzVNcTFaak5CeUNvCr8+jJdFU31LJrJPM+hHhmGHA5R59UHGa8SzhsOIEq9i+88aWqRTZg1Xq9Shqi1AjP5Qu2lITncNffvCyY9Jx0XnHFLOU+/MmuNHhBXdRQ4BifaYI3bTflBWIezRae8VCkrsxRFIevseLP8B5HslEMolivaVUH+tuRZXK+TR0xVSaGmaUvsD0Y5VAxULQ+kl8nJH/BDMXUIEgnTRS/KbTjsnncHiypr0zkln/q0nwkATvv8fZNyaM091MgOBCczaN0vPzsJ69J7m3+VWkcBc21k8hC11YLy1xgKeunnah2x1R2GDk1NLFXK3AhRRX0yB1soB0cwFMmvDBzUxMI45ewu5Qgj4WLkFH2SRg5DNcr3DCs1nquzKoGTeWHJo+5vO4IihjsyAI/29z5avmI4OGrpjG3Uavhe3r4mGxjr+IzD3sJr8EOYk8tK4yT5MvLpipslTgHwA3OIJ5Nfy2JtYVH/pT+QCsoigqn5RR2Ku+6EhGW9S7vFlnvJqzIOvMv5MxiCOQgwDHS0zxSTeVqjVAk55jIHfGjqTQ6GwBkn9X2il2bKF3Mba/e8oBDWBexi1aCTgMUeBFSU6BgVl4nLveRaDIhsMvqhi6ciFJXqUF6Zbe0jJ6w5b5B4RiUyj5doUb39H02Wew/acOUvKmb5q3rxWURbIkS+8cgU4o/hp2UISLuDUjv/Gk3sO/9V4wdAoHpSyWUjiDEP5fjB5VW647WPqvUKPga3WWxQAkkEpBnc2KtaJ4xGlvuXDdlYGsXjDQDJ+QEkTmAdC78WcVT0LOUy4TfhQSzaJqjcX6pt1NwgcLvhoE4WZDWuDLtebJoYHQ9QDQ8UEdLIqyoTJfDuOrhI/iUi9oNgoS5M/v4AftvyZHknzUTO2Fsim1nVNvr/7qN07oCvFJxLW6RZDbGLUkJA8/09ABbz0xs4ot4jX5x4onR8SJceRNxY+hg8dL6j5uyjnHWr4RMU5Vgk/NSLQZ7d+KoiYUNl5W83s7GEoiJg5hmCxv3fikK0Qzvya4dyRdZYgTDtUtvYjdq87Xf0znTDo/oIUQrqZzBtlkzi9zSvNTDUBegoj2+UcENpQmbkYeQUrWApum5HKjlVjq02sYUaBmGj0A2Yk+f6OlT0Md9Odx8Re9ULDm/zWKXnAKZumlZpiJJS+MBGt9RuuNtobTk4ytHNPL5MYjlLR+8sxBfTAT1Q+Km/1Gj9jTzahXdCwsshXgTZA+ZXJwpCwlitU9UVDhU6dFcEh5pQ0wqY2Lz93yDhPznTOqq0zvDeJYVE0W1nvM7PqgrQ1XP5A4lCgDPr7Y50HPZnh7rb+LIXBONK2VVXB0+NR4rZnGjUBuVy7cqIIxbGFsciQ39aP5OM5e3OiEt5UAIjF2gxwqvLyiM4exZNNRZU9rbnKUjtS56XZxoFocl/QwHKFQafIymqcEBWB58wjdPLv4u6dXQMVyQAGvhZZQCQfzmWjvltm3ZYNFAoMRgAEiULrycb7jA5D9KN6Vx0fml0ezxH3NmtASrCrITioEcFSqAqW5aRN3jS6k+PsLBh0qZBUCefvbbBjoQyJMBYQGVwDdGaHqWvi+D2SRN5YCvDa2jGgM32q"
 
-[env.SENTRY_RISHI_API_TOKEN]
-age = "YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IHNzaC1lZDI1NTE5IG5QMTlMdyBFK1Vmcmc4RGJWakM1Wm1tdEw4c00vN2hUb1BwWDhteW92MFFiangwZEZJCkZBMjY5c0cwVVFzc0QwNFloRUNUQ2FzYWZoZ0kxdUgyTG1NK2E0cEhicnMKLT4gQnw8L2ctZ3JlYXNlIFMgXyBGRFtBN0oKZjVZaVU1MGFYUjJmCi0tLSBEakkrMGhRUm1GSHlBbWZpS21CRTdMbjgwRGxqVFloSS9XK3dVYkZYRDF3Cov+SCDCvdmdf3hbwrsubdqfOrq7sN8Gw0PZ5mBHbvPMG74+BiJqVE5FsnXs56dezw1ZLWQUsEDCSawXaSrF9fSleJCL1bZ0y2HzyPPGi5udC7eVslcNBruqf1KY39RJ0XNVBX1uhco"
-
 [env.CLUSTER_GEMINI_API_KEY]
 age = "YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IHNzaC1lZDI1NTE5IG5QMTlMdyAxYkF3d3BNZjZtQnJ1OU5lVTlOWDVLV090dXpVS2doazFmWFVOcU5yWndFClpac1dPUnBuYndFZXMwRS9SUkh3UWhhejcwRUNvOTI1NUpCVCt2RmlGencKLT4gSkFDS2ktZ3JlYXNlIF91IFYKbk1IbXVyQng0REt1emppZ1N2bEZ0ZE9WVWxPbGcrbEc4TkZLeUx2dnFYNmR5Tjg4M0RLLzNTZlJ1QmMKLS0tIEVxdWcvSWlIMTBwdi9BZnZGNk11b0l4Q1RPN2JvRkFNVTFhWWpJWk56VnMKxkcuMsZArVOlaj7vZgMMh2r//ZJgEjDot+xO33uZgX2DgBVdnyevf8B0rP/0LRVhL+87Ur/iSpyYTcDG7h0uidPQ41O8eEscDAE6OhKTLzgJqbP6/g"
 
@@ -330,14 +231,12 @@ includes = [
   "mise/tasks/ansible.toml",
   "mise/tasks/infrastructure.toml",
   "mise/tasks/my-website.toml",
-  "mise/tasks/s3.toml",
   "mise/tasks/sops.toml",
   "mise/tasks/spacetime.toml",
   "mise/tasks/workspace.toml",
   "mise/tasks/yral-auth.toml",
   "mise/tasks/yral-ios.toml",
   "mise/tasks/yral-metadata.toml",
-  "mise/tasks/yral-rishi-agent.toml",
 ]
 
 # ── Daemons ─────────────────────────────────────────────────────────────────

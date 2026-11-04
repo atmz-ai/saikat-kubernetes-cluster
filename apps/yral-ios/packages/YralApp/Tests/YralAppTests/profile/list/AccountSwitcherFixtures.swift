@@ -50,12 +50,9 @@ enum AccountSwitcherFixtures {
       keychain: keychain,
       defaults: defaults,
       spacetimeDataSource: dataSource,
-      influencerDataSource: AIInfluencerDataSource(session: mockSession),
       sessionStore: sessionStore
     )
     keychain.setString(Self.mainSubject, forKey: .mainSubject)
-    // The name overlay requires an id token — the creator call is
-    // Bearer-authenticated.
     keychain.setString("test-id-token", forKey: .idToken)
     AIIdentitiesStore.put(
       [
@@ -111,45 +108,6 @@ enum AccountSwitcherFixtures {
     "[" + rows.joined(separator: ",") + "]"
   }
 
-  /// The creator-names response body (`GET /api/v1/creator/influencers`,
-  /// untyped per the spec defect) — shape per creator.py: {influencers: [...]}.
-  static func creatorNamesResponseBody(
-    entries: [(subject: String, name: String)]
-  ) -> String {
-    let rows = entries.map { entry in
-      "{\"id\":\"\(entry.subject)\",\"name\":\"\(entry.name)\",\"display_name\":null,\"avatar_url\":null}"
-    }
-    return "{\"influencers\":[\(rows.joined(separator: ","))],\"total\":\(entries.count)}"
-  }
-
-  /// Serves BOTH endpoints the refresh flow hits: the SpacetimeDB
-  /// profiles batch and the creator-names listing.
-  @discardableResult
-  static func serveProfilesAndNames(
-    profilesBody: String,
-    namesBody: String,
-    recorder: RequestRecorder
-  ) -> @Sendable (URLRequest) throws -> (HTTPURLResponse, Data) {
-    return { request in
-      recorder.record(request)
-      let isCreatorCall = request.url?.path.contains("/api/v1/creator/influencers") == true
-      let body = isCreatorCall ? namesBody : profilesBody
-      guard
-        let response = HTTPURLResponse(
-          url: request.url!,
-          statusCode: 200,
-          httpVersion: "HTTP/1.1",
-          headerFields: ["Content-Type": "application/json"]
-        )
-      else {
-        throw URLError(.badServerResponse)
-      }
-      return (response, Data(body.utf8))
-    }
-  }
-
-  /// Serves the profiles batch only (the creator listing fails — for
-  /// asserting the name overlay's absence).
   @discardableResult
   static func serveProfilesOnly(
     profilesBody: String,
@@ -157,8 +115,10 @@ enum AccountSwitcherFixtures {
   ) -> @Sendable (URLRequest) throws -> (HTTPURLResponse, Data) {
     return { request in
       recorder.record(request)
-      if request.url?.path.contains("/api/v1/creator/influencers") == true {
-        throw URLError(.notConnectedToInternet)
+      guard request.url?.host == AppConfiguration.spacetimeDBBaseURL,
+        request.url?.path.contains("/call/get_users_profile_details") == true
+      else {
+        throw URLError(.unsupportedURL)
       }
       guard
         let response = HTTPURLResponse(

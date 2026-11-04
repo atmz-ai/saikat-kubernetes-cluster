@@ -81,7 +81,8 @@ struct ProfileScreen: View {
 
   private var header: some View {
     HStack(spacing: 16) {
-      AsyncImage(url: sessionStore.profilePic.flatMap(URL.init(string:))) { image in
+      let profilePictureURL = ProfilePicture.resolveURL(sessionStore.profilePic)
+      AsyncImage(url: profilePictureURL.isEmpty ? nil : URL(string: profilePictureURL)) { image in
         image.resizable().scaledToFill()
       } placeholder: {
         Image(systemName: "person.crop.circle.fill")

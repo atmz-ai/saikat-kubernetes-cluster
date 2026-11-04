@@ -7,7 +7,7 @@ description = "Install workspace tools and build dependencies without changing S
 run = "mise bootstrap packages apply --yes && mise install && mise run python-setup"
 
 [bootstrap]
-description = "Provision infrastructure credentials, initialize application submodules, and apply Git dotfiles"
+description = "Provision infrastructure credentials and apply Git dotfiles"
 depends = ["python-setup"]
 run = '''
 #!/usr/bin/env bash
@@ -49,9 +49,7 @@ fi
 # deliberately OVERWRITING any existing key (operator decision 2026-09-01: this
 # vault key is the adopted identity for everything — GitHub + every node provider;
 # see ansible/inventory/group_vars/all/vars.yml "single key for everything"). ssh,
-# git, and ansible then pick it up automatically — locally AND on the CI runner,
-# which is what lets the submodule clone below authenticate with no CI-specific
-# setup.
+# git, and ansible then pick it up automatically — locally AND on the CI runner.
 if [ -f .saikat-machine-access-ed25519 ]; then
   mkdir -p ~/.ssh && chmod 700 ~/.ssh
   cp .saikat-machine-access-ed25519 ~/.ssh/id_ed25519
@@ -62,12 +60,6 @@ if [ -f .saikat-machine-access-ed25519 ]; then
   chmod 644 ~/.ssh/id_ed25519.pub
   echo '  ✓ Installed saikat-machine-access SSH key as ~/.ssh/id_ed25519 (default machine identity)'
 fi
-
-# Initialize git submodules (app source repos). SSH URLs (git@github.com:...)
-# resolve via the default identity installed above. accept-new handles a fresh
-# CI runner (github.com not yet in known_hosts) while still refusing CHANGED
-# host keys (TOFU).
-GIT_SSH_COMMAND="ssh -o StrictHostKeyChecking=accept-new" git submodule update --init --recursive
 
 # Extract kubeconfig from Ansible vault → ~/.kube/config (idempotent — skips if already present)
 if [ "$bootstrap_vault_ok" = true ] && [ ! -f ~/.kube/config ]; then

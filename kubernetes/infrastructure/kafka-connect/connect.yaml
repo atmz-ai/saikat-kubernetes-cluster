@@ -9,11 +9,6 @@
 # for both the worker bootstrap connection and the default consumer/producer config.
 # Do NOT set those in spec.config; the substitution does not work at bootstrap time.
 #
-# EnvVarConfigProvider: uses the Apache Kafka native provider
-# (org.apache.kafka.common.config.provider.EnvVarConfigProvider) so that
-# KafkaConnector configs can reference ${env:VAR_NAME} for S3 credentials.
-# Strimzi's own EnvVarConfigProvider was removed in 0.46.0.
-#
 # * 2 replicas for connector task distribution; host anti-affinity spreads them.
 ---
 apiVersion: kafka.strimzi.io/v1
@@ -48,10 +43,7 @@ spec:
       password: kafka-connect-password
 
   config:
-    # Apache Kafka native EnvVarConfigProvider — allows connector configs to
-    # reference ${env:VAR_NAME} (e.g. S3 credentials in the S3 sink connector).
-    config.providers: env,secrets
-    config.providers.env.class: org.apache.kafka.common.config.provider.EnvVarConfigProvider
+    config.providers: secrets
     config.providers.secrets.class: io.strimzi.kafka.KubernetesSecretConfigProvider
     # Replication for Connect internal topics
     config.storage.replication.factor: 3

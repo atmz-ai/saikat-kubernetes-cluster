@@ -3,21 +3,13 @@ import Testing
 
 @testable import YralApp
 
-/// Real-bot-name overlay + account-switch session tests — split
-/// from `AccountSwitcherAvatarIntegrationTests.swift` to stay
-/// within the file/type lint bounds.
-/// Real-bot-name overlay + account-switch session tests — split
-/// from `AccountSwitcherAvatarIntegrationTests.swift` to stay
-/// within the file/type lint bounds.
 @MainActor
 struct AccountSwitcherNameAndSwitchTests {
 
   /// Short alias — the fixture namespace name is long.
   typealias Fixtures = AccountSwitcherFixtures
-  // MARK: - Real bot names (the creator-name overlay)
-
-  @Test("creator listing overlays the real bot names over pseudonyms")
-  func creatorNamesOverlay() async throws {
+  @Test("profile refresh preserves locally stored bot names without external lookup")
+  func storedBotNamesDuringProfileRefresh() async throws {
     let keychain = KeychainStore(service: "switcher-avatar-tests-\(UUID().uuidString)")
     defer { keychain.removeAll() }
     let defaults = Fixtures.freshDefaults()
@@ -29,17 +21,9 @@ struct AccountSwitcherNameAndSwitchTests {
       channel: channel
     )
 
-    // The local store's usernames exist only on the creating device;
-    // on a fresh install they're absent and rows show pseudonyms.
-    AIIdentitiesStore.put(
-      [
-        AIIdentityEntry(subject: Fixtures.firstBotSubject, username: nil),
-        AIIdentityEntry(subject: Fixtures.secondBotSubject, username: nil),
-      ],
-      defaults: defaults
-    )
+    let recorder = RequestRecorder()
     ChannelURLProtocol.register(
-      Fixtures.serveProfilesAndNames(
+      Fixtures.serveProfilesOnly(
         profilesBody: Fixtures.profilesResponseBody(rows: [
           Fixtures.profileWireRow(
             subject: Fixtures.firstBotSubject,
@@ -47,11 +31,7 @@ struct AccountSwitcherNameAndSwitchTests {
           ),
           Fixtures.profileWireRow(subject: Fixtures.secondBotSubject, avatarURL: nil),
         ]),
-        namesBody: Fixtures.creatorNamesResponseBody(entries: [
-          (subject: Fixtures.firstBotSubject, name: "dekuizuku"),
-          (subject: Fixtures.secondBotSubject, name: "uraraka"),
-        ]),
-        recorder: RequestRecorder()
+        recorder: recorder
       ),
       forChannel: channel
     )
@@ -63,10 +43,12 @@ struct AccountSwitcherNameAndSwitchTests {
     )
     #expect(namesBySubject[Fixtures.firstBotSubject] == "dekuizuku")
     #expect(namesBySubject[Fixtures.secondBotSubject] == "uraraka")
+    #expect(recorder.requests.count == 1)
+    #expect(recorder.requests.allSatisfy { $0.url?.host == AppConfiguration.spacetimeDBBaseURL })
   }
 
-  @Test("bots without a creator record keep their pseudonym fallback")
-  func missingCreatorRecordKeepsPseudonym() async throws {
+  @Test("bots without a stored name retain their local pseudonym")
+  func missingStoredNameKeepsPseudonym() async throws {
     let keychain = KeychainStore(service: "switcher-avatar-tests-\(UUID().uuidString)")
     defer { keychain.removeAll() }
     let defaults = Fixtures.freshDefaults()
@@ -83,16 +65,12 @@ struct AccountSwitcherNameAndSwitchTests {
       defaults: defaults
     )
     ChannelURLProtocol.register(
-      Fixtures.serveProfilesAndNames(
+      Fixtures.serveProfilesOnly(
         profilesBody: Fixtures.profilesResponseBody(rows: [
           Fixtures.profileWireRow(
             subject: Fixtures.firstBotSubject,
             avatarURL: Fixtures.firstBotHostedAvatar
           )
-        ]),
-        // The creator listing knows only the first bot.
-        namesBody: Fixtures.creatorNamesResponseBody(entries: [
-          (subject: Fixtures.firstBotSubject, name: "dekuizuku")
         ]),
         recorder: RequestRecorder()
       ),
@@ -106,7 +84,7 @@ struct AccountSwitcherNameAndSwitchTests {
       return
     }
     #expect(firstBot.subject == Fixtures.firstBotSubject)
-    #expect(firstBot.username == "dekuizuku")
+    #expect(firstBot.username == UsernameGenerator.username(fromSubject: Fixtures.firstBotSubject))
   }
 
   @Test("switchToAccount persists the tapped row's hosted URL into the session cache")
@@ -189,7 +167,7 @@ struct AccountSwitcherNameAndSwitchTests {
     #expect(sessionStore.username != namelessBotSubject)
   }
 
-  @Test("switchToAccount without a URL falls back to GobGob (offline switch)")
+  @Test("switchToAccount without a URL uses the native placeholder")
   func switchWithoutURLFallsBack() {
     let keychain = KeychainStore(service: "switcher-avatar-tests-\(UUID().uuidString)")
     defer { keychain.removeAll() }
@@ -202,10 +180,32 @@ struct AccountSwitcherNameAndSwitchTests {
 
     client.switchToAccount(subject: Fixtures.firstBotSubject, avatarURL: nil)
 
-    #expect(
-      sessionStore.profilePic
-        == ProfilePicture.url(fromSubject: Fixtures.firstBotSubject)
+    #expect(sessionStore.profilePic == "")
+    #expect(client.cachedSession()?.userSubject == Fixtures.firstBotSubject)
+  }
+
+  @Test("retired avatar URLs are rejected when switching and restoring cached sessions")
+  func retiredAvatarIsNotRestored() {
+    let keychain = KeychainStore(service: "switcher-avatar-tests-\(UUID().uuidString)")
+    defer { keychain.removeAll() }
+    let defaults = Fixtures.freshDefaults()
+    let (client, sessionStore) = Fixtures.makeClient(
+      defaults: defaults,
+      keychain: keychain,
+      channel: UUID().uuidString
     )
+    let retiredURL = "https://prakash-yral.hel1.your-objectstorage.com/gobgob/gob.77.png"
+
+    client.switchToAccount(subject: Fixtures.firstBotSubject, avatarURL: retiredURL)
+
+    #expect(sessionStore.profilePic == "")
+    #expect(defaults.string(forKey: CachedSessionKey.profilePic.rawValue) == "")
+
+    defaults.set(retiredURL, forKey: CachedSessionKey.profilePic.rawValue)
+    let restored = client.cachedSession()
+    #expect(restored?.userSubject == Fixtures.firstBotSubject)
+    #expect(restored?.profilePic == "")
+    #expect(restored?.profilePic != retiredURL)
   }
 }
 

@@ -64,11 +64,6 @@ struct AccountSwitcherScreen: View {
     .presentationDetents([.fraction(2.0 / 3.0), .medium, .large])
     .background(Color.black)
     .onAppear {
-      // Fallback entries first (instant, offline-safe), then one
-      // batch read of the bot profiles overlays the DURABLE hosted
-      // avatar URLs from the SpacetimeDB profile table — the source
-      // of truth written at creation. Best-effort: on failure the
-      // GobGob fallback rows remain.
       send(.appeared(localEntries: authClient.accountSwitcherEntries()))
     }
   }
@@ -142,7 +137,7 @@ struct AccountSwitcherScreen: View {
       )
     } label: {
       HStack(spacing: 10) {
-        AsyncImage(url: URL(string: account.avatarURL)) { image in
+        AsyncImage(url: account.avatarURL.isEmpty ? nil : URL(string: account.avatarURL)) { image in
           image.resizable().scaledToFill()
         } placeholder: {
           Color.gray.opacity(0.25)
@@ -199,7 +194,7 @@ extension AccountSwitcherEntry {
     mainAccount: AccountSwitcherEntry(
       subject: "main-subject",
       username: "sunnyotter",
-      avatarURL: ProfilePicture.url(fromSubject: "main-subject"),
+      avatarURL: "",
       isBot: false,
       isActive: false
     ),
@@ -207,14 +202,14 @@ extension AccountSwitcherEntry {
       AccountSwitcherEntry(
         subject: "bot-one",
         username: "dekuizuku",
-        avatarURL: ProfilePicture.url(fromSubject: "bot-one"),
+        avatarURL: "",
         isBot: true,
         isActive: true
       ),
       AccountSwitcherEntry(
         subject: "bot-two",
         username: "uraraka",
-        avatarURL: ProfilePicture.url(fromSubject: "bot-two"),
+        avatarURL: "",
         isBot: true,
         isActive: false
       ),

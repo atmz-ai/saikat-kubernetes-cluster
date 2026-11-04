@@ -16,18 +16,8 @@ import Foundation
 /// positional arrays. Escaping is framework-handled.
 public struct SpacetimeDBRemoteDataSource: Sendable {
 
-  // TODO(endpoint-input-sanitization): audit ALL endpoints we call —
-  // here (SpacetimeDB procedures/reducers), AIInfluencerDataSource
-  // (agent.rishi.yral.com persona/metadata/influencer/avatar), and
-  // AuthDataSource (yral-auth) — and confirm each one SANITIZES the
-  // inputs it accepts (length caps, character-set/format validation,
-  // injection-safe persistence). The iOS side pre-sanitizes some
-  // (the username field), but client-side checks are UX only — the
-  // server must enforce. Known probe points: the bio (LLM free text),
-  // the username (regex-validity + uniqueness), instructions text
-  // (400+ chars of free text). Verify each backend rejects malformed
-  // input with a specific error BEFORE persisting, and add
-  // server-side tests for the rejections.
+  // TODO audit server-side validation in the SpacetimeDB and authentication endpoints,
+  // including length limits, format checks and injection-safe persistence.
 
   /// Default URLSession — no custom client (30s default timeout matches
   /// the Kotlin policy; per-endpoint overrides are inline

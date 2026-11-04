@@ -16,13 +16,6 @@ public enum AppConfiguration {
   public static let feedBaseURL = "recommendation-service-82502260393.us-central1.run.app"
   /// Anshuman's influencer-feed recsys.
   public static let influencerFeedBaseURL = "recsys-influencer-feed.ansuman.yral.com"
-  /// Unified agent backend (storage interface, videogen, upload, chat, coach).
-  /// Prakash's storage-interface was retired 2026-08-21 — all these moved here.
-  public static let storageInterfaceBaseURL = "agent.rishi.yral.com"
-  public static let videogenBaseURL = "agent.rishi.yral.com"
-  public static let uploadBaseURL = "agent.rishi.yral.com"
-  public static let chatBaseURL = "agent.rishi.yral.com"
-  public static let coachBaseURL = "agent.rishi.yral.com"
   /// Pump/dump game balance (Cloudflare Worker).
   public static let pumpDumpBaseURL = "yral-hot-or-not.go-bazzinga.workers.dev"
   /// yral-billing — creator earnings + IAP grants.

@@ -1,6 +1,6 @@
 # Application Source
 
-Application code lives in `apps/<application>/`. Its cluster deployment declarations live separately in `kubernetes/apps/<application>/`, which Flux reconciles independently of local submodule checkout state. Repository-wide operating rules live in the root `AGENTS.md`; application-specific contracts belong in the application's own `AGENTS.md`.
+Application code lives in `apps/<application>/`. Its cluster deployment declarations live separately in `kubernetes/apps/<application>/`, which Flux reconciles from Git. Repository-wide operating rules live in the root `AGENTS.md`; application-specific contracts belong in the application's own `AGENTS.md`.
 
 ## Maintained Applications
 
@@ -14,11 +14,11 @@ Application code lives in `apps/<application>/`. Its cluster deployment declarat
 
 Rust applications maintained in this repository belong in the root Cargo workspace. Do not add them to its exclusion list. Tools, tasks, local configuration, secrets, and daemons remain centralized at the repository root; follow the root onboarding conventions rather than adding per-application tooling configuration.
 
-## Independent Submodule
+## External Ownership
 
-`yral-rishi-agent` is a submodule of `git@github.com:saikatdas0790/yral-rishi-agent.git`, a fork of `dolr-ai/yral-rishi-agent`, serving `agent.rishi.yral.com`. Changes land on fork branches and go through a fork-to-upstream pull request. Do not bypass the upstream maintainer's protections or merge authority. Its own documentation and instructions are maintained independently.
-
-Initialize submodules after a fresh clone with `git submodule update --init --recursive`, or use the repository bootstrap task that already performs this step.
+Rishi independently maintains the Ole-Ole-AI repositories. Do not include his
+code as a submodule or consume his APIs. New application APIs belong in this
+repository; do not replace retired integrations with another Rishi endpoint.
 
 ## Retired Legacy Frontend
 

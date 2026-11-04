@@ -13,6 +13,10 @@ documentation.
 
 ## Architecture rules
 
+- Home/discovery, influencer detail, chat, and AI-account creation/upload
+  integrations are retired. Do not retain disabled screens, stubs, or Rishi's
+  API contract. Restore features only against APIs owned in this repository.
+
 - **Apple-native UI testing only.** UI tests are Swift XCTest cases using
   XCUIAutomation in `iosAppUITests/`, mirroring feature folders. Run them with
   `mise run yral-ios-ui-test`; select a simulator with
@@ -61,8 +65,8 @@ documentation.
   (currently `authentication/`, `profile/`, `settings/`), with the logic
   that screen uses colocated INSIDE the folder (view + browser session +
   data source + validator together — no per-layer folders). A feature may
-  have ROUTE subfolders named after its screens (`profile/create/`,
-  `profile/list/`, later `profile/detail/` — one per screen, code
+  have ROUTE subfolders named after its screens (`profile/list/`,
+  `profile/detail/` — one per screen, code
   colocated in each). Files that don't fit an existing feature stay at
   the ROOT (`Sources/YralApp/`) — cross-feature infrastructure (Session,
   AppConfiguration, NetworkError, ProfilePicture, Spacetime trio,
@@ -82,7 +86,7 @@ documentation.
   | `Machine` | A finite state machine (the `State`/`Event`/`Effect` types + pure `transition`) | Beside its UI | No (pure — tested instead) |
   | *(none)* | Logic: clients, data sources, parsers/validation, persistence, wire models, config | Beside the UI that calls it | No |
 
-  So `SignInScreen.swift` is a screen, `AICreationHeaderComponent.swift` is a
+  So `SignInScreen.swift` is a screen, `CountryPickerButtonComponent.swift` is a
   piece of UI, `AuthMachine.swift` is a state machine, and `AuthClient.swift`
   is logic. Rename on touch — no big-bang rewrite. The name itself stays the
   domain noun (`AccountSwitcherScreen`, `AuthClient`), never the `Yral`

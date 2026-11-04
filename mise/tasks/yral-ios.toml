@@ -13,19 +13,9 @@ dir = "apps/yral-ios/packages/YralApp"
 run = "swift package resolve"
 
 # ! The Firebase plist stays gitignored; build and upload tasks materialize its age value.
-[yral-ios-sync-rishi-openapi]
-description = "Fetch the LIVE OpenAPI spec from agent.rishi.yral.com (byte-verbatim) into the SPM target — the generator plugin consumes it at build time. Offline → keeps the committed snapshot (the spec is a build INPUT, never hand-edited; spec defects are fixed by PR to yral-rishi-agent)."
-dir = "apps/yral-ios/packages/YralApp"
-run = '''
-curl -fsSL --max-time 30 https://agent.rishi.yral.com/openapi.json \
-  -o Sources/YralApp/openapi.json \
-  || echo 'WARN: live spec unreachable — building against the committed snapshot (offline mode)'
-'''
-
 [yral-ios-build]
 description = "Build the iosApp target for the iOS Simulator with the age-encrypted Firebase plist"
 dir = "apps/yral-ios"
-depends = ["yral-ios-sync-rishi-openapi"]
 run = '''
 #!/usr/bin/env bash
 set -euo pipefail
@@ -51,7 +41,6 @@ xcodebuild build \
 [yral-ios-test]
 description = "Run the YralApp SPM package unit tests (Swift Testing)"
 dir = "apps/yral-ios/packages/YralApp"
-depends = ["yral-ios-sync-rishi-openapi"]
 run = "swift test"
 
 [yral-ios-ui-test]

@@ -27,7 +27,7 @@ extension AuthClient {
       usePreferred
       ? preferredSubject
       : mainSubject ?? preferredSubject
-    let profilePic = cachedProfilePic(
+    let profilePictureURL = cachedProfilePictureURL(
       userSubject: userSubject, preferredSubject: preferredSubject
     )
     let username = cachedUsername(
@@ -38,10 +38,10 @@ extension AuthClient {
         userSubject != nil && userSubject != main
       } ?? false
 
-    guard let userSubject, let profilePic else { return nil }
+    guard let userSubject else { return nil }
     return Session(
       userSubject: userSubject,
-      profilePic: profilePic,
+      profilePic: profilePictureURL,
       // Cached username when present; deterministic pseudonym
       // fallback otherwise (never the raw identifier as a name).
       username: UsernameGenerator.resolveUsername(
@@ -51,17 +51,15 @@ extension AuthClient {
     )
   }
 
-  /// Kotlin `getCachedProfilePic`: cached pic trusted only when the
-  /// preferred subject matches; else derived from the subject.
-  private func cachedProfilePic(
+  private func cachedProfilePictureURL(
     userSubject: String?,
     preferredSubject: String?
-  ) -> String? {
+  ) -> String {
     let cached = defaults.string(forKey: CachedSessionKey.profilePic.rawValue)
     guard preferredSubject == userSubject else {
-      return userSubject.map { ProfilePicture.url(fromSubject: $0) }
+      return ""
     }
-    return cached ?? userSubject.map { ProfilePicture.url(fromSubject: $0) }
+    return ProfilePicture.resolveURL(cached)
   }
 
   /// Kotlin `getCachedUsername`: cached username trusted only when the
@@ -87,7 +85,9 @@ extension AuthClient {
     isAIAccount: Bool
   ) {
     defaults.set(userSubject, forKey: CachedSessionKey.userSubject.rawValue)
-    defaults.set(profilePic, forKey: CachedSessionKey.profilePic.rawValue)
+    defaults.set(
+      ProfilePicture.resolveURL(profilePic), forKey: CachedSessionKey.profilePic.rawValue
+    )
     // The stored username when present; deterministic pseudonym
     // fallback otherwise.
     let resolvedUsername = UsernameGenerator.resolveUsername(

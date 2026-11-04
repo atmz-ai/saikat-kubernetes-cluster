@@ -4,6 +4,5 @@
 ansible/collections/
 apps/yral-ios/build/
 apps/yral-ios/packages/YralApp/.build/
-apps/yral-rishi-agent/.venv/
 target/
 video-generation/

@@ -776,12 +776,6 @@ pub fn accept_new_user_registration(
 ///
 /// MUST run inside a transaction — the procedure wraps it in `with_tx`.
 ///
-/// The standalone `delete_user_info` REDUCER was REMOVED (2026-09-10):
-/// reducers run inside the DB transaction and cannot propagate deletion
-/// to external systems, which orphaned the bots' rows on the agent
-/// service (persona names stayed "taken" forever — see
-/// dolr-ai/yral-rishi-agent#512). Clients call the `delete_user`
-/// PROCEDURE instead.
 fn cascade_delete_user(
     ctx: &ReducerContext,
     subject_to_delete: &str,
@@ -939,13 +933,7 @@ fn cascade_delete_user(
     Ok(deleted_subjects)
 }
 
-// ─────────────────────────────────────────────────────────────────────────
-// Procedure: delete with backend sync (the preferred client entry point)
-// ─────────────────────────────────────────────────────────────────────────
-
-/// Per-bot outcome of the backend soft-delete on the agent service.
-/// `error` carries the upstream response body (or transport error text)
-/// verbatim — the client surfaces the agent's own words.
+/// ! Retained in the result schema for existing client wire compatibility.
 #[derive(SpacetimeType)]
 pub struct BackendDeletionStatus {
     pub bot_subject: String,
@@ -955,8 +943,7 @@ pub struct BackendDeletionStatus {
     pub error: String,
 }
 
-/// The `delete_user` result: the cascade's error text (empty on success),
-/// every subject removed, and each bot's backend soft-delete outcome.
+/// * Account deletion results contain only this module's deletion outcomes.
 #[derive(SpacetimeType)]
 pub struct DeleteUserResult {
     /// The cascade's error (e.g. "User not found", "Unauthorized");
@@ -967,28 +954,14 @@ pub struct DeleteUserResult {
     pub backend_deletions: Vec<BackendDeletionStatus>,
 }
 
-/// Rishi's influencer backend — the `ai_influencers` rows holding the
-/// persona names that must free up on deletion.
-const AGENT_SERVICE_BASE_URL: &str = "https://agent.rishi.yral.com";
-
-/// Delete the ACTIVE account: the transactional cascade, then (after
-/// commit) the deleted bots' backend soft-deletes so their persona
-/// names free up for re-creation.
-///
-/// `id_token` is forwarded as the agent-call bearer: the module's
-/// `sender_auth().jwt()` exposes only parsed claims, never the signed
-/// token. Ownership is enforced twice — here via the JWT's subject
-/// claim, and on the agent via `parent_principal_id == token user`.
-///
-/// BotAccount target → deletes that bot; the client switches back to
-/// main. MainAccount target → deletes the main + ALL its bots; the
-/// client logs out.
+/// ! id_token and backend_deletions preserve existing client wire compatibility.
 #[spacetimedb::procedure]
 pub fn delete_user(
     ctx: &mut ProcedureContext,
     subject_to_delete: String,
     id_token: String,
 ) -> DeleteUserResult {
+    drop(id_token);
     let cascade_result = ctx.try_with_tx(|tx| {
         let caller_text = tx
             .sender_auth()
@@ -1010,57 +983,10 @@ pub fn delete_user(
         }
     };
 
-    // Best-effort and idempotent: a main subject has no influencer row
-    // (its 404 counts as success), and a bot already gone also 404s.
-    let backend_deletions = deleted_subjects
-        .iter()
-        .map(|subject| soft_delete_influencer_row(ctx, subject, &id_token))
-        .collect();
-
     DeleteUserResult {
         error: String::new(),
         deleted_subjects,
-        backend_deletions,
-    }
-}
-
-fn soft_delete_influencer_row(
-    ctx: &ProcedureContext,
-    bot_subject: &str,
-    id_token: &str,
-) -> BackendDeletionStatus {
-    let url = format!("{AGENT_SERVICE_BASE_URL}/api/v1/influencers/{bot_subject}");
-    let request = spacetimedb::http::Request::builder()
-        .uri(url)
-        .method("DELETE")
-        .header("Authorization", format!("Bearer {id_token}"))
-        .body(())
-        .expect("Building the DELETE request failed");
-
-    match ctx.http.send(request) {
-        Ok(response) => {
-            let (parts, body) = response.into_parts();
-            let status = parts.status.as_u16();
-            // 200 deleted, 404 already gone — both success (the row
-            // must simply not be retrievable).
-            let ok = status == 200 || status == 404;
-            BackendDeletionStatus {
-                bot_subject: bot_subject.to_string(),
-                ok,
-                http_status: status,
-                error: if ok {
-                    String::new()
-                } else {
-                    body.into_string_lossy()
-                },
-            }
-        }
-        Err(error) => BackendDeletionStatus {
-            bot_subject: bot_subject.to_string(),
-            ok: false,
-            http_status: 0,
-            error: error.to_string(),
-        },
+        backend_deletions: Vec::new(),
     }
 }
 

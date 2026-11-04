@@ -95,7 +95,7 @@ struct AuthDataSourceTests {
     let sessionStore = SessionStore()
     let session = Session(
       userSubject: activeSubject,
-      profilePic: ProfilePicture.url(fromSubject: activeSubject),
+      profilePic: "",
       username: "test-user",
       isAIAccount: isAIAccount
     )

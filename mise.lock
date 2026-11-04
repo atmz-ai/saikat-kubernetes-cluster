@@ -736,45 +736,6 @@ checksum = "sha256:6761cf0dd740591df7643cf55fd03913c8ec7ddd88b419fe2f170abe3479e
 url = "https://github.com/astral-sh/python-build-standalone/releases/download/20261020/cpython-3.14.8+20261020-x86_64-pc-windows-msvc-install_only_stripped.tar.gz"
 provenance = "github-attestations"
 
-[[tools.rclone]]
-version = "1.75.2"
-backend = "aqua:rclone/rclone"
-
-[tools.rclone."platforms.linux-arm64"]
-checksum = "sha256:7e1e8d69654941b7b7df84ee74c5f7fb09cce7d5496947fb7bf16b55ff427d10"
-url = "https://github.com/rclone/rclone/releases/download/v1.75.2/rclone-v1.75.2-linux-arm64.zip"
-url_api = "https://api.github.com/repos/rclone/rclone/releases/assets/624698085"
-
-[tools.rclone."platforms.linux-arm64-musl"]
-checksum = "sha256:7e1e8d69654941b7b7df84ee74c5f7fb09cce7d5496947fb7bf16b55ff427d10"
-url = "https://github.com/rclone/rclone/releases/download/v1.75.2/rclone-v1.75.2-linux-arm64.zip"
-url_api = "https://api.github.com/repos/rclone/rclone/releases/assets/624698085"
-
-[tools.rclone."platforms.linux-x64"]
-checksum = "sha256:349ac8fba6ff65d6247043f1750cdcb518ec5d500ef91463a10d37c0ccdf3702"
-url = "https://github.com/rclone/rclone/releases/download/v1.75.2/rclone-v1.75.2-linux-amd64.zip"
-url_api = "https://api.github.com/repos/rclone/rclone/releases/assets/624695998"
-
-[tools.rclone."platforms.linux-x64-musl"]
-checksum = "sha256:349ac8fba6ff65d6247043f1750cdcb518ec5d500ef91463a10d37c0ccdf3702"
-url = "https://github.com/rclone/rclone/releases/download/v1.75.2/rclone-v1.75.2-linux-amd64.zip"
-url_api = "https://api.github.com/repos/rclone/rclone/releases/assets/624695998"
-
-[tools.rclone."platforms.macos-arm64"]
-checksum = "sha256:610ab7d48615135dfc60b763858b11a426a0d3d1160c1bb76fb0ae6011b02edd"
-url = "https://github.com/rclone/rclone/releases/download/v1.75.2/rclone-v1.75.2-osx-arm64.zip"
-url_api = "https://api.github.com/repos/rclone/rclone/releases/assets/624713742"
-
-[tools.rclone."platforms.macos-x64"]
-checksum = "sha256:574e1f31cf1c464e5fb0325cb66fcbdeaf1efa1802bd9b17f13c256fd74b6561"
-url = "https://github.com/rclone/rclone/releases/download/v1.75.2/rclone-v1.75.2-osx-amd64.zip"
-url_api = "https://api.github.com/repos/rclone/rclone/releases/assets/624713102"
-
-[tools.rclone."platforms.windows-x64"]
-checksum = "sha256:8a9db2bad1dc79a65b3348fd857069598e2aab7cf4d118b77b1df23055aff818"
-url = "https://github.com/rclone/rclone/releases/download/v1.75.2/rclone-v1.75.2-windows-amd64.zip"
-url_api = "https://api.github.com/repos/rclone/rclone/releases/assets/624717601"
-
 [[tools.rg]]
 version = "15.2.0"
 backend = "aqua:BurntSushi/ripgrep"
@@ -866,51 +827,6 @@ url = "https://github.com/astral-sh/ruff/releases/download/0.17.3/ruff-x86_64-pc
 url_api = "https://api.github.com/repos/astral-sh/ruff/releases/assets/679956524"
 provenance = "github-attestations"
 
-[[tools.rush]]
-version = "0.11.1"
-backend = "aqua:shenwei356/rush"
-
-[tools.rush."platforms.linux-arm64"]
-checksum = "sha256:5008abfafa8c2e7c69c0f8714c06ebd08899b0a082e95db14bae50495f695efc"
-checksum_source = "mise-versions"
-url = "https://github.com/shenwei356/rush/releases/download/v0.11.1/rush_linux_arm64.tar.gz"
-url_api = "https://api.github.com/repos/shenwei356/rush/releases/assets/700065148"
-
-[tools.rush."platforms.linux-arm64-musl"]
-checksum = "sha256:5008abfafa8c2e7c69c0f8714c06ebd08899b0a082e95db14bae50495f695efc"
-checksum_source = "mise-versions"
-url = "https://github.com/shenwei356/rush/releases/download/v0.11.1/rush_linux_arm64.tar.gz"
-url_api = "https://api.github.com/repos/shenwei356/rush/releases/assets/700065148"
-
-[tools.rush."platforms.linux-x64"]
-checksum = "sha256:1a08baa9f2751c8581f0655fe1aa40a15595ffe70d5f3377d113060329c58fc4"
-url = "https://github.com/shenwei356/rush/releases/download/v0.11.1/rush_linux_amd64.tar.gz"
-url_api = "https://api.github.com/repos/shenwei356/rush/releases/assets/700065006"
-
-[tools.rush."platforms.linux-x64-musl"]
-checksum = "sha256:1a08baa9f2751c8581f0655fe1aa40a15595ffe70d5f3377d113060329c58fc4"
-checksum_source = "mise-versions"
-url = "https://github.com/shenwei356/rush/releases/download/v0.11.1/rush_linux_amd64.tar.gz"
-url_api = "https://api.github.com/repos/shenwei356/rush/releases/assets/700065006"
-
-[tools.rush."platforms.macos-arm64"]
-checksum = "sha256:bbcbf882da03ab06f17f6c5c8ee29dc50cd9515937dc8373d5b6cc25de19dcd9"
-checksum_source = "mise-versions"
-url = "https://github.com/shenwei356/rush/releases/download/v0.11.1/rush_darwin_arm64.tar.gz"
-url_api = "https://api.github.com/repos/shenwei356/rush/releases/assets/700064344"
-
-[tools.rush."platforms.macos-x64"]
-checksum = "sha256:3e5f6f320fbbdd67a900705ed1486d9aecee6db7bc16d0eaf61b686b91b8f524"
-checksum_source = "mise-versions"
-url = "https://github.com/shenwei356/rush/releases/download/v0.11.1/rush_darwin_amd64.tar.gz"
-url_api = "https://api.github.com/repos/shenwei356/rush/releases/assets/700063910"
-
-[tools.rush."platforms.windows-x64"]
-checksum = "sha256:4b81911ebf7f4b7343fbe099c2f07947c7e75047342ad8ff207a952c0bb48656"
-checksum_source = "mise-versions"
-url = "https://github.com/shenwei356/rush/releases/download/v0.11.1/rush_windows_amd64.exe.tar.gz"
-url_api = "https://api.github.com/repos/shenwei356/rush/releases/assets/700065723"
-
 [[tools.rust]]
 version = "stable"
 backend = "core:rust"
@@ -918,45 +834,6 @@ backend = "core:rust"
 [tools.rust.options]
 components = "clippy,rust-analyzer,rust-src,rustfmt"
 targets = "wasm32-unknown-unknown,x86_64-unknown-linux-musl"
-
-[[tools.s5cmd]]
-version = "2.3.0"
-backend = "aqua:peak/s5cmd"
-
-[tools.s5cmd."platforms.linux-arm64"]
-checksum = "sha256:1439f0d00ecedcd2a2f1f2c6749bbb0152b2257bf5086f29646ec8ae38798e24"
-url = "https://github.com/peak/s5cmd/releases/download/v2.3.0/s5cmd_2.3.0_Linux-arm64.tar.gz"
-url_api = "https://api.github.com/repos/peak/s5cmd/releases/assets/213717270"
-
-[tools.s5cmd."platforms.linux-arm64-musl"]
-checksum = "sha256:1439f0d00ecedcd2a2f1f2c6749bbb0152b2257bf5086f29646ec8ae38798e24"
-url = "https://github.com/peak/s5cmd/releases/download/v2.3.0/s5cmd_2.3.0_Linux-arm64.tar.gz"
-url_api = "https://api.github.com/repos/peak/s5cmd/releases/assets/213717270"
-
-[tools.s5cmd."platforms.linux-x64"]
-checksum = "sha256:de0fdbfa3aceae55e069ba81a0fc17b2026567637603734a387b2fca06c299b4"
-url = "https://github.com/peak/s5cmd/releases/download/v2.3.0/s5cmd_2.3.0_Linux-64bit.tar.gz"
-url_api = "https://api.github.com/repos/peak/s5cmd/releases/assets/213717269"
-
-[tools.s5cmd."platforms.linux-x64-musl"]
-checksum = "sha256:de0fdbfa3aceae55e069ba81a0fc17b2026567637603734a387b2fca06c299b4"
-url = "https://github.com/peak/s5cmd/releases/download/v2.3.0/s5cmd_2.3.0_Linux-64bit.tar.gz"
-url_api = "https://api.github.com/repos/peak/s5cmd/releases/assets/213717269"
-
-[tools.s5cmd."platforms.macos-arm64"]
-checksum = "sha256:ae007bc96276f498ae3c1fb017e57630cf93ef260cfe7e97b365522e240c973f"
-url = "https://github.com/peak/s5cmd/releases/download/v2.3.0/s5cmd_2.3.0_macOS-arm64.tar.gz"
-url_api = "https://api.github.com/repos/peak/s5cmd/releases/assets/213717274"
-
-[tools.s5cmd."platforms.macos-x64"]
-checksum = "sha256:df6f76f6d317c4d051ad083219ed36eb8d8e5ebc55ceeeb91f5e66cdc3ac71fb"
-url = "https://github.com/peak/s5cmd/releases/download/v2.3.0/s5cmd_2.3.0_macOS-64bit.tar.gz"
-url_api = "https://api.github.com/repos/peak/s5cmd/releases/assets/213717268"
-
-[tools.s5cmd."platforms.windows-x64"]
-checksum = "sha256:9d8a98c1d9f6284c6d54aeec3daeb5f1412fd101850ae756c1e70dd8ffe52166"
-url = "https://github.com/peak/s5cmd/releases/download/v2.3.0/s5cmd_2.3.0_Windows-64bit.zip"
-url_api = "https://api.github.com/repos/peak/s5cmd/releases/assets/213717275"
 
 [[tools.sops]]
 version = "3.13.3"

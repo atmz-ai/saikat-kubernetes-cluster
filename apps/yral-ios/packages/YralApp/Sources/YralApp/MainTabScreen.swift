@@ -1,62 +1,18 @@
 import SwiftUI
 
-/// The signed-in app shell — a five-tab bottom navigation bar
-/// (operator-specified structure, 2026-09-01):
-///   home  — the AI-influencer feed (Phase 3 fills it in)
-///   chat  — past conversations list (chat phase)
-///   create — NEW AI influencer creation (moved here from Settings)
-///   profile — the current account's details (Phase 4 fills it in)
-///   menu  — what Settings holds today
-///
-/// Tab content = the five views above; the system tab bar renders as
-/// Liquid Glass on iOS 26 (native chrome — no custom styling).
 struct MainTabScreen: View {
 
   let authClient: AuthClient
   let sessionStore: SessionStore
 
-  @State private var selectedTab: Tab = .home
-  /// The create wizard's draft — owned HERE, outside the sheet, so
-  /// pulling down to leave never loses it: tapping Create again
-  /// resumes exactly where the user left off (operator request
-  /// 2026-09-01). Reset inside the sheet is the explicit clear.
-  @State private var creationDraft = AICreationDraft()
-  @State private var activeConversation: ChatConversation?
+  @State private var selectedTab: Tab = .profile
 
   enum Tab: Hashable {
-    case home, chat, create, profile, menu
+    case profile, menu
   }
 
   var body: some View {
     TabView(selection: $selectedTab) {
-      HomeFeedScreen(
-        dataSource: HomeDiscoveryDataSource(),
-        detailDataSource: InfluencerDetailDataSource(),
-        idToken: { authClient.idToken },
-        // A match opens the CONVERSATION with that influencer (the same
-        // sheet the Chat list uses). The old handler switched to the Chat
-        // tab but discarded the conversation, so the match was lost.
-        onOpenChat: { conversation in activeConversation = conversation }
-      )
-      .tabItem { Label("Home", systemImage: "house.fill") }
-      .tag(Tab.home)
-
-      ChatScreen(
-        dataSource: ChatDataSource(),
-        idToken: { authClient.idToken },
-        onOpenConversation: { conversation in
-          activeConversation = conversation
-        }
-      )
-      .tabItem { Label("Chat", systemImage: "bubble.left.and.bubble.right.fill") }
-      .tag(Tab.chat)
-
-      // The create tab is a button, not a destination: tapping it
-      // pushes the creation flow as a sheet from anywhere.
-      Color.clear
-        .tabItem { Label("Create", systemImage: "plus") }
-        .tag(Tab.create)
-
       ProfileScreen(sessionStore: sessionStore, dataSource: authClient.spacetimeDataSource)
         .tabItem { Label("Profile", systemImage: "person.fill") }
         .tag(Tab.profile)
@@ -66,36 +22,6 @@ struct MainTabScreen: View {
         .tag(Tab.menu)
     }
     .tint(.pink)
-    .sheet(
-      isPresented: Binding(
-        get: { selectedTab == .create },
-        set: { if !$0 && selectedTab == .create { selectedTab = .home } }
-      )
-    ) {
-      NavigationStack {
-        AIAccountCreationScreen(
-          authClient: authClient,
-          sessionStore: sessionStore,
-          onCreationCompleted: { selectedTab = .profile },
-          draft: $creationDraft
-        )
-      }
-      .presentationDetents([.large])
-      // The system grabber — the visible pull cue. Pulling down
-      // LEAVES without losing anything: the draft lives in
-      // MainTabView (outside the sheet) and resumes on the next
-      // Create tap. Reset inside the sheet is the explicit clear.
-      .presentationDragIndicator(.visible)
-    }
-    .sheet(item: $activeConversation) { conversation in
-      NavigationStack {
-        ChatConversationScreen(
-          conversation: conversation,
-          dataSource: ChatDataSource(),
-          idToken: { authClient.idToken }
-        )
-      }
-    }
   }
 }
 
