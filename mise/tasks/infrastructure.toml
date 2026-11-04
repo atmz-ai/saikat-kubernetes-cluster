@@ -159,6 +159,8 @@ assert backup["spec"]["retain"] == 7
 assert all(job["spec"]["task"] not in ("snapshot", "snapshot-force-create", "snapshot-delete") for job in jobs)
 assert next(job for job in jobs if job["spec"]["task"] == "snapshot-cleanup")["spec"]["retain"] == 0
 target = next(resource for resource in rendered["longhorn-backup"] if resource["kind"] == "BackupTarget" and resource["metadata"]["name"] == "default")
+assert [resource["metadata"]["name"] for resource in rendered["longhorn-backup"] if resource["kind"] == "BackupTarget"] == ["default"]
+assert not any(resource["kind"] == "Secret" and resource["metadata"]["name"] == "longhorn-s3-backup-credentials" for resource in rendered["longhorn-backup"])
 settings = next(resource for resource in rendered["longhorn"] if resource["kind"] == "HelmRelease")["spec"]["values"]["defaultSettings"]
 assert target["spec"]["backupTargetURL"] == settings["backupTarget"]
 assert target["spec"]["credentialSecret"] == settings["backupTargetCredentialSecret"]

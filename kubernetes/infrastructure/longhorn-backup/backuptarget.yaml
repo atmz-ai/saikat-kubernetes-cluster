@@ -7,14 +7,3 @@ spec:
   backupTargetURL: "s3://saikat-kubernetes-cluster-longhorn-volume-snapshot-backups@us-east-1/"
   credentialSecret: "longhorn-rustfs-credentials"
   pollInterval: 5m0s
----
-# ! Add this archive only after the default target has moved away from its URL.
-apiVersion: longhorn.io/v1beta2
-kind: BackupTarget
-metadata:
-  name: hetzner-archive
-  namespace: longhorn-system
-spec:
-  backupTargetURL: "s3://yral-bare-metal-kubernetes-cluster-control-plane-backup@hel1/longhorn"
-  credentialSecret: "longhorn-s3-backup-credentials"
-  pollInterval: 0s

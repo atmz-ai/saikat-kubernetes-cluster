@@ -1,7 +1,6 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
-  - s3-credentials.sops.yaml
   - ../loki/loki-rustfs-credentials.sops.yaml
   - backuptarget.yaml
   - recurringjobs.yaml
