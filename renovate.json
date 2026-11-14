@@ -6,7 +6,7 @@
     "timezone": "UTC",
     "prConcurrentLimit": 20,
     "prHourlyLimit": 0,
-    "automerge": false,
+    "automerge": true,
     "minimumReleaseAge": "4 days",
     "minimumReleaseAgeBehaviour": "timestamp-required",
     "rebaseWhen": "behind-base-branch",
