@@ -53,7 +53,7 @@ pitchfork = "latest"
 #   linux/amd64 on arm64 via Rosetta (verified: `uname -m` → x86_64), which is
 #   what every `-image` task's `--platform linux/amd64` requires.
 #
-python = "3.14.8"
+python = "3.15.2"
 rg = "latest"
 ruff = "latest"
 # Rust — latest STABLE via mise.lock resolution (committed lock pins the
