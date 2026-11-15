@@ -15,8 +15,6 @@ resources:
   - dashboard-allowed-emails.yaml
   - atmz-internal-apps-google-oauth.sops.yaml
   - service-dashboard.yaml
-  - deployment-kafka-console.yaml
-  - service-kafka-console.yaml
   - deployment-longhorn-ui.yaml
   - service-longhorn-ui.yaml
   - longhorn-ui-allowed-emails.yaml
