@@ -1,17 +1,3 @@
-# Beszel hub — lightweight server monitoring platform
-#
-# The hub is a PocketBase web application that provides a dashboard for viewing
-# and managing connected systems (agents). Agents run on each monitored host in
-# the cluster and connect to the hub via WebSocket.
-#
-# Image: henrygd/beszel (Docker Hub, multi-arch amd64/arm64)
-# Port: 8090  |  Data dir: /beszel_data (SQLite, PVC-backed)
-# * Exposed at https://beszel.saikat.oleole.ai with Beszel's built-in authentication.
-#
-# Upgrades: bump the image tag below, push, Flux reconciles with Recreate
-# strategy (brief downtime — single replica + PVC). No image automation for
-# third-party images; upgrades are manual tag bumps in git.
-# Releases: https://github.com/henrygd/beszel/releases
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -21,6 +7,7 @@ metadata:
     configmap.reloader.stakater.com/reload: "beszel-config"
 spec:
   replicas: 1
+  # ! Recreate prevents overlapping pods from opening the same SQLite-backed PVC.
   strategy:
     type: Recreate
   selector:
@@ -35,7 +22,7 @@ spec:
     spec:
       containers:
         - name: beszel
-          image: henrygd/beszel:0.20.0
+          image: henrygd/beszel:0.21.2
           ports:
             - containerPort: 8090
               name: http
