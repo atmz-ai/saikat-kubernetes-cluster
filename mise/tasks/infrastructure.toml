@@ -16,6 +16,11 @@ configuration = json.loads(Path("renovate.json").read_text())
 for workflow_path in sorted(Path(".github/workflows").glob("*.yml")):
     yaml.safe_load(workflow_path.read_text())
     print("PASS: workflow YAML syntax", workflow_path)
+infrastructure_workflow = yaml.safe_load(Path(".github/workflows/infrastructure-releases.yml").read_text())
+triggers = infrastructure_workflow.get("on", infrastructure_workflow.get(True))
+assert "pull_request" in triggers
+assert triggers["push"]["branches"] == ["main"]
+print("PASS: PR checks run once while merged revisions still receive push checks")
 tekton_template = "tektoncd/" + "{" * 2 + "project" + "}" * 2
 managers = [manager for manager in configuration["customManagers"] if manager.get("datasourceTemplate") == "github-releases" and ("depNameTemplate" not in manager or manager.get("depNameTemplate") == tekton_template)]
 versions = {}

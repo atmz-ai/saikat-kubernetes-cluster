@@ -24,7 +24,8 @@ manifests, and official Tekton mirror URLs need no per-image extractor.
 Run `mise run infrastructure-release-checks` and
 `mise run renovate-configuration-checks` before deploying bundle changes. The
 Infrastructure Releases workflow runs without credentials on both Linux and
-macOS, including bot PRs. It installs only `kubectl`, Python and Node via
+macOS, including bot PRs. Push validation targets `main`; branch updates receive
+PR validation without a duplicate push run. It installs only `kubectl`, Python and Node via
 mise-action and uses `mise run --skip-tools` to avoid installing unrelated
 project runtimes during validation. Renovate performs check-gated merging itself rather
 than delegating to platform automerge. Do not rely on native automerge to wait
