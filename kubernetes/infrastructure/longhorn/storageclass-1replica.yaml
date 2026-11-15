@@ -1,7 +1,7 @@
 # 1-replica StorageClass for workloads with app-layer replication.
 #
 # Use this for stateful workloads that implement their own replication at the
-# application layer (e.g. Kafka with replication.factor=3, CNPG PostgreSQL with
+# application layer (e.g. CNPG PostgreSQL with
 # streaming replication). App-layer replication is STRICTLY STRONGER than
 # Longhorn 2-replica — layering both only multiplies write amplification with
 # zero additional durability benefit.
@@ -12,7 +12,6 @@
 #   3. The write amplification from layering both is measurable and unacceptable
 #
 # Workloads currently using this class:
-#   - Kafka (3 brokers, RF=3 — app-layer replication IS the write path)
 #   - CNPG PostgreSQL (streaming replication — see AGENTS.md storage policy)
 apiVersion: storage.k8s.io/v1
 kind: StorageClass

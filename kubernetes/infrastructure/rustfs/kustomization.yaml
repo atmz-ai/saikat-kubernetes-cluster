@@ -9,5 +9,4 @@ resources:
   - google-authorization.yaml
   - loki-bucket.yaml
   - backup-buckets.yaml
-  - retire-event-archive.yaml
   - route.yaml

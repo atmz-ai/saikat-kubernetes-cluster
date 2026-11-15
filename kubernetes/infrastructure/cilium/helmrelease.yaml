@@ -206,7 +206,7 @@ spec:
     # * network is irrelevant as long as cluster nodes can reach each other using
     # * IP/UDP" — every node here reaches every other over its public address. Proof:
     # * cross-region pod traffic worked before any overlay existed (etcd 5 HEL / 2 FSN,
-    # * Kafka 4/1, CoreDNS 4/4, cert-manager 2/1).
+    # * CoreDNS 4/4, cert-manager 2/1).
     # *
     # * If cross-provider routing ever genuinely needs more than this, use Cilium's own
     # * features (Cluster Mesh for separate clusters, BGP for route distribution) — not

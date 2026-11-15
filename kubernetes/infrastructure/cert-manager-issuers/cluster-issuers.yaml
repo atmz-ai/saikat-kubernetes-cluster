@@ -30,7 +30,7 @@
 #
 # Because the RFC2136 list came first, the Cloudflare solver was never reached and
 # yral.com renewals failed silently for ~32 days, expiring kube-system/
-# wildcard-yral-com-tls and kafka/kafka-external-tls. Keep the selectors disjoint
+# wildcard-yral-com-tls. Keep the selectors disjoint
 # so each domain has exactly one home.
 #
 # Switching from staging to prod:

@@ -7,7 +7,7 @@
 #
 # Use this for ALL stateful workloads that do NOT have their own app-layer
 # replication (e.g. ClickHouse, Loki, Prometheus, Harbor, PowerDNS). Workloads
-# with app-layer replication (Kafka RF=3, CNPG streaming) should use
+# with app-layer replication (CNPG streaming) should use
 # longhorn-1replica instead — see AGENTS.md storage policy.
 #
 # Encryption keys are stored in the longhorn-crypto SOPS-encrypted Secret. All
