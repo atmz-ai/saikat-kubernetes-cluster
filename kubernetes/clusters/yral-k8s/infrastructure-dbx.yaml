@@ -4,6 +4,7 @@ metadata:
   name: infrastructure-dbx
   namespace: flux-system
 spec:
+  suspend: false
   interval: 1h
   path: ./kubernetes/infrastructure/dbx
   prune: true

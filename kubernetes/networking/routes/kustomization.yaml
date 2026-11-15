@@ -11,7 +11,6 @@ resources:
   - kafka-console.yaml
   - longhorn-ui.yaml
   - harbor.yaml
-  - dbx.yaml
   - kafka-bridge.yaml
   - kafka-bridge-referencegrant.yaml
   - yral-auth.yaml

@@ -17,8 +17,6 @@ resources:
   - service-dashboard.yaml
   - deployment-kafka-console.yaml
   - service-kafka-console.yaml
-  - deployment-dbx.yaml
-  - service-dbx.yaml
   - deployment-longhorn-ui.yaml
   - service-longhorn-ui.yaml
   - longhorn-ui-allowed-emails.yaml
