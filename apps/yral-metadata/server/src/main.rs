@@ -47,6 +47,7 @@ fn application_router(state: Arc<AppState>) -> Router {
         .route("/explorer/{*tail}", get(services::openapi::get_swagger))
         .route("/explorer/", get(services::openapi::get_swagger_root))
         .route("/healthz", get(api::handlers::healthz))
+        .route("/metadata/health", get(api::handlers::healthz))
         .layer(CorsLayer::permissive())
         .with_state(state)
 }

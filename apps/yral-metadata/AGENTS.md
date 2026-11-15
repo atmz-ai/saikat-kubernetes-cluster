@@ -7,8 +7,10 @@ Removed paths return HTTP 404; do not reintroduce successful no-op responses.
 
 `GET /session` verifies an ES256 bearer token from `https://auth.yral.com`, rejects
 anonymous and expired tokens, and returns its verified claims in `ApiResult`.
-It does not register a user or update a session. `GET /healthz` and the OpenAPI
-explorer remain available. Startup requires only `BIND_ADDRESS` and
+It does not register a user or update a session. `GET /healthz`, its compatible
+probe alias `GET /metadata/health`, and the OpenAPI explorer remain available.
+Both health paths use the same handler and return `{"status":"ok"}`.
+Startup requires only `BIND_ADDRESS` and
 `YRAL_AUTH_PUBLIC_KEY`; administrative metadata credentials are no longer used.
 
 The client exposes health and token verification only. The types crate retains

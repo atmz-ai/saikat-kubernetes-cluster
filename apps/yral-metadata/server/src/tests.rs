@@ -63,19 +63,17 @@ async fn health_and_openapi_work_without_backend_configuration() {
         yral_auth_public_key: TEST_PUBLIC_KEY.into(),
     };
     let application = application_router(Arc::new(AppState::new(&configuration).unwrap()));
-    let response = application
-        .clone()
-        .oneshot(
-            Request::builder()
-                .uri("/healthz")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-    let body = to_bytes(response.into_body(), 1024).await.unwrap();
-    assert_eq!(&body[..], br#"{"status":"ok"}"#);
+    for path in ["/healthz", "/metadata/health"] {
+        let response = application
+            .clone()
+            .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK, "{path}");
+        assert_ne!(response.status(), StatusCode::NOT_FOUND, "{path}");
+        let body = to_bytes(response.into_body(), 1024).await.unwrap();
+        assert_eq!(&body[..], br#"{"status":"ok"}"#, "{path}");
+    }
 
     for path in ["/explorer/", "/explorer/swagger.json"] {
         let response = application
