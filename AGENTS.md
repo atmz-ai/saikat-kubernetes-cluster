@@ -132,6 +132,9 @@ This exception applies to the mise-only wording elsewhere in this document, incl
 ### Local Pull Request Validation (Preference)
 Run the same existing mise tasks locally against the exact changes being merged, and proceed when the relevant local checks pass rather than waiting for GitHub Actions. Keep CI and Renovate auto-merging enabled; do not rerun or watch Actions merely to duplicate successful local validation. Respect any enforced GitHub required checks without administrator bypasses. This preference does not waive post-push Flux reconciliation and production health verification.
 
+### Isolated Worktrees (Preference)
+Use a separate Git worktree for changes by default, especially when other sessions or the operator are editing the repository. Never switch branches, stage, or commit another task's shared checkout. Start from the appropriate committed base and validate the combined result before merging; do not copy unrelated uncommitted edits. In the VS Code Agents window, select New Worktree; `sessions.useWorktree` sets the initial default, but an existing workspace remembers its last isolation choice. Worktrees isolate files, not cluster operations or ports, so continue coordinating production changes.
+
 ### Leptos Macro-Free & Builder Syntax (Hard Rule)
 All Leptos-rs UI code must avoid macros wherever a macro-free alternative exists. This is a hard preference against macros in all Rust code we write, not just Leptos — macros bypass rust-analyzer's type inference, autocomplete, refactoring, and error messages. Apply the following rules to all Leptos components, pages, and views across the repo — both new code and existing code. When touching any file that violates these rules, convert it in the same change (gradual migration, no big-bang rewrite):
 
