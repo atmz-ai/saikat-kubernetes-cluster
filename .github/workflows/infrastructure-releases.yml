@@ -33,4 +33,5 @@ jobs:
       - name: Install declared Python tooling
         run: mise run --skip-tools python-setup
       - name: Validate upstream bundles and update discovery
-        run: mise run --skip-tools infrastructure-release-checks ::: renovate-configuration-checks
+        run: |
+          mise run --skip-tools infrastructure-release-checks ::: renovate-configuration-checks

@@ -13,6 +13,9 @@ import jsonschema
 import yaml
 
 configuration = json.loads(Path("renovate.json").read_text())
+for workflow_path in sorted(Path(".github/workflows").glob("*.yml")):
+    yaml.load(workflow_path.read_text(), Loader=yaml.CSafeLoader)
+    print("PASS: workflow YAML syntax", workflow_path)
 tekton_template = "tektoncd/" + "{" * 2 + "project" + "}" * 2
 managers = [manager for manager in configuration["customManagers"] if manager.get("datasourceTemplate") == "github-releases" and ("depNameTemplate" not in manager or manager.get("depNameTemplate") == tekton_template)]
 versions = {}
