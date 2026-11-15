@@ -23,7 +23,6 @@ resources:
   - infrastructure-containerized-data-importer-operator.yaml
   - infrastructure-containerized-data-importer.yaml
   - infrastructure-coredns.yaml
-  - infrastructure-dbx.yaml
   - infrastructure-external-dns.yaml
   - infrastructure-flux-receiver.yaml
   - infrastructure-gateway-api-crds.yaml

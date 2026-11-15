@@ -115,7 +115,7 @@ When making changes to a codebase (fixing bugs, migrating APIs, adding features)
 ### Sweeping Changes — Per-Component Verification (Hard Rule)
 When making sweeping changes (removing a feature, restructuring workspaces, bumping shared deps, etc.) that touch multiple components, **verify each affected component individually** before pushing:
 1. **Compile** — `cargo check` / `cargo build` / `mise run <app>-build` for each affected component.
-2. **Test** — `cargo test` / `mise run <app>-test`. Tests requiring external services (SpacetimeDB, Kafka, PostgreSQL) that fail with "Connection refused" are expected locally; verify no *new* test failures from the change.
+2. **Test** — `cargo test` / `mise run <app>-test`. Tests requiring external services (Kafka, PostgreSQL) that fail with "Connection refused" are expected locally; verify no *new* test failures from the change.
 3. **Run locally** — `mise run <app>-run` (starts the app's daemon via mise) to verify the app starts and the health endpoint responds.
 4. **Push** — once all components pass, push to git and let CI/CD handle deployment.
 5. **Validate on prod** — after deployment, verify the service is healthy in production (read-only `kubectl get/describe/logs`, health endpoint, smoke test).
@@ -165,7 +165,7 @@ Always use well-named, descriptive variable and type names. Never use shortened 
 
 Modern IDEs and language tooling make long names ergonomic regardless of language. Descriptive names serve as inline documentation and make grep/code-search effective. Abbreviations create cognitive overhead and inconsistency.
 
-**No legacy domain jargon (Hard Rule):** Do not carry over naming from previous platforms. Call things what they actually are in the current system (e.g. `oauth_subject` / `user_id` for user identifiers, `service_id` for service identifiers, SpacetimeDB `Identity` for database identity). When touching code that uses legacy jargon from a prior platform, rename to the accurate current term in the same change. This prevents conflation and makes the code self-documenting.
+**No legacy domain jargon (Hard Rule):** Do not carry over naming from previous platforms. Call things what they actually are in the current system (e.g. `oauth_subject` / `user_id` for user identifiers, `service_id` for service identifiers). When touching code that uses legacy jargon from a prior platform, rename to the accurate current term in the same change. This prevents conflation and makes the code self-documenting.
 ### Comments Are the Exception, Not the Default (Hard Rule)
 **Hard preference: do not add unnecessary comments. Remove resolved TODO comments without replacing them with findings, incident summaries, or explanatory comments unless explicitly requested.**
 
@@ -252,12 +252,10 @@ Code we maintain compiles and lints with **zero warnings** — not "acceptable" 
 When `#[cfg]` feature gates cause a variable/function/import to be unused in some configurations: gate the declaration itself with the matching `#[cfg(...)]` (or `#[cfg(any(...))]` for multiple features), so the symbol only exists when it's used. This is the correct pattern — the code is genuinely absent in that configuration, not present-but-suppressed. Gate both the definition and all call sites consistently.
 
 ### Regression Tests for Every Bug Fix (Hard Rule)
-**Every bug fix ships with tests: at least one asserting the fixed behavior, and negative tests pinning the original failure case** (the exact input that was broken, asserting the wrong output never returns). A bug that was once hit must never be silently reintroduced. Scope judgment applies — not a barrage of meaningless tests: pin the bug's essence (the boundary/shape that was wrong), not every permutation around it. Wire/protocol bugs pin the exact request/response bodies (see yral-ios `SpacetimeDBRemoteDataSourceTests` pinning reducer-call JSON against the live signatures after the 3-arg-vs-4-arg `update_profile_details` drift). Pure-function bugs pin inputs/outputs at the broken boundary. UI-state bugs pin the state transitions that were wrong. The regression test lands in the SAME change as the fix — never deferred.
+**Every bug fix ships with tests: at least one asserting the fixed behavior, and negative tests pinning the original failure case** (the exact input that was broken, asserting the wrong output never returns). A bug that was once hit must never be silently reintroduced. Scope judgment applies — not a barrage of meaningless tests: pin the bug's essence (the boundary/shape that was wrong), not every permutation around it. Wire/protocol bugs pin the exact request/response bodies against the authoritative contract. Pure-function bugs pin inputs/outputs at the broken boundary. UI-state bugs pin the state transitions that were wrong. The regression test lands in the SAME change as the fix — never deferred.
 
 ### Check Live API Signatures Before Porting/Calling (Hard Rule)
-**When calling or porting a call to any API, read the authoritative contract first — the generated bindings, OpenAPI spec, or the module's own source — instead of blindly copying/porting code from an existing caller.** Existing callers can be stale: they may predate an upstream migration (e.g. the frozen Kotlin app calling SpacetimeDB `update_profile_details` with the pre-migration 3-arg wire shape against the live 4-arg reducer — arg-validation failure at runtime). Reading the contract also surfaces semantics a copy would miss (e.g. `update_as_ai_account_id` routing the edit to the bot's profile vs the owner's). Port behavior, not wire shapes.
-
-**The generated bindings ARE the source of truth for the SpacetimeDB API.** `mise run spacetime-publish` regenerates them (build → publish → `spacetime-generate`) on every deploy, so `apps/yral-database-spacetime/bindings/src/generated/` always mirrors the last-deployed schema — never cross-check bindings against other callers, and never treat an existing client (e.g. the frozen Kotlin app) as more current than the bindings. For HTTP services the OpenAPI spec / handler source holds the same role.
+**When calling or porting a call to any API, read the authoritative contract first — the generated bindings, OpenAPI spec, or the module's own source — instead of blindly copying/porting code from an existing caller.** Existing callers can predate an upstream migration. Port behavior, not stale wire shapes.
 
 **API bindings come from the live contract, generated, never hand-curated (Hard Rule).** For any HTTP service we call, generate typed bindings from the service's OWN OpenAPI spec. The spec is consumed VERBATIM — no filtering to "only the endpoints we use today" and no hand-written subsets; the full API generates so future features have the whole context. Keep byte-verbatim committed contract snapshots current through the consuming service's build workflow. Spec DEFECTS (untyped responses, missing security declarations) are fixed in the owning service — not patched locally — so the contract improves for every consumer.
 
@@ -370,7 +368,7 @@ XState exposes `initialTransition(machine)` and `transition(machine, state, even
 - **Gradual migration.** Convert when touching a file; do not big-bang rewrite. Existing flat-state types get folded in as they are next modified.
 
 ### Pure Functions & Thin API Wrappers (Hard Rule)
-All business logic must be implemented as **pure functions** — no I/O, no side effects, no external service calls. Functions that call external APIs (HTTP, database, KV store, SpacetimeDB, etc.) must be **thin wrappers** that delegate to pure functions for all logic. This applies to all application code (Rust, Kotlin, TypeScript, etc.):
+All business logic must be implemented as **pure functions** — no I/O, no side effects, no external service calls. Functions that call external APIs (HTTP, database, KV store, etc.) must be **thin wrappers** that delegate to pure functions for all logic. This applies to all application code (Rust, Kotlin, TypeScript, etc.):
 
 - **Pure functions** take inputs, return outputs, and have no side effects. They contain all business logic: validation, transformation, computation, decision-making.
 - **Thin wrappers** handle only I/O: calling the external API, passing the result to a pure function, and returning/writing the result. No business logic in wrappers.
@@ -424,7 +422,7 @@ Maintain a top-level `constants.rs` beside `lib.rs` for constants shared between
 
 ### Storage Replication Policy
 
-**Default: Longhorn 2-replica** (`longhorn` StorageClass). Use for ALL stateful workloads that do NOT have their own app-layer replication — Loki, Prometheus, Harbor, PowerDNS, dbx, GeoIP. This gives storage-level HA (tolerates 1 node failure) with LUKS2 encryption at rest.
+**Default: Longhorn 2-replica** (`longhorn` StorageClass). Use for ALL stateful workloads that do NOT have their own app-layer replication — Loki, Prometheus, Harbor, PowerDNS, GeoIP. This gives storage-level HA (tolerates 1 node failure) with LUKS2 encryption at rest.
 
 **Exception: Longhorn 1-replica** (`longhorn-1replica` StorageClass). Use ONLY for workloads with app-layer replication that is strictly stronger than Longhorn 2-replica. All three criteria must be met:
 1. The application implements its own replication natively (not just backups)
@@ -500,6 +498,7 @@ independent off-cluster disaster-recovery copy.
 - **ReferenceGrant (cross-namespace routes):** When an HTTPRoute/TLSRoute in namespace A references a Service in namespace B, a `ReferenceGrant` must exist in the **target** namespace (B) allowing it. Without it, Cilium Gateway silently returns HTTP 500 for all requests (`ResolvedRefs: False, RefNotPermitted`). Always add the ReferenceGrant in the same commit as the HTTPRoute when they span namespaces.
 - **NetworkPolicy rule:** Never rely on `fromCIDRSet`/`namespaceSelector`/`podSelector` for gateway-originated traffic (cilium-envoy runs hostNetwork; appears as node IP). Use an explicit ingress rule with only a `ports:` clause (app-level auth does the real enforcement).
 - **SOPS encryption mechanism:** To encrypt `*.sops.yaml` files, use the mise tasks: `mise run sops-encrypt -- <file>.sops.yaml` (encrypts in-place) or `mise run sops-edit -- <file>.sops.yaml` (opens in `$EDITOR`). These tasks extract the age key from Ansible vault automatically. The `.sops.yaml` creation rules in repo root handle age key selection automatically — no need to pass `--age` explicitly. For decryption, use `mise run sops-decrypt -- <file>.sops.yaml`. To get the raw age key for ad-hoc use: `mise run ansible-vault-view -- vault_age_private_key`.
+  - Remove a secret key without exposing plaintext with `mise run sops-edit -- unset <file>.sops.yaml '["stringData"]["KEY"]'`. SOPS updates encryption and the MAC atomically; never delete ciphertext lines manually. See [SOPS common operations](https://getsops.io/docs/usage/common-operations/#unset-a-sub-part-in-a-document-tree).
 - **Editing SOPS files (decrypt → edit → re-encrypt workflow):** To add/modify keys in an existing `*.sops.yaml` file without an interactive editor: (1) `mise run sops-decrypt -- --in-place <file>.sops.yaml` (decrypt in-place), (2) edit `<file>.sops.yaml` with VS Code edit tools (`replace_string_in_file`, etc.), (3) `mise run sops-encrypt -- <file>.sops.yaml` (encrypt in-place). This works reliably every time — no `sops --set` JSON syntax issues, no MAC integrity errors, no temp files to clean up. Never commit the file while it's in the decrypted (plaintext) state.
 - **Create the whole file, then encrypt it in ONE pass (Hard Rule).** Write the complete plaintext YAML first — including `apiVersion`, `kind`, `metadata.name`, `metadata.namespace`, `type`, and the secret values — and run `sops --encrypt --in-place` over the finished file exactly once. **Never create the file, then post-process it** (e.g. template a placeholder and substitute the real value with a script afterwards): the second write rewrites an already-SOPS-encrypted document, and the tree-walker ends up with a half-processed tree where some sibling keys are `ENC[...]` and others are still plaintext. Measured on `harbor-role-secret.sops.yaml` (2026-10-02): that produced `metadata.name` encrypted while `metadata.namespace` stayed plaintext, and Flux reported `decryption failed for '<encrypted-value>'` / `failed to decrypt and format 'harbor/<encrypted-name>' ENC[...]` on every reconcile. For a password placeholder, run `mise run sops-edit -- <file>.sops.yaml` after the first encryption instead — `sops` re-encrypts the whole document consistently.
   - **! `sops --decrypt` succeeding proves nothing.** A malformed file decrypts perfectly locally and with the cluster's own key, because the failure is in how *kustomize-controller* walks the tree, not in the ciphertext. Do not treat a clean local decrypt as evidence the file is usable by Flux.
@@ -617,50 +616,12 @@ This ensures `mise bootstrap --yes && mise run setup` is the only command needed
 - Reuse shared secret definitions across services rather than duplicating their values.
 - Onboard service environment values, age secrets, and its daemon in root `mise.toml`; build/test/run/image tasks belong in its selected task catalog. Run tasks declare only the daemons they require.
 
-### SpacetimeDB Usage Rules
+### API Pagination
 
-**Mise tasks only for database mutations (Hard Rule).** Never run `spacetime publish`, `spacetime sql`, `spacetime delete`, `spacetime call`, or any other `spacetime` subcommand that mutates database state directly in a terminal. **Always use the corresponding mise task** (`mise run spacetime-build`, `mise run spacetime-generate`, `mise run spacetime-test`, `mise run spacetime-publish`, `mise run spacetime-validate`, etc.). The only exception is when the user explicitly asks you to run the raw CLI command. Rationale: `spacetime publish` to Maincloud can drop tables and disconnect clients on breaking schema changes — the mise `spacetime-publish` task is interactive (no `--yes`) so the migration plan is reviewed before accepting. Running raw CLI bypasses this safety check and can destroy production data. Read-only CLI inspection (`spacetime describe`, `spacetime logs`, `spacetime list`) is allowed directly, but all mutations must go through mise tasks.
+Paginated APIs use cursor-based pagination, not offset/limit. Pass the last record's identifier or timestamp as an optional cursor alongside a page size, and return `next_cursor` (`None` when exhausted).
 
-**Read-only SQL only (Hard Rule).** When querying a database with `spacetime sql` (or any SQL client — psql, `kubectl exec -- psql`, GUI tools), NEVER run `INSERT`, `UPDATE`, `DELETE`, `TRUNCATE`, `DROP`, `ALTER`, or any other statement that mutates state — on production, ever, no exceptions. Read statements only: `SELECT`, `DESCRIBE`, `EXPLAIN`, etc. Data mutations belong in reducers (published from git via mise tasks) or the incremental-migration pattern; imperative SQL bypasses module validation, ownership checks, and the review flow.
-
-**Never use `--delete-data` on production (Hard Rule).** `--delete-data` wipes ALL tables in the database — including KV stores, post tables, and any other data. This is NEVER acceptable on a production/Maincloud database, regardless of the reason. If a schema migration requires data deletion (e.g. removing a table with data, changing column types), use the V2 table pattern: create a new table, backfill data into it, validate, swap read paths, then clean up the old table via a reducer (not `--delete-data`). There are no exceptions to this rule.
-
-**Schema migrations — Incremental Migration pattern (Hard Rule).** SpacetimeDB's automatic migrations support adding tables, adding columns with defaults at the end, adding indexes, and adding reducers. **Column renames, column type changes, column removals, and column reordering are all "modifying columns" — they are forbidden and require the incremental migration pattern, not `--delete-data`.** Never rename a field on an existing `#[spacetimedb::table]` struct in place — that changes the column name in the live table and breaks the schema. Forbidden changes (removing tables, modifying columns, reordering) must use the [Incremental Migration](https://spacetimedb.com/docs/databases/incremental-migrations) pattern instead:
-1. **Create a new versioned table** (`<table>_v2`) with the desired schema — adding tables is always safe.
-2. **Dual-write**: new writes go to both old and new tables so outdated clients continue working.
-3. **Lazy migration**: on read, check the new table first; if the row is missing, migrate it from the old table on-the-fly (amortizes cost across transactions).
-4. **Batch migration for large tables (>1M rows)**: proactively migrate via a batch reducer that reads N rows from the old table and inserts them into the new table. Amortize across multiple reducer calls until all rows are migrated.
-5. **Swap read paths**: once all data is in the new table, update procedures/reducers to read only from the new table.
-6. **Validate**: confirm counts match, spot-check rows, verify all clients work.
-7. **Clean up**: remove the old table from the schema and publish. The old table must be empty first (clear via a reducer — never `--delete-data`). Drop the old table only after a confirmed production period.
-
-**Naming convention — use numeric suffixes, not `v` (Hard Rule).** The module uses SpacetimeDB's default `CaseConversionPolicy::SnakeCase`, which converts Rust names to snake_case canonical/wire names. This splits `v2` into `v_2` (e.g. `accept_new_user_registration_v2` → `accept_new_user_registration_v_2` in the REST API). To avoid this, the `v` prefix convention is prohibited — use numeric suffixes instead:
-
-- **Type names:** Use `<Type>2` instead of `<Type>V2` (e.g. `UserProfileDetails7` not `UserProfileDetailsV7`).
-- **Table names:** Use `<table_name>_2` (e.g. `posts_2` not `posts_v2`). Use the `name` attribute in `#[spacetimedb::table(name = "posts_2", ...)]` to override automatic splitting.
-- **Reducer/procedure names:** Use `<name>_2` (e.g. `accept_new_user_registration_2` not `accept_new_user_registration_v2`).
-
-Legacy `v`-prefixed table names (`posts_v2`, `PostV2`) are kept as-is because they are backed by live data — renaming table structs requires `--delete-data` (wipes all rows). All non-table `v`-suffixed names have been removed (V4/V7 types, v2 procedures/reducers).
-
-**Sequential versioning — only when a prior version exists (Hard Rule):** Only create a versioned table/type/reducer when there is an existing prior version to migrate from. If `user_profiles` exists and needs a schema change, create `user_profiles_2`. Do not create versioned names preemptively ("just in case"). When versioning is needed, use sequential numbering: if `posts_v2` is the current version, the next is `posts_3` (not `posts_5`). Check the codebase for existing versions before choosing a number.
-
-**Cursor-based pagination (Hard Rule).** All paginated APIs (procedures, REST endpoints) must use cursor-based pagination, not offset/limit. The cursor is the ID (or timestamp) of the last record from the previous page — pass it as an optional `cursor` argument alongside a `limit`/`size` parameter. `None` cursor starts from the beginning. Return `next_cursor` (`None` when no more results). Offset/limit pagination is rejected — it's inefficient for large datasets and unstable under concurrent inserts.
-
-**No raw SQL from application code (Hard Rule).** SpacetimeDB supports raw SQL over its REST/WS APIs, but we avoid it in app code to keep data access typed and declarative:
-- **Rust services** interact with a SpacetimeDB database via the **generated `spacetimedb-sdk` bindings** (`spacetime generate` → `src/bindings/`): typed reducer calls, typed procedure calls with typed `SpacetimeType` returns, and typed table accessors. Never send raw SQL strings from Rust.
-- **Mobile / non-SDK clients** (no Kotlin/Swift SpacetimeDB SDK exists) call module **procedures** via REST (`POST /v1/database/{db}/call/:name`, JSON array body → typed JSON `SpacetimeType` return). The client never constructs SQL.
-- **CLI `spacetime sql` / `spacetime call`** is acceptable for imperative debugging/one-off inspection only — never wire it into application code or scripts.
-Rationale: SpacetimeDB REST `/sql` has no bind parameters (only `:sender` for RLS), so interpolating values risks SQL injection and loses type safety. The generated bindings + procedures are the typed, safe paths.
-
-**Procedures vs HTTP handlers vs reducers** (SpacetimeDB module patterns; the CLI/crate version is pinned once in `mise.toml`):
-- **Reducers** (`#[spacetimedb::reducer]`) — transactional, can't return data to callers. Use for all mutations.
-- **Procedures** (`#[spacetimedb::procedure]`, `features = ["unstable"]`) — non-transactional (open explicit `ctx.with_tx`), can return typed `SpacetimeType` values to the caller, `ctx.sender()` available, generated SDK bindings. **Prefer for per-user/typed-return reads.**
-- **HTTP handlers** (`#[spacetimedb::http::handler]` + `#[spacetimedb::http::router]`, `features = ["unstable"]`, exposed at `/v1/database/{db}/route/*path`) — bypass SpacetimeDB auth by design (`sender` is `Identity::ZERO`), arbitrary `http::Response`. **Prefer for truly public/identity-agnostic endpoints** where "no auth" is the feature — webhook receivers, public config dumps, health checks, pre-signed URL issuers.
-Both procedures and HTTP handlers require `features = ["unstable"]` in the module's `Cargo.toml` (unstable-gated in the pinned spacetimedb crate).
-Module-specific syntax details (table index macro, accessor traits) belong as comments in the module source, not here.
-
-### External Service Config & Secrets (SpacetimeDB + general)
-For any external service the repo calls (SpacetimeDB Maincloud, third-party APIs, etc.):
+### External Service Config & Secrets
+For any external service the repo calls:
 - **Locally:** plaintext values and native age-encrypted secrets both live in root `mise.toml [env]`.
 - **In-cluster:** plaintext → k8s `ConfigMap`; secrets → SOPS-encrypted `*.sops.yaml`. **Only provision cluster config if a service in our cluster actually calls the external service.** External clients (mobile apps, out-of-workspace backends) carry their own config and do not consume our cluster ConfigMaps/SOPS.
 - Wire config into the consuming app through its existing mechanism, with mise providing local process environments.
