@@ -68,6 +68,11 @@ Cross-namespace is the exception (shared infra like Cilium/cert-manager/monitori
 
 ## Policies
 
+### Repository-Owned Assets and Deliverables (Hard Rule)
+**Save every agent-created asset and deliverable inside the repository, never in `~/.copilot/`, `.copilot/`, session-state folders, agent memory folders, or other agent-private storage.** This includes CSV exports, reports, images, diagrams, and reusable generated files. Colocate them with their owning feature; use `assets/` for standalone deliverables without an existing owner. Link to the repository copy, not a session-private copy. A tool-provided session folder does not override this rule.
+
+Keep reusable, non-sensitive assets under version control. Sensitive exports must still live inside the repository, but keep their exact paths gitignored unless stored with the repository's approved encryption workflow; never commit or push plaintext financial data or secrets.
+
 ### Missing CLI tools
 If a CLI tool is needed but not installed, do NOT use `sudo apt-get install` or any system package manager. Instead:
 1. Check if mise provides it — add to `[tools]` in `mise.toml` (e.g. `dig`/`nslookup` via `"apt:bind9-dnsutils"` in `[bootstrap.packages]`).
