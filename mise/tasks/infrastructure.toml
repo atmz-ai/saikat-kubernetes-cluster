@@ -8,11 +8,32 @@ import re
 import subprocess
 import urllib.request
 from pathlib import Path
+from urllib.parse import urlparse
 
 import jsonschema
 import yaml
 
 configuration = json.loads(Path("renovate.json").read_text())
+dashboard_addresses = re.findall(r'href="(https://[^"]+)"', Path("kubernetes/apps/dashboard/index.html").read_text())
+for scenario in ("complete", "dashboard-before-oauth-cutover"):
+    candidate = list(dashboard_addresses)
+    callbacks = []
+    for name in ("grafana", "headlamp", "hubble-ui"):
+        deployment = yaml.safe_load(Path("kubernetes/infrastructure/oauth2-proxy/deployment-" + name + ".yaml").read_text())
+        arguments = deployment["spec"]["template"]["spec"]["containers"][0]["args"]
+        callback = next(argument.split("=", 1)[1] for argument in arguments if argument.startswith("--redirect-url="))
+        callbacks.append(urlparse(callback).hostname)
+    if scenario == "dashboard-before-oauth-cutover":
+        candidate = [address for address in candidate if urlparse(address).hostname != callbacks[0]]
+        candidate.append("https://unconfigured.example.invalid")
+    try:
+        assert all(hostname in {urlparse(address).hostname for address in candidate} for hostname in callbacks), "dashboard link and OAuth callback hosts differ"
+    except AssertionError:
+        assert scenario != "complete", "dashboard promotes an unconfigured OAuth origin"
+        print("PASS: rejected regression", scenario)
+    else:
+        assert scenario == "complete", "premature OAuth hostname cutover accepted"
+        print("PASS: dashboard links preserve OAuth callback origins")
 for workflow_path in sorted(Path(".github/workflows").glob("*.yml")):
     yaml.safe_load(workflow_path.read_text())
     print("PASS: workflow YAML syntax", workflow_path)
