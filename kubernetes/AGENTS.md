@@ -46,6 +46,13 @@ Render the affected tree locally with `mise exec -- kubectl kustomize <directory
 
 Remove ordinary resources from Git and let Flux prune them. For complete removal of a Flux Kustomization, first reconcile an empty resource set with the CR resumed, verify its inventory and resources are gone, then remove the empty CR. Deleting a suspended CR orphans its resources. Stateful storage and external data require their own explicit retention or migration decision.
 
+Helm retains CRDs installed from a chart's `crds/` directory during uninstall.
+For full retirement, verify no custom-resource instances remain, reconcile the
+chart's same-version official CRD definitions into the owning Flux Kustomization,
+and verify inventory ownership before emptying that resource set to prune them.
+Preserve every `status.storedVersions` entry during adoption, even with zero
+instances; an empty collection does not clear the CRD's stored-version history.
+
 RustFS supports server-side bucket removal with a signed `DELETE /<bucket>` and
 `x-rustfs-force-delete: true`; ordinary S3 bucket deletion requires an empty
 bucket. Check the deployed version's
