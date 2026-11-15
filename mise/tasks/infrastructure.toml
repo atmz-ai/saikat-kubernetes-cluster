@@ -14,7 +14,7 @@ import yaml
 
 configuration = json.loads(Path("renovate.json").read_text())
 for workflow_path in sorted(Path(".github/workflows").glob("*.yml")):
-    yaml.load(workflow_path.read_text(), Loader=yaml.CSafeLoader)
+    yaml.safe_load(workflow_path.read_text())
     print("PASS: workflow YAML syntax", workflow_path)
 tekton_template = "tektoncd/" + "{" * 2 + "project" + "}" * 2
 managers = [manager for manager in configuration["customManagers"] if manager.get("datasourceTemplate") == "github-releases" and ("depNameTemplate" not in manager or manager.get("depNameTemplate") == tekton_template)]
@@ -41,7 +41,7 @@ for path in sorted(Path("kubernetes/infrastructure").rglob("kustomization.yaml")
         repository, version = extracted[0]
         versions.setdefault(repository, set()).add(version)
         with urllib.request.urlopen(address, timeout=60) as response:
-            upstream = [resource for resource in yaml.load_all(response.read(), Loader=yaml.CSafeLoader) if resource]
+            upstream = [resource for resource in yaml.safe_load_all(response.read()) if resource]
         for resource in upstream:
             identity = (resource["apiVersion"], resource["kind"], resource["metadata"].get("namespace", ""), resource["metadata"]["name"])
             assert identity not in expected, "duplicate upstream resource: " + str(identity)
@@ -54,7 +54,7 @@ for path in sorted(Path("kubernetes/infrastructure").rglob("kustomization.yaml")
     if result.stderr:
         print(result.stderr)
     result.check_returncode()
-    rendered = [resource for resource in yaml.load_all(result.stdout, Loader=yaml.CSafeLoader) if resource]
+    rendered = [resource for resource in yaml.safe_load_all(result.stdout) if resource]
     actual = {(resource["apiVersion"], resource["kind"], resource["metadata"].get("namespace", ""), resource["metadata"]["name"]) for resource in rendered}
     missing = expected.keys() - actual
     if path.parent.name == "tekton-triggers":
@@ -90,7 +90,7 @@ for repository, declared in versions.items():
     print("PASS: coherent release", repository, *declared)
 
 for path in sorted(Path("kubernetes").rglob("*.yaml")):
-    for resource in yaml.load_all(path.read_text(), Loader=yaml.CSafeLoader):
+    for resource in yaml.safe_load_all(path.read_text()):
         if not isinstance(resource, dict):
             continue
         identity = (resource.get("apiVersion"), resource.get("kind"))
@@ -105,7 +105,7 @@ result = subprocess.run(["kubectl", "kustomize", "kubernetes/clusters/yral-k8s"]
 if result.stderr:
     print(result.stderr)
 result.check_returncode()
-for resource in yaml.load_all(result.stdout, Loader=yaml.CSafeLoader):
+for resource in yaml.safe_load_all(result.stdout):
     if resource:
         print("PASS: cluster entrypoint", resource["kind"], resource["metadata"]["name"])
 '''
