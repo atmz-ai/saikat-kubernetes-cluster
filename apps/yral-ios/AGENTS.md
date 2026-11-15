@@ -17,6 +17,12 @@ documentation.
   integrations are retired. Do not retain disabled screens, stubs, or Rishi's
   API contract. Restore features only against APIs owned in this repository.
 
+- The app retains OAuth sign-in/session, legal/support links, version information,
+  and sign-out. Database clients, profile/posts/editing, account deletion and
+  account switching are retired without replacement storage or API stubs.
+  Session identity comes only from OAuth claims. ID-token extensions for deleted
+  features are ignored; refresh tokens are opaque and validated by the issuer.
+
 - **Apple-native UI testing only.** UI tests are Swift XCTest cases using
   XCUIAutomation in `iosAppUITests/`, mirroring feature folders. Run them with
   `mise run yral-ios-ui-test`; select a simulator with
@@ -51,7 +57,7 @@ documentation.
 
 - **Stateful logic is a finite state machine (Hard Rule).** Any type with
   more than one meaningful mode — session, account deletion, upload job,
-  AI-account creation, the account switcher — is an FSM: top-level state as
+  OAuth authorization — is an FSM: top-level state as
   an enum with state-specific payloads inside the variants, mutated only
   through one pure `transition(_ event:)`, wrapped in an `actor` when it has
   concurrent work. Add a shared `context` only when several states genuinely
@@ -62,14 +68,14 @@ documentation.
 
 - **Folder per top-level screen/feature (Hard Rule).** Sources live under
   `Sources/YralApp/<feature>/` — ONE folder per top-level screen/feature
-  (currently `authentication/`, `profile/`, `settings/`), with the logic
+  (currently `authentication/`, `settings/`), with the logic
   that screen uses colocated INSIDE the folder (view + browser session +
   data source + validator together — no per-layer folders). A feature may
   have ROUTE subfolders named after its screens (`profile/list/`,
   `profile/detail/` — one per screen, code
   colocated in each). Files that don't fit an existing feature stay at
   the ROOT (`Sources/YralApp/`) — cross-feature infrastructure (Session,
-  AppConfiguration, NetworkError, ProfilePicture, Spacetime trio,
+  AppConfiguration, NetworkError,
   AppRoot/RootScene) — until a feature owns them or a new feature folder
   earns its place. Do NOT create a feature folder ahead of its first
   real screen, and do NOT pre-create route subfolders with no code in
@@ -185,8 +191,8 @@ documentation.
   test files. Filenames follow their type (`AuthClient.swift`,
   `Session.swift`).
 
-- **Thin Xcode shell** (`iosApp.xcodeproj`) — targets, signing, assets, and
-  the Crashlytics dSYM build phase only. Contains no product code. The
+- **Thin Xcode shell** (`iosApp.xcodeproj`) — targets, signing and assets
+  only. Contains no product code. The
   pbxproj uses folder-synchronized groups: adding a file under `iosApp/`
   or the SPM package requires **zero** pbxproj edits.
 - **Single SPM package** (`packages/YralApp/`) — ALL product code. One target
@@ -235,7 +241,7 @@ documentation.
      discarding the swap in git. `objectVersion` is a plist-format field and
      disappears with the format. Check the folder-synchronized groups survive
      (they are what keeps this shell edit-free when files are added), and
-     re-verify the Crashlytics dSYM upload build phase and signing settings,
+     re-verify the signing settings,
      since those live in the same file. -->
 
 ## One environment (preference)
@@ -248,87 +254,14 @@ that differed per channel would need a second one, and it does not exist.
 
 Consequences worth stating because they are easy to "fix" wrongly:
 - **No `DEBUG`/`RELEASE` conditionals around product behavior.** If it must
-  be disabled during development, it is disabled everywhere (e.g. analytics
-  autotracking is left at SDK defaults, `app_id` is always `yral-ios`).
+  be disabled during development, it is disabled everywhere.
   A debug-only `print`, an assert, and a preview fixture are fine — they do
   not change the shipped artifact.
-- **One bundle id, one App Store Connect record, one Firebase project.**
+- **One bundle id, one App Store Connect record.**
   TestFlight is a distribution channel on that record, not a second app.
 - **A bug filed from a TestFlight build reproduces on prod.** There is no
   "works in staging" state to investigate — the difference is which users
   are on the build, not which code is.
-
-## Analytics (Snowplow)
-
-**The collector is the write path; the Kafka Bridge cannot accept events.**
-The tracker POSTs to our self-hosted Scala Stream Collector
-(`AppConfiguration.snowplowCollectorURL` → `snowplow-collector.yral.com`,
-SDK-appended path `/com.snowplowanalytics.snowplow/tp2`), which writes
-straight to the Kafka `snowplow-raw` topic. That collector is intentionally
-public and unauthenticated (`kubernetes/networking/routes/snowplow-collector.yaml`)
-— the tracker protocol is not a browser-origin-authenticated flow. The
-**Kafka Bridge** (`kafka-bridge.yral.com`) is a different service and is
-READ-ONLY: its `KafkaUser` carries no write ACL. Use it solely to read events
-back when verifying an integration. Authenticate with the `X-Bearer-Token`
-header using the age-decrypted `KAFKA_BRIDGE_TOKEN` supplied by mise.
-
-Two Bridge gotchas when verifying (both cost real debugging time):
-
-1. **Consumer group names must start with `bridge-`.** The `KafkaUser` grants
-   `Read` only on `bridge-`-prefixed groups; any other name fails with
-   `GroupAuthorizationException` (HTTP 500) and the error gives no hint that
-   the prefix is the problem.
-2. **`snowplow-raw` is NOT JSON.** The collector writes Thrift-serialized
-   `CollectorPayload` records (`iglu:com.snowplowanalytics.snowplow/CollectorPayload/thrift/1-0-0`),
-   so consuming with `format=json` returns HTTP 406
-   (`Failed to decode: Unexpected character`). Use `format=binary` and
-   base64-decode the `value` — the raw POST body, including `se_ca`/`se_ac`/
-   `se_pr`, is embedded as text inside the binary frame. `snowplow-enriched`
-   is the JSON topic. Also consume with `auto.offset.reset=latest` and post
-   the probe after subscribing: `earliest` walks the whole partition and trips
-   the Bridge's response-size cap (HTTP 422).
-
-**Structured events only (Hard Rule).** The Enrich resolver in our cluster
-registers Iglu Central as its ONLY schema repository
-(`kubernetes/infrastructure/snowplow/iglu-resolver-config.yaml`), and Iglu
-Central holds only Snowplow's own schemas. A custom self-describing event
-(`iglu:com.yral/...`) therefore fails schema resolution and lands in
-`snowplow-enrich-bad`. Every event is an atomic `Structured` event, whose
-schema IS on Iglu Central. Adding a custom schema requires first standing up
-a self-hosted Iglu server and registering it in that resolver config — not a
-client-side change.
-
-**Wire shape mirrors the legacy Kotlin app** so existing dashboards survive
-the migration: `se_ca` = feature name, `se_ac` = event name, `se_pr` = the
-event's fields as a JSON **string**, truncated to 1000 characters (the
-`atomic` schema's `se_property` cap — over-length events become
-`atomic_field_length_exceeded` bad rows). `base64Encoding` is `false` so
-contexts land in the parseable `cx` array rather than the opaque `co` field.
-
-**Screen views are automatic — do not hand-track them.** Snowplow's
-`TrackerDefaults` enable `screenViewAutotracking`, session, lifecycle,
-install, application and platform contexts by default, so the tracker is
-configured with only the deliberate deviations (`appId`,
-`devicePlatform(.mobile)`, `base64Encoding(false)`). Re-stating SDK defaults
-is the drift the root AGENTS.md "Default-First Configuration" rule exists to
-prevent. Add a flag only when a concrete symptom justifies it, and say why in
-a comment beside it.
-
-**Three files, one responsibility each** — mirroring the Crashlytics split:
-
-| File | Kind | Holds |
-| --- | --- | --- |
-| `AnalyticsMachine.swift` | machine | The identity FSM: who events are attributed to. Pure transition. |
-| `AnalyticsEvent.swift` | logic | The typed event catalog + wire mapping. Pure. |
-| `AnalyticsClient.swift` | logic | The only I/O: installs the tracker, consults the machine, sends. |
-
-Emit events through `AnalyticsClient.track(_:)`; never call the Snowplow SDK
-directly from a screen, and never compute attribution anywhere but the
-machine. `SessionStore` projects the auth state onto the machine through its
-`identityChangeHandler` closure (the same seam shape as its `effectHandler`),
-so the store keeps no analytics dependency; `RootScene` wires the two
-together. All three types are tested without a tracker — the machine and the
-projection are pure, and no test constructs an `AnalyticsClient`.
 
 ## Design rules
 - **Native Liquid Glass everywhere (Hard Rule).** The app targets iOS 26 and
@@ -430,11 +363,9 @@ via `yral-ios-ci-checks`; local `yral-ios-checks` formats before that same suite
 The deploy job is
 kept as a commented block in `yral-ios-ci.yml` for easy re-enabling.
 
-**Checks parity:** CI needs only a working mise + the root repo's
-pre-existing `ANSIBLE_VAULT_PASSWORD` GitHub secret; `mise run bootstrap`
-extracts the SSH identity from the vault and mise decrypts the Firebase plist and
-signing secrets from root `mise.toml`, exactly like local. No repo-scoped iOS
-GitHub secrets, no fastlane, no CocoaPods.
+**Checks parity:** lint, package tests and unsigned simulator builds require
+no credentials. Distribution alone consumes the age-encrypted signing values
+in root `mise.toml`. No fastlane or CocoaPods.
 
 - `.github/workflows/yral-ios-ci.yml` — checks only (lint + package tests
   + simulator build). The TestFlight deploy job is commented out — deploys
@@ -451,7 +382,7 @@ GitHub secrets, no fastlane, no CocoaPods.
 
 ### Signing secrets
 
-Credentials are age-encrypted in the root `mise.toml`. The build checks the Firebase credential; upload checks all required signing values and fails clearly if the identity or a required value is missing. These checks never upload or print a secret.
+Credentials are age-encrypted in the root `mise.toml`. Upload checks all required signing values and fails clearly if the identity or a required value is missing. These checks never upload or print a secret.
 
 | Environment key | Content |
 | --- | --- |
@@ -465,46 +396,10 @@ Non-secret identifiers live in root `mise.toml [env]`:
 altool resolves the API key by file convention:
 `./private_keys/AuthKey_<KEY_ID>.p8` — the upload task writes it there.
 
-## Firebase
-
-Single Firebase project (`yral-mobile`). **`GoogleService-Info.plist` is
-GITIGNORED** — it contains the project's Google Cloud API key, which GitHub
-secret scanning flags when committed (an earlier commit leaked it; the key
-was rotated 2026-09-01). The plist is age-encrypted in root `mise.toml`
-(`YRAL_IOS_FIREBASE_PLIST_BASE64`, base64) and injected at build time:
-the `yral-ios-build` and `yral-ios-upload-testflight` tasks materialize it
-from the native mise age value. To rotate it, rotate the key in Google Cloud,
-update the plist, and store its Base64 with `mise set --age-encrypt --stdin`
-using the explicit infrastructure SSH recipient described in the root `AGENTS.md`.
-Crashlytics + Analytics initialize at
-launch (`YralAppRoot.configureFirebase()`), so every shipped build reports
-crashes from day one. The Crashlytics dSYM upload build phase runs after
-every Release build (path resolution documented in `project.pbxproj`).
-
-**Report every handled error to Crashlytics — never swallow into a UI label
-only (Hard Rule).** Every `catch` of an API/network/persistence failure
-records the error via the `CrashReporter` facade
-(`packages/YralApp/Sources/YralApp/CrashReporter.swift`, thin wrapper over
-`Crashlytics.crashlytics().record(error:)` — the documented non-fatal
-mechanism per Firebase's "Report non-fatal exceptions" docs; no-op when
-Firebase isn't configured so tests/previews stay clean). No `try?` on
-network calls in feature flows — a best-effort UI enhancement that fails
-still reports (`try?` hides the failure from both the user AND the
-dashboard; use do/catch + record + fallback behavior instead). Grouping is
-by NSError `domain`+`code`, so codes are STABLE per error kind (one code
-per `NetworkError` case via `CrashReporter.stableCode` — never per-instance
-values; the docs warn high-cardinality domains/codes get rate-limited).
-Per-instance detail (upstream status + body per the verbatim-errors rule,
-operation context, call site) lives in `userInfo` keys (`context`, `site`)
-and shows in the issue's Keys/logs tabs; the full `String(describing:)` of
-the error is in `NSLocalizedDescriptionKey`. Breadcrumbs via
-`CrashReporter.log(_:)` (64 kB ring buffer per session). Non-fatals buffer
-on-device and are delivered on the next app launch.
-
 ## Phase status
 
-- [x] Phase 0 — scaffold + CI/distribution + Crashlytics
-- [x] Phase 1 — core foundation (config, SpacetimeDB client, networking, auth client, analytics providers)
+- [x] Phase 0 — scaffold + CI/distribution
+- [x] Phase 1 — core foundation (config, networking, auth client)
 - [ ] Phase 2 — auth + account/settings + deep links + push
 - [ ] Phase 3 — video feed
 - [ ] Phase 4+ — profile, chat, upload/videogen, wallet, ai-influencer, subscriptions

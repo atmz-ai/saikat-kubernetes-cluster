@@ -8,9 +8,6 @@ age.strict = false
 
 [tools]
 age = "latest"
-# ! Keep 131: on 20261103, Binaryen 133 built successfully but SpacetimeDB 2.14.0
-# ! rejected local schema inspection with "invalid leading byte (0x7e) for external kind".
-# ! The same module published locally with 131; require a local build/publish check before bumping.
 "aqua:WebAssembly/binaryen" = "131"
 aws-cli = "latest"
 azure-cli = "latest"
@@ -23,13 +20,6 @@ gh = "latest"
 # ! The vfox gcloud backend imports an unavailable Lua python module before installation.
 "asdf:mise-plugins/mise-gcloud" = { version = "latest", depends = ["python"] }
 helm = "latest"
-# SpacetimeDB CLI. The release tarball names its binary `spacetimedb-cli`,
-# but the canonical, documented invocation is `spacetime` (see
-# https://spacetimedb.com/docs/cli-reference and the official installer) —
-# `rename_exe` exposes the pinned version under the canonical name so PATH
-# resolution never falls through to a stale installer-managed binary.
-# `spacetimedb-standalone` stays untouched: `spacetime start` execs it.
-"github:clockworklabs/SpacetimeDB" = { version = "latest", rename_exe = { "spacetimedb-cli" = "spacetime" } }
 jq = "latest"
 kubectl = "latest"
 node = "latest"
@@ -59,10 +49,6 @@ ruff = "latest"
 # Rust — latest STABLE via mise.lock resolution (committed lock pins the
 # exact resolved version per `mise lock`, so builds stay reproducible while
 # `mise run setup` on a fresh checkout pulls the newest stable).
-#
-# Stable is correct repo-wide: no #![feature] gates anywhere (SpacetimeDB's
-# `unstable` is a crate feature, stable-fine), and nightly-2026-09-08's wasm
-# codegen drifted into breaking `spacetime generate`.
 #
 "core:rust" = { version = "stable", targets = [
   "wasm32-unknown-unknown",
@@ -108,21 +94,8 @@ CARGO_HOME = "{{env.HOME}}/.cargo"
 RUSTUP_HOME = "{{env.HOME}}/.rustup"
 CARGO_BINSTALL_DIR = "{{env.HOME}}/.local/share/cargo-binstall"
 KUBECONFIG = "{{env.HOME}}/.kube/config"
-# SpacetimeDB Maincloud (SaaS) — DB identity/name for the yral-database-spacetime
-# module. The Maincloud base URL is fixed; the DB name matches `spacetime.json`.
-# Plaintext only (no secrets here); the admin token (if needed for write
-# * Administrative credentials are age-encrypted below. See AGENTS.md
-# "External Service Config & Secrets".
-SPACETIMEDB_MAINCLOUD_URL = "https://maincloud.spacetimedb.com"
-SPACETIMEDB_DB_NAME = "yral-database-spacetime-4lbo7"
 
 # ── yral-auth ─────────────────────────────────────────────────────────────
-# SpacetimeDB config (KV store + identity token for REST calls).
-# The admin token is the yral-auth JWT — SpacetimeDB derives an admin Identity
-# * SPACETIMEDB_ADMIN_TOKEN is age-encrypted below.
-# SPACETIMEDB_URL is the name yral-auth's SpacetimeKV expects (same value as
-# SPACETIMEDB_MAINCLOUD_URL).
-SPACETIMEDB_URL = "https://maincloud.spacetimedb.com"
 # Plaintext (non-sensitive) values — public OAuth identifiers and public keys.
 GOOGLE_CLIENT_ID = "804814798298-taifmq3k6olk9bjr1cqb9gfnp1mssqqb.apps.googleusercontent.com"
 APPLE_CLIENT_ID = "com.yral.yral-auth"
@@ -183,26 +156,8 @@ age = "YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IHNzaC1lZDI1NTE5IG5QMTlMdyBRWm5yNVd6MytwW
 [env.CLIENT_JWT_ED_PEM]
 age = "YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IHNzaC1lZDI1NTE5IG5QMTlMdyA2WHB1azZQWk9rQmZtbURmQ21NM210MHRzdkxta29tNGFyczBxeEpmUlFjCi84VVFnOElpejBjR0lLcG55dyttQ0RUalVFd25iSGdyclVnN21rUXpyZ0EKLT4gSU55LmgtZ3JlYXNlClFzdDQwOUF1T1NqVWNLSmtOcVRnbjlTUjlxcHRHc2VtZEZwUHpHK1Z1UGdrUTVjb21KaGhIYkFub1d5VnJoVUsKCi0tLSB0aVBSWTVYNXVLOFJNb1RXOGJpdkhVaTFWbGVwemgrOCs0TUlPOG54ODRzCkb3XeHI7qyNUU9p4CpktV3e2Xa9kTJajy0WnecNGGrV/iNPGizYB2vNeTyaKvLVrjRKlrj1NFoqFbu5t2mufIjCJCKHwOYntXuzSIaysoiz+5wk9GQBtKa434Jag9Yo6CZsF7QMcykp6mBVMupzRsTRl9x9/2mZZ9WXfi9D3DKNpOo5V/5IDAXY09G5qsXeRUN75ec9vQ"
 
-[env.SPACETIMEDB_ADMIN_TOKEN]
-age = "YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IHNzaC1lZDI1NTE5IG5QMTlMdyBmekNoR1NBZ3gwZnNvcSt1WUJaMFZZbzE2MGxBNVNlWHhRMWRMUmdXZ1ZzCk9SamRzeFNlZVhkWGNoQVo1Wk4zeGtRdGVCU2RlczJqWGF2TCtsRXQ4SFkKLT4gSlhKcmhpQk8tZ3JlYXNlIH5sT0g6OyBeUn08Lms/PyBwO2QgJGFFCmw3bUpXYkRnb0RzYTkwd0dQd0tXNjV5Sncvd2g0UkR1dTR2R0U0RXp4cFhVV3NjQmZlU1RKNFdzQVViSnF3NjkKeE95VDUxTEh1YVUyRFZsSCthUQotLS0gZWRSZ1h0cUNGaDBzbVhnazg1WHZnaEdXVkFTRS9ZQTY1Um5yTlNTc014TQqm3cuCfoKb0+wUCKyiSkjMUjUcQ/oNMorjjZjPAyq7dz3hmSYcmmvo6+mUVTqwiqGvTtKcO+kE7K77IYBSdn2duIQXIYMDDrKp010bEicxfm971g1/PcosaCs/M9xIM8XPDpNS41W4u9rsbP9TaS9FIC39N1+VOlzuYB1m7ALA44Jm4x2UDrtyzn8WRWfgUzV9770BO9Qz8IyMwaR3alSnJ0dqBeJ6WU+chVq62nC2kh7zvcIVxj1C5BveA1j89LpFF68Gw5VVmFoFaxd3/9wE5Z3F5oB1JqS+zF+BtWXGQJtnkeiywjanfmUrQFaqSKBRFeICsUZIJDFAa9Vv8skxFV+La9CNnpIv7E+H91fFQ8IL7jBROlYzaAjlkTB21xyEzTU6nqcMdgePddCKYnQaiSfiMbxcVc9Lef4qP3yc1qWeJC1WIwopomKiBjcXoyvYhyZqX/kZNkiOM9DnriddrFL2msGUMsYobIkocyVrK6TJmPiHSUTiCyDt2R+j58Qj1au5Tt1Hmxby+YjpF+5r5R79QcADf9xexlRKf+faByk2+BGWBgR/FvFNbkocaVMYXgfp777hblGkEnWA1aJUr43pghwRI49oyLg7Vv72+vbF7na2OBoha+aOlliC8LekWRJg2tY4d5t9Drv+YB7EGcFwH7DExL8fh+yCUnlIdj3b8tIs2eCF++tJv1zksOYGLk0ZzmgolfoHvNBz0C9bebXWXAFh4U7yHxOSOiYMptQ/HnD+qg"
-
-[env.YRAL_OFF_CHAIN_USER_MIGRATION_API_KEY]
-age = "YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IHNzaC1lZDI1NTE5IG5QMTlMdyBLa1NPL1NQUDBIbUJjblBKc0FyT3ZLTFU2dEJob2lUcmpDTmdHVGFsRkc0CjBvYmJJT1VFZ0VYdVNLVEl4dHBpQU0vNENDWXhLeGZSYTA4YjlkTUl4TEkKLT4gfi1ncmVhc2UgdmInZlNGIE5nbikgTkogPiw2CmI1ZFA0Vjg2anFsaFQ4Q3F0SjJOZXl3cThpaTRLSWhCaTVod3pYRTc3SFRPZnUxQitKVGJCYkIvSFVzQkdNazMKOGFBUGFKYwotLS0gS1hoaXRkbEZmWGwyOTRKNjQwRlUrdFpCWnVqUWJScTMzcVdaSEw0R2sxdwqS1FNZrbe288RYkhFnC3Usht8S3uCNQsnuUNDVOPjlo7g1AH6Vv8GZXyDT3uUcst/j7wqem1lrmiqtxBICd3xwnjFQH2aLEHW3rhE8ajnJs2zLsmSlsU3wG1VlaBkQ9iP+d/Cx6tXJhYg8DEggGoPQdBQ1JhGoYm4TthhzBgCk+fzIB2uVBes7ZLgqKBvmp3qCbBN63VOrCZdqAy8JzTx3gGh/NemByZ4bLTylAOW3NW6oEWWYANS6s5pTtBNYCwvvSCXoMyQnyyLwHbZ8QLTfpE21bW204izhFi9kkvenGZ2XXfi/c2ofV1s3EqdyX4z+rmwbrGP2MNde"
-
-[env.YRAL_METADATA_NOTIFICATION_API_KEY]
-age = "YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IHNzaC1lZDI1NTE5IG5QMTlMdyBJdDM1WWQzVUVFTi9PZGZBeUszYlpOM2xFZnFtS2o1ZVJVRkZlNmZ5am44CnVHRVRmZFR5VHh1dVVValY1QW0yc2xiNmZTenJtMWZ1U1kvTU85UitkNlkKLT4gLT0tZ3JlYXNlIEA+PT5udlgmIFltClAwMlpsUjExK2JpamV3Sml6eVRkakRMNzhIYk5yYWl2MTlTdUU4eFNsZ3lmNzF5djNjZ09BVXhrMTNESEhVbVMKTUlVa2hoQ3JxWGdFeUlUOXVYcnEza1F6VisxRAotLS0gZ2RQN1ZUNTdVNlBkOEhzeS9qcEdQek1CQVlhaXRSR0toUEZzbU9XZ1RvRQr00zOOyErIIp9Lv1w5XtrN8ROWbcH3g+rWpO++lXDB/6c+dinswlsJOkCCpXOTbrQTfUoe2jLse8l8oS2v4V0SwJELQQiuuT9rGH2+V9mlpVOzXcs81BkWGz76jeaI2YKMWO3HUspcD6wsrue8eSKSJqAfPiHgWho3d3fkJK0Ud3cm3piEtKJ+adov8XrqMaccvs6fODETvINbq6+6l5ndB0ZWtMm1NRtkhio/P0Sq7nb2pfGx8OrrUdTvx/JPLao8saLgCQs99+uhfjbokSes6KIqWbfzmVwj+NS7DclMnojV6Wx/mNGwctID"
-
-[env.YRAL_METADATA_TOKEN]
-age = "YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IHNzaC1lZDI1NTE5IG5QMTlMdyBJTGgvL056L1diUE91bytyTm41U214bmkwOFczSS9YSytkeWJ3eDZwNldNCnY3ZVZHT0VkT0syYVhyRU1CZ0NpeUJnZm5ZaVJROEl4bVc3cW4xa1BjRTgKLT4gNT0tZ3JlYXNlIGpffCZJbiBoNHFjZygnIFJ3IEoKQ0EyN01JUzFkWWlpK1pmNWxNRDgyUzVXVjB3NGFHMTFBT0svbGhFZXArbkMvZXhMelMzc2xvRWttZ085cXh1MwpEalNjSFdyWQotLS0gYUZaQklmV29oekcyL3pML0F2TURMdGhVa1c1R3hlZ2pQSFVySGowM3BJVQpdkzPtN7T0+Pm5qx3xdBWvuv0Mr+VVdJGx5+z9bVCK0r3OctMOvEDs8A9XV9Po2NPE6hidJDHPTzzMdhyA4G3ngOk2ZBuCPB8/RWe53pwXXnd86ON3MxcNWb9U/OLi7C4hxiP1Z0g/tgyaIqKsrCBFMiWf2L3lyyienM0BYYE+ERaqhnYBQyFuLqcCCmxEk4xDm0TVrFqoeQQfpxCJVaBbqEi0PzSkPw9ZHI1hoZpP6taXuRItMFP8e6uVXokjSH6lKk0pU4J/MMAZUmKUnReuygggP+wD9EVGi4Ein+rSJ5UCJb1iFevssfClB9rNS/xTTrQHZA8"
-
-[env.JWT_PUBLIC_KEY]
-age = "YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IHNzaC1lZDI1NTE5IG5QMTlMdyA1d08wUkFRMkpIYzhuMjF2NlRXcElmWFJabk91UTBWWDFpZ2N6MEtCSEhjCmdVdWxxWUtMeW1rSnVDcmlqUzdkU0F5aWk5ajM0SzBTYlhLMXFzRXJuZTgKLT4gSXlcYjQtZ3JlYXNlIFlYJmUralwgN2UoICYgYnBRVzgKeFRaSHl4Mis2VEdKNEpDWEE0dXp6UGdCd1VIeUQ5dmM5TlpneTRGRlRkVVBKa2lWODRNRjdWNUhDSms4Z0VRCi0tLSA5U1pkRHo2anZVdmJsbDdra0FRT2N4VGlMRkdPc0NEQVoreFR0cVpES3Q0Clg5ZlSQHNd2zpLokg4Y0qBd/Tmx/ODANMA+dfQZW5DSzhlqyGxnpsKAXlFucXOATsaJ40T3il2hOARAXRL+quQ7cPRt+cXdtWsfRCX/8f3XBKMHMkTW9ATVGoUyusOKlOEZGcyt/MHtLOQ5KTQpgtsveS1KsM71JqsOUfcIPmKfJuAmolsKgI+j6I3ntCIgJA"
-
 [env.YRAL_AUTH_PUBLIC_KEY]
 age = "YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IHNzaC1lZDI1NTE5IG5QMTlMdyBIbVlJaXlTOWl5bmZnZFpqK0M5bmU4RXo1eGRVZkpQV0QwdXN1OUpmT1V3CkdLUGxPeFRHeVlYMXNUNWRHcEJrUlloWW85R2k0U0RSTCtMalZHa1RkdlkKLT4gZXstZ3JlYXNlIFVzRWpYblcgR1ohOQptZUJNdmRRCi0tLSBDUGlqYUk2cGlLNVh2TkJoZ0UvV0w0YWVKaGp3aE03VW1GNnhqT2pMWVpNChMvvWv8SvK/3fDD2xVIf9XDKWO+SQAAjxfdOj+K/lUM4gP97dYtqbRsvOBLhIyJ0esbUoG1MetoYwpk4W+MLDZHN0VlXmsiLsM/b1vGPuZqY7pCZZ9YjSLGbv6JIe4ch+AsmxnpmhPu0ybs5P31kdUSxZVzHb7Is/Zhs/+c4kKtRHOAkPqeXBkUohplzkTcFAvKaa4mDyVC6L5qj/gEMOu+fcS3EOlGevhzjP3/NGaxTLAEc8hJEYb0ODznLzmGPkF0RedIVCRgn6PpXCsgDPbk"
-
-[env.YRAL_METADATA_BACKEND_ADMIN_IDENTITY]
-age = "YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IHNzaC1lZDI1NTE5IG5QMTlMdyAzQ241M005YkpUQTQ2dDZiMURsM2NMcDFrcVU1NjZaL3dkSzFGTkY1RVJrCkVCRUtNUHV4ZW1hN0dURlloM2czcHBzWndPM2VjQ2NrOE9Rem16a0NqVEUKLT4gbVtiLWdyZWFzZSA8Ck1CNTAyV2g2WjRCZgotLS0gbU1xM09FM1k3dHBCM2p4dWxSNGhIMTdENFBDaFNDNlhRRGRtOGwyc0JZMAqogpG3rtyw2H6QtjusyKLOMwcbPsZO4j3d6kO2uBz+wqrqDnooEhWQV0mwpxCZzGH0DdgSgamShEKeBeWmQyQI++YxOqB0GK7IGogFWkFxaC7WVjCsx34UD5KN8r+9sdWHHMETZc4FPLt1AzFikWtkjcOPaid52pq16MG0BmMZpf1SQnHteShRz5KF/g9hxmNUD2ihbAWyvAquRgfYBvWPh8/V95PFNKk1n8/Z4a/bWsANwfViPvog/0P5ynwk07nYwgqeQ04kfvxUS+yx3SPNaycQyPIF0wMhTOA5AUjUVwS70+N0lAIfxkXK3FtotGTyUyLJ8fdAEXtGe9k+nA"
 
 [env.KAFKA_BRIDGE_TOKEN]
 age = "YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IHNzaC1lZDI1NTE5IG5QMTlMdyBva1QyWER6bU4zcnhuM1E0eEV5b0lpeEJPazNTNjlkbkxlaGpqVFV4V0JrCk0xSzkwNHVTWUY1b25NNUpDdEZtZkFyak40cnk1bngrOW8yaWlBOXNycGcKLT4gYTk2PlstZ3JlYXNlIEJAfk8gTkd4CnJFQ1B1bC9jSk9UNGxiZmRRdwotLS0gVmJmSmpUdEdGclJHTGFBWkkvcFNIcGloYWxva3k4Y045VWZwL2NIazBaTQo81cDYL9j/pp1i/TEaAtCQjZc3fB/ylwqK8n7/4BKFA3bbdXduzrE8RudiQXQPHyJxlPX9BOQMpkhyYx22oKzW5rUTotsuuZe7vw9Q4cx9c4ScWCjnRFwxSXyjuTaY1AU"
@@ -220,9 +175,6 @@ age = "YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IHNzaC1lZDI1NTE5IG5QMTlMdyBGVFNQU0sxWlo5e
 [env.APP_STORE_CONNECT_API_KEY_BASE64]
 age = "YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IHNzaC1lZDI1NTE5IG5QMTlMdyArQXVMN0U2U2FYdnpDclFoQmFHczJ4SmNaRVZOVHpqcUZyR0ZxZ3RSMUFFCk9GNzNnZWpCdkdGVnpRaEovOUUwMzRzVDRuNHhFRlliMk9STzltbG5UWFEKLT4gcS1ncmVhc2UgQSxXVUZ3IDklcmEKM3lYcW9HbTg1eStRY2V6NGxEaUplYWtKZkhNdFgzN29FbUllWHl1WDlVa05RcS9McDhUdXlBSU80Z3QvM3ZDRQpkaTMwZHcKLS0tIFhMOC9rVEVYVzkvSm1DeVhhY0lqMkdQZWtmZmIrdUwxblhoZmlLa2JnTkEKS9MFp9zbB9UVtJ6xFCkWp5yNNVAEp2cGYarMyQZ5c/m7dl8cybp4FFZ9leMtThbcXA0TyHrLT5XT4L8NHXn/dHwQOnhnouOow1lCYFekjx6gDYaXTanTVzXlvZ6QmFOL9xmG0jaMzL/dT4kAT5ZZDmZyfJfYHAD6jQYPMoe7kBcQtfn/vmgUrc9Uq9lE5Uq56VkZLocpdV2CLUyAiLvfzWNt8GSrvTL64Pe2HBfsBLiFuqsBnVSwiYLhiTKe63iOMZtUtCoxaa2mgYCNc/dzr8m4N3uyQDYqiFUPdf5u07hPKefa7/YW6knjQB9BfZno8wXuHYJdWsUV0YswUwu5CeJfGNK73Sk+a6OuReK+Msf5Tj9Y0MYgFAC1B/5UuAvtfse4r9mOvYJEm4b4Z/mTKPKlMQ6P8yUQl/S3n7fq+9a1gdDecHExtgm8ETFVNvn7OQ5aNWRnZoyBX8Azy2PDdJCy8+p+DIuYSmBbKi3f2ycgA7xiA3983A"
 
-[env.YRAL_IOS_FIREBASE_PLIST_BASE64]
-age = "YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IHNzaC1lZDI1NTE5IG5QMTlMdyBGc21tRE03UFZCYXNWM0tvSjZMejZ3NHNqMWRYQ00xYjJlYlliVWZqbnpVCm1jdGFzWFNESTlEaklqKzN5Y09Qa2hKU3lvekxqdmxVWmdjVWRZaGF5aEEKLT4gMjYtZ3JlYXNlIGhsCklvRGVxeE42L293Ci0tLSBlNE1GeGtCRkk4Yi96OHBocHBEM1AyOVBxakhVSWhGVzVNcTFaak5CeUNvCr8+jJdFU31LJrJPM+hHhmGHA5R59UHGa8SzhsOIEq9i+88aWqRTZg1Xq9Shqi1AjP5Qu2lITncNffvCyY9Jx0XnHFLOU+/MmuNHhBXdRQ4BifaYI3bTflBWIezRae8VCkrsxRFIevseLP8B5HslEMolivaVUH+tuRZXK+TR0xVSaGmaUvsD0Y5VAxULQ+kl8nJH/BDMXUIEgnTRS/KbTjsnncHiypr0zkln/q0nwkATvv8fZNyaM091MgOBCczaN0vPzsJ69J7m3+VWkcBc21k8hC11YLy1xgKeunnah2x1R2GDk1NLFXK3AhRRX0yB1soB0cwFMmvDBzUxMI45ewu5Qgj4WLkFH2SRg5DNcr3DCs1nquzKoGTeWHJo+5vO4IihjsyAI/29z5avmI4OGrpjG3Uavhe3r4mGxjr+IzD3sJr8EOYk8tK4yT5MvLpipslTgHwA3OIJ5Nfy2JtYVH/pT+QCsoigqn5RR2Ku+6EhGW9S7vFlnvJqzIOvMv5MxiCOQgwDHS0zxSTeVqjVAk55jIHfGjqTQ6GwBkn9X2il2bKF3Mba/e8oBDWBexi1aCTgMUeBFSU6BgVl4nLveRaDIhsMvqhi6ciFJXqUF6Zbe0jJ6w5b5B4RiUyj5doUb39H02Wew/acOUvKmb5q3rxWURbIkS+8cgU4o/hp2UISLuDUjv/Gk3sO/9V4wdAoHpSyWUjiDEP5fjB5VW647WPqvUKPga3WWxQAkkEpBnc2KtaJ4xGlvuXDdlYGsXjDQDJ+QEkTmAdC78WcVT0LOUy4TfhQSzaJqjcX6pt1NwgcLvhoE4WZDWuDLtebJoYHQ9QDQ8UEdLIqyoTJfDuOrhI/iUi9oNgoS5M/v4AftvyZHknzUTO2Fsim1nVNvr/7qN07oCvFJxLW6RZDbGLUkJA8/09ABbz0xs4ot4jX5x4onR8SJceRNxY+hg8dL6j5uyjnHWr4RMU5Vgk/NSLQZ7d+KoiYUNl5W83s7GEoiJg5hmCxv3fikK0Qzvya4dyRdZYgTDtUtvYjdq87Xf0znTDo/oIUQrqZzBtlkzi9zSvNTDUBegoj2+UcENpQmbkYeQUrWApum5HKjlVjq02sYUaBmGj0A2Yk+f6OlT0Md9Odx8Re9ULDm/zWKXnAKZumlZpiJJS+MBGt9RuuNtobTk4ytHNPL5MYjlLR+8sxBfTAT1Q+Km/1Gj9jTzahXdCwsshXgTZA+ZXJwpCwlitU9UVDhU6dFcEh5pQ0wqY2Lz93yDhPznTOqq0zvDeJYVE0W1nvM7PqgrQ1XP5A4lCgDPr7Y50HPZnh7rb+LIXBONK2VVXB0+NR4rZnGjUBuVy7cqIIxbGFsciQ39aP5OM5e3OiEt5UAIjF2gxwqvLyiM4exZNNRZU9rbnKUjtS56XZxoFocl/QwHKFQafIymqcEBWB58wjdPLv4u6dXQMVyQAGvhZZQCQfzmWjvltm3ZYNFAoMRgAEiULrycb7jA5D9KN6Vx0fml0ezxH3NmtASrCrITioEcFSqAqW5aRN3jS6k+PsLBh0qZBUCefvbbBjoQyJMBYQGVwDdGaHqWvi+D2SRN5YCvDa2jGgM32q"
-
 [env.CLUSTER_GEMINI_API_KEY]
 age = "YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IHNzaC1lZDI1NTE5IG5QMTlMdyAxYkF3d3BNZjZtQnJ1OU5lVTlOWDVLV090dXpVS2doazFmWFVOcU5yWndFClpac1dPUnBuYndFZXMwRS9SUkh3UWhhejcwRUNvOTI1NUpCVCt2RmlGencKLT4gSkFDS2ktZ3JlYXNlIF91IFYKbk1IbXVyQng0REt1emppZ1N2bEZ0ZE9WVWxPbGcrbEc4TkZLeUx2dnFYNmR5Tjg4M0RLLzNTZlJ1QmMKLS0tIEVxdWcvSWlIMTBwdi9BZnZGNk11b0l4Q1RPN2JvRkFNVTFhWWpJWk56VnMKxkcuMsZArVOlaj7vZgMMh2r//ZJgEjDot+xO33uZgX2DgBVdnyevf8B0rP/0LRVhL+87Ur/iSpyYTcDG7h0uidPQ41O8eEscDAE6OhKTLzgJqbP6/g"
 
@@ -232,7 +184,6 @@ includes = [
   "mise/tasks/infrastructure.toml",
   "mise/tasks/my-website.toml",
   "mise/tasks/sops.toml",
-  "mise/tasks/spacetime.toml",
   "mise/tasks/workspace.toml",
   "mise/tasks/yral-auth.toml",
   "mise/tasks/yral-ios.toml",
@@ -291,59 +242,7 @@ fi
 '''
 ready_http = "http://localhost:8083/"
 
-# ── SpacetimeDB standalone server (port 3000) ──────────────────────────────
-# Local SpacetimeDB instance for the yral-database-spacetime module. Required by
-# `spacetime dev` (which publishes to http://127.0.0.1:3000). In-memory mode —
-# data is lost on restart, which is fine for dev. No JWT keys, so this is the
-# plain server for tasks that don't need authenticated identity.
-
-[daemons.spacetimedb]
-run = "exec spacetime start --in-memory --listen-addr 127.0.0.1:3000"
-ready_http = "http://127.0.0.1:3000/v1/health"
-stop_signal = "SIGINT"
-retry = 3
-
-# ── SpacetimeDB local dev (in-memory + JWT keys, auto-publishes module) ─────
-# Used by the `dev` group and by the yral-auth dev tasks. Starts the
-# local server, publishes the module (via the on_ready hook below), and stays
-# running. Data is lost on restart (in-memory).
-#
-# JWT key configuration: the local server verifies JWTs using yral-auth's public
-# ES256 key (JWT_PUB_EC_PEM from [env] above). The PEM is written to a temp file
-# before starting, then passed via --jwt-pub-key-path, which makes
-# yral-auth-minted JWTs valid SpacetimeDB tokens — the server derives a
-# deterministic Identity from the iss + sub claims. The private key (JWT_EC_PEM)
-# * JWT_EC_PEM is supplied by the root age-encrypted environment.
-
-[daemons.spacetimedb-dev]
-# NOTE: the mktemp template's X's must be the LAST characters. Trailing them
-# with ".pem" makes mktemp treat the whole string as a literal name — it then
-# creates that one fixed path, and every restart after the first fails with
-# "mkstemp failed ... File exists" (which is why the daemon would not start
-# after an unclean stop). The extension was cosmetic: `spacetime start` reads
-# the PEM content, not the filename. The key files are also cleaned up on exit
-# so they don't linger in /tmp carrying the JWT signing key.
-run = '''
-mise run secrets-check -- JWT_EC_PEM
-JWT_PUB_FILE=$(mktemp /tmp/spacetimedb-jwt-pub-XXXXXX) && \
-JWT_PRIV_FILE=$(mktemp /tmp/spacetimedb-jwt-priv-XXXXXX) && \
-trap 'rm -f "$JWT_PUB_FILE" "$JWT_PRIV_FILE"' EXIT && \
-printf '%s' "$JWT_PUB_EC_PEM" > "$JWT_PUB_FILE" && \
-chmod 600 "$JWT_PUB_FILE" "$JWT_PRIV_FILE" && \
-printf '%s' "$JWT_EC_PEM" > "$JWT_PRIV_FILE" && \
-exec spacetime start --in-memory --listen-addr 127.0.0.1:3000 --non-interactive --jwt-pub-key-path "$JWT_PUB_FILE" --jwt-priv-key-path "$JWT_PRIV_FILE"
-'''
-ready_http = "http://127.0.0.1:3000/v1/health"
-stop_signal = "SIGINT"
-retry = 3
-
-[daemons.spacetimedb-dev.hooks]
-# Publish the module to the local server once it's ready.
-# --env dev loads spacetime.dev.json (server: local) on top of spacetime.json.
-on_ready = "spacetime build -p apps/yral-database-spacetime && spacetime publish --env dev --yes --server local yral-database-spacetime-4lbo7"
-
 # ── yral-auth prod-config dev server (release binary, port 8080) ───────────
-# Runs against the prod SpacetimeDB config. Build first with: mise run
 # * Build first with yral-auth-build; credentials come from the root age values.
 
 [daemons.yral-auth]
@@ -390,10 +289,7 @@ dir = "apps/yral-auth"
 ready_http = "http://localhost:8082/healthz"
 stop_signal = "SIGINT"
 
-# ── yral-auth dev (local SpacetimeDB, port 8080) ───────────────────────────
-# Dev variant: points SPACETIMEDB_URL at the local server (127.0.0.1:3000) and
-# depends on spacetimedb-dev being ready (the module is published via its
-# on_ready hook). Build first with: mise run yral-auth-build.
+# * Build the development authentication server with yral-auth-build.
 
 [daemons.yral-auth-dev]
 run = '''
@@ -407,8 +303,7 @@ fi
 dir = "apps/yral-auth"
 ready_http = "http://localhost:8080/healthz"
 stop_signal = "SIGINT"
-depends = ["spacetimedb-dev"]
-env = { LEPTOS_SITE_ADDR = "0.0.0.0:8080", SPACETIMEDB_URL = "http://127.0.0.1:3000", SPACETIMEDB_DB_NAME = "yral-database-spacetime-4lbo7" }
+env = { LEPTOS_SITE_ADDR = "0.0.0.0:8080", LEPTOS_SITE_ROOT = "../../target/site" }
 
 # ── yral-metadata dev server (release binary, port 7000) ───────────────────
 # Build first with: mise run yral-metadata-build
@@ -417,6 +312,7 @@ env = { LEPTOS_SITE_ADDR = "0.0.0.0:8080", SPACETIMEDB_URL = "http://127.0.0.1:3
 # Binary path is OS-conditional at start. Root target/ only —
 # apps/yral-metadata/target is a stale leftover.
 run = '''
+mise run secrets-check -- YRAL_AUTH_PUBLIC_KEY
 if [[ "$(uname)" == "Darwin" ]]; then
   exec ../../target/release/yral-metadata-server
 else
@@ -426,7 +322,6 @@ fi
 dir = "apps/yral-metadata"
 ready_http = "http://localhost:7001/healthz"
 stop_signal = "SIGINT"
-env = { JWT_PUBLIC_KEY = "${JWT_PUBLIC_KEY:-}", YRAL_AUTH_PUBLIC_KEY = "${YRAL_AUTH_PUBLIC_KEY:-}", YRAL_METADATA_BACKEND_ADMIN_IDENTITY = "${YRAL_METADATA_BACKEND_ADMIN_IDENTITY:-}", YRAL_OFF_CHAIN_USER_MIGRATION_API_KEY = "${YRAL_OFF_CHAIN_USER_MIGRATION_API_KEY:-}", YRAL_METADATA_NOTIFICATION_API_KEY = "${YRAL_METADATA_NOTIFICATION_API_KEY:-}" }
 
 # ── yral-metadata container (podman) ────────────────────────────────────────
 # Build first with: mise run yral-metadata-image
@@ -434,15 +329,16 @@ env = { JWT_PUBLIC_KEY = "${JWT_PUBLIC_KEY:-}", YRAL_AUTH_PUBLIC_KEY = "${YRAL_A
 [daemons.yral-metadata-container]
 depends = ["container-system-start"]
 run = '''
+mise run secrets-check -- YRAL_AUTH_PUBLIC_KEY
 if [[ "$(uname)" == "Darwin" ]]; then
   exec container run --rm \
     -e APP_ENV -e RUST_LOG -e BIND_ADDRESS=0.0.0.0:7000 \
-    -e JWT_PUBLIC_KEY -e YRAL_AUTH_PUBLIC_KEY -e BACKEND_ADMIN_IDENTITY \
+    -e YRAL_AUTH_PUBLIC_KEY \
     -p 7002:7000 test/yral-metadata
 else
   exec podman run --rm \
     -e APP_ENV -e RUST_LOG -e BIND_ADDRESS=0.0.0.0:7000 \
-    -e JWT_PUBLIC_KEY -e YRAL_AUTH_PUBLIC_KEY -e BACKEND_ADMIN_IDENTITY \
+    -e YRAL_AUTH_PUBLIC_KEY \
     -p 7002:7000 test/yral-metadata
 fi
 '''
@@ -453,8 +349,6 @@ stop_signal = "SIGINT"
 
 # Named subsets, usable wherever a daemon name is accepted:
 #   mise daemons start dev      |  mise daemons stop --group dev
-# Dependency order inside `dev` is handled by each daemon's own `depends`:
-# spacetimedb-dev → (publishes the module via its on_ready hook) → yral-auth-dev
 
 [daemon_groups]
-dev = ["spacetimedb-dev", "yral-auth-dev"]
+dev = ["yral-auth-dev"]

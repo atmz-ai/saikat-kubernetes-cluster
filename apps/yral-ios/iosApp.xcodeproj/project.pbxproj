@@ -88,7 +88,6 @@
 				11D9260A3045F61B008548D5 /* Sources */,
 				11D9260B3045F61B008548D5 /* Frameworks */,
 				11D9260C3045F61B008548D5 /* Resources */,
-				11D926203045F679008548D5 /* Crashlytics dSYM Upload */,
 			);
 			buildRules = (
 			);
@@ -179,26 +178,6 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
-
-/* Begin PBXShellScriptBuildPhase section */
-		11D926203045F679008548D5 /* Crashlytics dSYM Upload */ = {
-			isa = PBXShellScriptBuildPhase;
-			alwaysOutOfDate = 1;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputPaths = (
-				"$(DWARF_DSYM_FOLDER_PATH)/$(DWARF_DSYM_FILE_NAME)",
-				"$(SRCROOT)/iosApp/GoogleService-Info.plist",
-			);
-			name = "Crashlytics dSYM Upload";
-			outputPaths = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "if [ \"$ENABLE_DEBUG_DSYM\" == \"YES\" ]; then\n  \"${BUILD_DIR%/Build/*}/SourcePackages/checkouts/firebase-ios-sdk/Crashlytics/run\"\nfi\n";
-		};
-/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		11D9260A3045F61B008548D5 /* Sources */ = {

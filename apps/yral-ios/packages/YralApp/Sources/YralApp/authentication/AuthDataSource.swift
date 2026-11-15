@@ -1,23 +1,5 @@
 import Foundation
 
-/// yral-auth HTTP data source — port of Kotlin `AuthDataSourceImpl`.
-///
-/// Endpoint table (all on `auth.yral.com` unless noted):
-///   - POST `oauth/token` (form-urlencoded): anonymous (client_credentials),
-///     authorization-code exchange, refresh-token grant.
-///   - POST `api/create_ai_account` (JSON)
-///   - POST `metadata.yral.com/v2/update_session_as_registered` (JSON, Bearer)
-///
-/// Account DELETION does not live here — it's the SpacetimeDB
-/// `delete_user_info` reducer via `SpacetimeDBRemoteDataSource`
-/// (the off-chain-agent's DELETE /api/v1/user is decommissioned;
-/// it was a stub that deleted nothing).
-///
-/// Kotlin-faithful details:
-///   - Form bodies are RAW string interpolation (`grant_type=x&client_id=y`)
-///     with NO URL-encoding — values are safe (UUIDs, base64url tokens).
-///   - `redirect_uri` is sent unencoded (`com.yral.iosApp://oauth/callback`).
-///   - `update_session_as_registered` is fire-and-forget (status NOT checked).
 public struct AuthDataSource: Sendable {
 
   /// Default URLSession — no custom client needed (Kotlin's 30s timeout
@@ -101,52 +83,6 @@ public struct AuthDataSource: Sendable {
     return try TokenResponse.fromJSONBody(String(data: data, encoding: .utf8) ?? "")
   }
 
-  // MARK: - AI account creation (AI identity)
-
-  /// Mints a delegated AI identity under the caller. No Bearer header —
-  /// the Kotlin client sends the user id in the body only.
-  public func createAiAccount(
-    userID: String,
-    idToken: String
-  ) async throws -> String {
-    var request = URLRequest(
-      url: URL(string: "https://\(AppConfiguration.oauthBaseURL)/api/create_ai_account")!)
-    request.httpMethod = "POST"
-    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-    request.setValue("Bearer \(idToken)", forHTTPHeaderField: "Authorization")
-    let bodyObject: [String: String] = ["user_id": userID]
-    request.httpBody = try JSONSerialization.data(withJSONObject: bodyObject)
-    let (data, response) = try await session.data(for: request)
-    guard let httpResponse = response as? HTTPURLResponse,
-      (200..<300).contains(httpResponse.statusCode)
-    else {
-      throw NetworkError.http(
-        statusCode: (response as? HTTPURLResponse)?.statusCode ?? 0,
-        body: String(data: data, encoding: .utf8)
-      )
-    }
-    return try JSONDecoder().decode(CreateAiAccountResponse.self, from: data).aiAccountId
-  }
-
-  // MARK: - Registration side effects
-
-  // Kotlin's updateYralSession fired POST /v2/update_session_as_registered
-  // here (fire-and-forget, status never checked). REMOVED: the server
-  // endpoint is a documented no-op that verifies the JWT and returns OK
-  // (see apps/yral-metadata server/src/session.rs — "will be deleted
-  // entirely once all consumers are migrated"). SpacetimeDB's
-  // accept_new_user_registration reducer is the real registration path.
-}
-
-// MARK: - DTOs
-
-/// `create_ai_account` response — `{"ai_account_id": "…"}`.
-/// File-scope (not nested in the data source) per the nesting lint rule.
-private struct CreateAiAccountResponse: Decodable {
-  let aiAccountId: String
-  private enum CodingKeys: String, CodingKey {
-    case aiAccountId = "ai_account_id"
-  }
 }
 
 /// `TokenResponseDto` — exact key names from the yral-auth token endpoint.

@@ -20,10 +20,8 @@ daemons = ["yral-auth"]
 run = "echo 'yral-auth daemon started (mise daemons logs yral-auth to follow)'"
 
 [yral-auth-test]
-description = "Run yral-auth tests with the authenticated local SpacetimeDB server"
+description = "Run yral-auth tests without an external database"
 dir = "apps/yral-auth"
-daemons = ["spacetimedb-dev"]
-env = { SPACETIMEDB_URL = "http://127.0.0.1:3000" }
 run = ["mise run secrets-check -- JWT_EC_PEM", "cargo test --features ssr --bins --lib -- --test-threads=1"]
 
 # ── Local image builds: runtime + builder sizing (all *-image tasks) ─────────
@@ -108,9 +106,3 @@ echo "=== Recent logs (last 20 lines, first pod) ==="
 FIRST_POD=$(kubectl -n yral-auth get pods -l app=yral-auth -o jsonpath='{.items[0].metadata.name}')
 kubectl -n yral-auth logs "$FIRST_POD" --tail=20
 '''
-
-[test-spacetime-jwt]
-description = "Run JWT-to-SpacetimeDB identity integration tests with the local authenticated server"
-dir = "apps/yral-auth"
-daemons = ["spacetimedb-dev"]
-run = ["mise run secrets-check -- JWT_EC_PEM", "cargo test -p yral-auth --features ssr spacetime::integration_tests -- --test-threads=1"]

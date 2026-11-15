@@ -1,18 +1,12 @@
 name: Yral iOS CI
 
 # * CI runs read-only checks; local yral-ios-checks formats before the same checks.
-# * CI needs mise + the Ansible vault password (the root repo's only GitHub secret).
-# * Bootstrap extracts the SSH identity; mise decrypts the Firebase plist from mise.toml.
+# * Simulator checks need no signing credentials or vault secrets.
 #
 # * pull_request → mise run yral-ios-ci-checks (lint + tests + sim build)
 #   push/merge to main    → same checks (deploys run locally — see the
 #                           commented-out deploy job below)
 #
-# Dependabot/Renovate PRs are SKIPPED: GitHub never delivers repo secrets
-# (ANSIBLE_VAULT_PASSWORD) to workflows triggered by those bots, so the
-# * The vault-to-age-identity chain cannot work there. The bumped action version
-# gets validated by the push-to-main run after the bot PR merges, which does
-# have secrets.
 on:
   pull_request:
     paths:
@@ -43,12 +37,6 @@ concurrency:
 jobs:
   checks:
     runs-on: macos-latest
-    # Dependabot/Renovate PR workflows receive NO repo secrets (GitHub policy —
-    # same as fork PRs), so the vault-dependent checks can never run there.
-    # Skip instead of failing (PR #249 failed exactly this way).
-    # user.type == 'Bot' covers dependabot[bot], renovate[bot], AND
-    # GitHub-App style logins (e.g. `app/renovate`) that lack the [bot] suffix.
-    if: github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.type != 'Bot')
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
@@ -62,16 +50,6 @@ jobs:
         uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: latest-stable
-
-      # ! Non-strict age loading permits setup before bootstrap provisions the identity.
-      - name: Bootstrap age decryption identity
-        env:
-          ANSIBLE_VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
-        run: |
-          echo "$ANSIBLE_VAULT_PASSWORD" > ansible/.vault_pass
-          chmod 600 ansible/.vault_pass
-          [ -s ansible/.vault_pass ] || { echo "ERROR: vault password empty"; exit 1; }
-          mise run bootstrap
 
       - name: Run checks (lint + package tests + simulator build)
         run: mise run yral-ios-ci-checks

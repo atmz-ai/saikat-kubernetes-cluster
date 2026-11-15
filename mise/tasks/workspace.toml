@@ -198,15 +198,14 @@ fi
 '''
 
 [dev-build]
-description = "Build all dev binaries (yral-auth + spacetime module)"
+description = "Build the authentication development binary"
 depends = ["runtime-config-check"]
 run = '''
 mise run yral-auth-build
-mise run spacetime-build
 '''
 
 [dev-start]
-description = "Start all dev servers (SpacetimeDB local + yral-auth)"
+description = "Start the authentication development server"
 depends = ["dev-build"]
 run = "mise daemons start dev"
 

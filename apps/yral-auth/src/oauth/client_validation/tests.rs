@@ -39,16 +39,6 @@ async fn retained_clients_keep_their_redirects_and_types() {
             "https://nofeebooking.com/auth/callback",
             OAuthClientType::Web,
         ),
-        (
-            "7a2f3b8c-1d4e-4f5a-9b6c-7d8e9f0a1b2c",
-            "https://auth.yral.com/account/callback",
-            OAuthClientType::Web,
-        ),
-        (
-            "7a2f3b8c-1d4e-4f5a-9b6c-7d8e9f0a1b2c",
-            "http://localhost:3000/account/callback",
-            OAuthClientType::Web,
-        ),
     ] {
         let client = validator.lookup_client(client_identifier).await.unwrap();
         assert_eq!(client.client_type, client_type);
@@ -72,6 +62,7 @@ async fn retired_frontend_clients_are_unauthorized() {
         "4ec00561-91bb-4e60-9743-8bed684145ba",
         "5c86a459-493d-463e-965d-be6ed74f3e5f",
         "f3a7872f-55f9-4ca7-8fec-9a5d20356248",
+        "7a2f3b8c-1d4e-4f5a-9b6c-7d8e9f0a1b2c",
     ] {
         assert!(
             matches!(validator.lookup_client(client_identifier).await, Err(crate::error::AuthErrorKind::UnauthorizedClient(rejected_identifier)) if rejected_identifier == client_identifier)
@@ -80,6 +71,8 @@ async fn retired_frontend_clients_are_unauthorized() {
     for redirect_url in [
         "https://legacy.yral.com/auth/google_redirect",
         "http://127.0.0.1:8080/auth/google_redirect",
+        "https://auth.yral.com/account/callback",
+        "http://localhost:3000/account/callback",
     ] {
         assert!(validator
             .validate_id_and_redirect(

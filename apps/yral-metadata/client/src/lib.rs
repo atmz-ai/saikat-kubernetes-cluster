@@ -2,349 +2,94 @@ pub mod consts;
 mod error;
 
 pub use error::*;
+pub use types::SessionClaims;
 
 use consts::DEFAULT_API_URL;
-
-use ic_agent::{export::Principal, Identity};
-use reqwest::{
-    header::{HeaderMap, HeaderValue, AUTHORIZATION},
-    Url,
-};
-use std::collections::HashMap;
-use types::identity::sign_message;
-use types::{
-    ApiResult, BulkGetUserMetadataReq, BulkGetUserMetadataRes, BulkUsers, GetUserMetadataRes,
-    GetUserMetadataV2Res, RegisterDeviceReq, RegisterDeviceRes, SetUserEmailMetadataReq,
-    SetUserEmailReq, SetUserMetadataReq, SetUserMetadataReqMetadata, SetUserMetadataRes,
-    SetUserSignedInMetadataReq, UnregisterDeviceReq, UnregisterDeviceRes, UserMetadata,
-    UserMetadataV2,
-};
-
-pub use types::{DeviceRegistrationToken, NotificationKey};
+use reqwest::Url;
+use types::ApiResult;
 
 #[derive(Clone, Debug)]
 pub struct MetadataClient<const AUTH: bool> {
     base_url: Url,
     client: reqwest::Client,
-    jwt_token: Option<String>,
+    authentication_token: Option<String>,
 }
 
 impl Default for MetadataClient<false> {
     fn default() -> Self {
-        Self {
-            base_url: Url::parse(DEFAULT_API_URL).unwrap(),
-            client: Default::default(),
-            jwt_token: None,
-        }
+        Self::with_base_url(Url::parse(DEFAULT_API_URL).unwrap())
     }
 }
 
-impl<const A: bool> MetadataClient<A> {
+impl<const AUTH: bool> MetadataClient<AUTH> {
     pub fn with_base_url(base_url: Url) -> Self {
         Self {
             base_url,
             client: Default::default(),
-            jwt_token: None,
+            authentication_token: None,
         }
     }
 
-    pub async fn set_user_metadata(
-        &self,
-        identity: &impl Identity,
-        metadata: SetUserMetadataReqMetadata,
-    ) -> Result<SetUserMetadataRes> {
-        let signature = sign_message(
-            identity,
-            metadata
-                .clone()
-                .try_into()
-                .map_err(|_| Error::Api(types::error::ApiError::MetadataNotFound))?,
-        )?;
-        let sender = identity
-            .sender()
-            .map_err(|e| Error::Api(types::error::ApiError::Unknown(e.to_string())))?;
-        let api_url = self
-            .base_url
-            .join("metadata/")
-            .map_err(|e| Error::Api(types::error::ApiError::Unknown(e.to_string())))?
-            .join(&sender.to_text())
-            .map_err(|e| Error::Api(types::error::ApiError::Unknown(e.to_string())))?;
-
-        let res = self
+    pub async fn healthz(&self) -> Result<()> {
+        let mut response = self
             .client
-            .post(api_url)
-            .json(&SetUserMetadataReq {
-                metadata,
-                signature,
-            })
+            .get(self.base_url.join("healthz")?)
             .send()
             .await?;
-
-        let res: ApiResult<SetUserMetadataRes> = res.json().await?;
-        Ok(res?)
-    }
-
-    pub async fn admin_set_user_metadata(
-        &self,
-        identity: &impl Identity,
-        user_principal: Principal,
-        metadata: SetUserMetadataReqMetadata,
-    ) -> Result<SetUserMetadataRes> {
-        let signature = sign_message(
-            identity,
-            metadata
-                .clone()
-                .try_into()
-                .map_err(|_| Error::Api(types::error::ApiError::MetadataNotFound))?,
-        )?;
-        let api_url = self
-            .base_url
-            .join("admin/metadata/")
-            .map_err(|e| Error::Api(types::error::ApiError::Unknown(e.to_string())))?
-            .join(&user_principal.to_text())
-            .map_err(|e| Error::Api(types::error::ApiError::Unknown(e.to_string())))?;
-
-        let res = self
-            .client
-            .post(api_url)
-            .json(&SetUserMetadataReq {
-                metadata,
-                signature,
-            })
-            .send()
-            .await?;
-
-        let res: ApiResult<SetUserMetadataRes> = res.json().await?;
-        Ok(res?)
-    }
-
-    async fn get_user_metadata_inner(
-        &self,
-        username_or_principal: String,
-    ) -> Result<GetUserMetadataV2Res> {
-        let api_url = self
-            .base_url
-            .join("metadata/")
-            .map_err(|e| Error::Api(types::error::ApiError::Unknown(e.to_string())))?
-            .join(&username_or_principal)
-            .map_err(|e| Error::Api(types::error::ApiError::Unknown(e.to_string())))?;
-
-        let res = self.client.get(api_url).send().await?;
-
-        let res: ApiResult<GetUserMetadataV2Res> = res.json().await?;
-        Ok(res?)
-    }
-
-    #[deprecated(note = "Use `get_user_metadata_v2` instead")]
-    pub async fn get_user_metadata(
-        &self,
-        user_principal: Principal,
-    ) -> Result<GetUserMetadataV2Res> {
-        self.get_user_metadata_inner(user_principal.to_text()).await
-    }
-
-    pub async fn get_user_metadata_v2(
-        &self,
-        username_or_principal: String,
-    ) -> Result<GetUserMetadataV2Res> {
-        self.get_user_metadata_inner(username_or_principal).await
-    }
-
-    pub async fn get_user_metadata_bulk(
-        &self,
-        user_principals: Vec<Principal>,
-    ) -> Result<HashMap<Principal, GetUserMetadataRes>> {
-        let api_url = self
-            .base_url
-            .join("metadata-bulk")
-            .map_err(|e| Error::Api(types::error::ApiError::Unknown(e.to_string())))?;
-
-        let res = self
-            .client
-            .post(api_url)
-            .json(&BulkGetUserMetadataReq {
-                users: user_principals,
-            })
-            .send()
-            .await?;
-
-        let res: ApiResult<BulkGetUserMetadataRes> = res.json().await?;
-        Ok(res?)
-    }
-
-    pub async fn set_signup_datetime(
-        &self,
-        user_principal: Principal,
-        already_signed_in: bool,
-    ) -> Result<UserMetadataV2> {
-        let api_url = self
-            .base_url
-            .join("signup/")
-            .map_err(|e| Error::Api(types::error::ApiError::Unknown(e.to_string())))?
-            .join(&user_principal.to_text())
-            .map_err(|e| Error::Api(types::error::ApiError::Unknown(e.to_string())))?;
-
-        let res = self
-            .client
-            .post(api_url)
-            .json(&SetUserSignedInMetadataReq { already_signed_in })
-            .send()
-            .await?;
-
-        let res: ApiResult<UserMetadata> = res.json().await?;
-
-        Ok(UserMetadataV2::from_metadata(user_principal, res?))
-    }
-
-    pub async fn set_user_email(
-        &self,
-        identity: &impl Identity,
-        email: String,
-        already_signed_in: bool,
-    ) -> Result<UserMetadataV2> {
-        let payload = SetUserEmailReq {
-            email,
-            already_signed_in,
-        };
-        let signature = sign_message(
-            identity,
-            payload
-                .clone()
-                .try_into()
-                .map_err(|_| Error::Api(types::error::ApiError::MetadataNotFound))?,
-        )?;
-        let sender = identity
-            .sender()
-            .map_err(|e| Error::Api(types::error::ApiError::Unknown(e.to_string())))?;
-        let api_url = self
-            .base_url
-            .join("email/")
-            .map_err(|e| Error::Api(types::error::ApiError::Unknown(e.to_string())))?
-            .join(&sender.to_text())
-            .map_err(|e| Error::Api(types::error::ApiError::Unknown(e.to_string())))?;
-
-        let res = self
-            .client
-            .post(api_url)
-            .json(&SetUserEmailMetadataReq { payload, signature })
-            .send()
-            .await?;
-
-        let res: ApiResult<UserMetadata> = res.json().await?;
-
-        Ok(UserMetadataV2::from_metadata(sender, res?))
-    }
-
-    pub async fn register_device(
-        &self,
-        identity: &impl Identity,
-        registration_token: DeviceRegistrationToken,
-    ) -> Result<RegisterDeviceRes> {
-        let signature = sign_message(
-            identity,
-            registration_token
-                .clone()
-                .try_into()
-                .map_err(|_| Error::Api(types::error::ApiError::AuthTokenMissing))?,
-        )?;
-        let sender = identity
-            .sender()
-            .map_err(|e| Error::Api(types::error::ApiError::Unknown(e.to_string())))?;
-
-        let api_url = self
-            .base_url
-            .join("notifications/")
-            .map_err(|e| Error::Api(types::error::ApiError::Unknown(e.to_string())))?
-            .join(&sender.to_text())
-            .map_err(|e| Error::Api(types::error::ApiError::Unknown(e.to_string())))?;
-
-        let res = self
-            .client
-            .post(api_url)
-            .json(&RegisterDeviceReq {
-                registration_token,
-                signature,
-            })
-            .send()
-            .await?;
-
-        let res: ApiResult<RegisterDeviceRes> = res.json().await?;
-        Ok(res?)
-    }
-
-    pub async fn unregister_device(
-        &self,
-        identity: &impl Identity,
-        registration_token: DeviceRegistrationToken,
-    ) -> Result<UnregisterDeviceRes> {
-        let signature = sign_message(
-            identity,
-            registration_token
-                .clone()
-                .try_into()
-                .map_err(|_| Error::Api(types::error::ApiError::AuthTokenMissing))?,
-        )?;
-        let sender = identity
-            .sender()
-            .map_err(|_| Error::Identity(::types::identity::Error::SenderNotFound))?;
-        let api_url = self
-            .base_url
-            .join("notifications/")
-            .map_err(|e| Error::Api(types::error::ApiError::Unknown(e.to_string())))?
-            .join(&sender.to_text())
-            .map_err(|e| Error::Api(types::error::ApiError::Unknown(e.to_string())))?;
-
-        let res = self
-            .client
-            .delete(api_url)
-            .json(&UnregisterDeviceReq {
-                registration_token,
-                signature,
-            })
-            .send()
-            .await?;
-
-        let res: ApiResult<UnregisterDeviceRes> = res.json().await?;
-        Ok(res?)
+        let status = response.status();
+        if !status.is_success() {
+            let mut body = Vec::new();
+            while let Some(chunk) = response.chunk().await? {
+                let remaining = (1024 * 1024_usize).saturating_sub(body.len());
+                body.extend_from_slice(&chunk[..chunk.len().min(remaining)]);
+                if body.len() == 1024 * 1024 {
+                    break;
+                }
+            }
+            return Err(Error::HttpResponse {
+                status: status.as_u16(),
+                body: String::from_utf8_lossy(&body).into_owned(),
+            });
+        }
+        Ok(())
     }
 }
 
 impl MetadataClient<true> {
-    pub fn with_jwt_token(self, jwt_token: String) -> Self {
+    pub fn with_jwt_token(self, authentication_token: String) -> Self {
         Self {
-            jwt_token: Some(jwt_token),
+            authentication_token: Some(authentication_token),
             ..self
         }
     }
 
-    pub async fn delete_metadata_bulk(&self, users: Vec<Principal>) -> Result<()> {
-        let api_url = self
-            .base_url
-            .join("metadata/bulk")
-            .map_err(|e| Error::Api(types::error::ApiError::Unknown(e.to_string())))?;
-
-        let jwt_token = self
-            .jwt_token
+    pub async fn get_session(&self) -> Result<SessionClaims> {
+        let authentication_token = self
+            .authentication_token
             .as_ref()
-            .ok_or(Error::Api(types::error::ApiError::Jwt))?;
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            AUTHORIZATION,
-            HeaderValue::from_str(jwt_token)
-                .map_err(|_| Error::Api(types::error::ApiError::Jwt))?,
-        );
-
-        let body = BulkUsers { users };
-
-        let res = self
+            .ok_or(Error::Api(types::error::ApiError::AuthTokenMissing))?;
+        let mut response = self
             .client
-            .delete(api_url)
-            .json(&body)
-            .headers(headers)
+            .get(self.base_url.join("session")?)
+            .bearer_auth(authentication_token)
             .send()
             .await?;
-
-        let res: ApiResult<()> = res.json().await?;
-        Ok(res?)
+        let status = response.status();
+        let mut body = Vec::new();
+        while let Some(chunk) = response.chunk().await? {
+            let remaining = (1024 * 1024_usize).saturating_sub(body.len());
+            body.extend_from_slice(&chunk[..chunk.len().min(remaining)]);
+            if body.len() == 1024 * 1024 {
+                break;
+            }
+        }
+        if !status.is_success() {
+            return Err(Error::HttpResponse {
+                status: status.as_u16(),
+                body: String::from_utf8_lossy(&body).into_owned(),
+            });
+        }
+        let result: ApiResult<SessionClaims> = serde_json::from_slice(&body)?;
+        Ok(result?)
     }
 }

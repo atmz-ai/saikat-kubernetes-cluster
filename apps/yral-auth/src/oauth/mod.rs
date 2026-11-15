@@ -2,6 +2,8 @@
 pub mod jwk_cache;
 #[cfg(feature = "ssr")]
 pub mod jwt;
+#[cfg(feature = "ssr")]
+pub mod pending_grants;
 
 use crate::{consts::ACCESS_TOKEN_MAX_AGE, error::AuthErrorKind};
 use base64::{prelude::BASE64_URL_SAFE_NO_PAD, Engine};

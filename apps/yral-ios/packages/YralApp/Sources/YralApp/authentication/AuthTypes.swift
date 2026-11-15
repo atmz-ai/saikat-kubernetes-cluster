@@ -20,8 +20,7 @@ public enum SocialProvider: String, Sendable {
 
 /// Token-expiry logout causes — Kotlin `AuthSessionCause`. Carried as the
 /// payload of `AuthMachine.State.signedOut`, so the reason a session ended
-/// travels with the state rather than in a parallel field (the analytics
-/// event lands with the analytics phase; tests assert on the cause).
+/// travels with the state rather than in a parallel field.
 public enum AuthExpiryCause: String, Sendable {
   case refreshTokenMissing = "REFRESH_TOKEN_MISSING"
   case refreshTokenExpiredOrInvalid = "REFRESH_TOKEN_EXPIRED_OR_INVALID"
