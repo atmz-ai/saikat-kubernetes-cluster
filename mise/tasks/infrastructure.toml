@@ -1,3 +1,70 @@
+[tekton-triggers-configuration-checks]
+description = "Validate Tekton release alignment and independently reconcilable startup configuration"
+run = '''
+#!/usr/bin/env -S ./.venv/bin/python -u
+import copy
+import subprocess
+import urllib.request
+from pathlib import Path
+
+import yaml
+
+resources = []
+for directory in ("tekton-triggers", "tekton-triggers/config"):
+    result = subprocess.run(
+        ["kubectl", "kustomize", "kubernetes/infrastructure/" + directory],
+        capture_output=True, text=True,
+    )
+    if result.stderr:
+        print(result.stderr)
+    result.check_returncode()
+    rendered = [resource for resource in yaml.safe_load_all(result.stdout) if resource]
+    if directory.endswith("/config"):
+        assert all(resource["kind"] == "ConfigMap" for resource in rendered)
+    resources.extend(rendered)
+    print("PASS: rendered", directory)
+
+lookup = {(resource["kind"], resource["metadata"]["name"]): resource for resource in resources}
+assert len(lookup) == len(resources), "duplicate configuration ownership"
+version = lookup[("ConfigMap", "triggers-info")]["data"]["version"]
+for name in ("release.yaml", "interceptors.yaml"):
+    address = "https://infra.tekton.dev/tekton-releases/triggers/previous/" + version + "/" + name
+    with urllib.request.urlopen(address, timeout=30) as response:
+        official = [resource for resource in yaml.safe_load_all(response.read()) if resource]
+    for resource in official:
+        identity = (resource["kind"], resource["metadata"]["name"])
+        assert lookup[identity] == resource, "release drift: " + str(identity)
+        print("PASS: official", version, *identity)
+
+for scenario in ("complete", "missing-startup-config", "old-eventlistener-image"):
+    candidate = copy.deepcopy(lookup)
+    if scenario == "missing-startup-config":
+        del candidate[("ConfigMap", "config-triggers-core-interceptors")]
+    controller = candidate[("Deployment", "tekton-triggers-controller")]["spec"]["template"]["spec"]["containers"][0]
+    if scenario == "old-eventlistener-image":
+        controller["args"][controller["args"].index("-el-image") + 1] = "ghcr.io/tektoncd/triggers/eventlistenersink-7ad1faa98cddbcb0c24990303b220bb8:v0.36.0"
+    try:
+        assert ("ConfigMap", "config-triggers-core-interceptors") in candidate
+        listener_image = controller["args"][controller["args"].index("-el-image") + 1]
+        assert listener_image.split(":")[-2] == version + "@sha256"
+    except AssertionError:
+        assert scenario != "complete", "valid configuration rejected"
+        print("PASS: rejected regression", scenario)
+    else:
+        assert scenario == "complete", "broken configuration accepted: " + scenario
+        print("PASS: complete startup configuration and matching EventListener image")
+
+cluster = Path("kubernetes/clusters/yral-k8s")
+entrypoint = yaml.safe_load((cluster / "kustomization.yaml").read_text())
+assert "infrastructure-tekton-triggers-config.yaml" in entrypoint["resources"]
+configuration = yaml.safe_load((cluster / "infrastructure-tekton-triggers-config.yaml").read_text())
+triggers = yaml.safe_load((cluster / "infrastructure-tekton-triggers.yaml").read_text())
+assert configuration["spec"]["path"] == "./kubernetes/infrastructure/tekton-triggers/config"
+assert {"name": configuration["metadata"]["name"]} in triggers["spec"]["dependsOn"]
+assert {"name": "infrastructure-tekton-triggers"} not in configuration["spec"]["dependsOn"]
+print("PASS: startup configuration reconciles before, and independently of, admission resources")
+'''
+
 [event-archive-configuration-checks]
 description = "Validate the new-events-only archive destination, runtime credentials, and bucket provisioning"
 run = '''
