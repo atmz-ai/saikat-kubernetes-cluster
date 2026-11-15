@@ -6,13 +6,6 @@
 ansible/.ansible/
 ansible/.vault_pass
 ansible/collections/
-apps/yral-ios/.build/
-apps/yral-ios/build/
-apps/yral-ios/DerivedData/
-apps/yral-ios/iosApp.xcodeproj/project.xcworkspace/xcuserdata/
-apps/yral-ios/iosApp.xcodeproj/xcuserdata/
-apps/yral-ios/packages/YralApp/.build/
-apps/yral-ios/private_keys/
 target/
 tailwind.config.js
 video-generation/

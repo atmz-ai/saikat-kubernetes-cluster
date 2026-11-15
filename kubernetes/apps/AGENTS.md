@@ -5,8 +5,8 @@ Each application owns a directory here containing its Namespace, workload, Servi
 ## Onboarding
 
 1. Create the application's `kustomization.yaml` and its required manifests in `kubernetes/apps/<application>/`.
-2. Declare a dedicated Flux Kustomization in `kubernetes/clusters/yral-k8s/app-<application>.yaml`, pointing to the application directory and declaring its dependencies and decryption requirements.
-3. Include that Flux CR in `kubernetes/clusters/yral-k8s/kustomization.yaml`. There is no shared `kubernetes/apps/kustomization.yaml` entry point.
+2. Declare a dedicated Flux Kustomization in `kubernetes/clusters/saikat-kubernetes-cluster/app-<application>.yaml`, pointing to the application directory and declaring its dependencies and decryption requirements.
+3. Include that Flux CR in `kubernetes/clusters/saikat-kubernetes-cluster/kustomization.yaml`. There is no shared `kubernetes/apps/kustomization.yaml` entry point.
 4. Add routes to `kubernetes/networking/routes/` and ReferenceGrants to each cross-namespace backend's target namespace. Register them in their owning resource lists.
 5. Configure image pull credentials and, for custom-built applications, the existing Shipwright/Tekton/Harbor/Flux image-automation workflow described in the root `AGENTS.md`.
 6. Validate local builds, tests, runtime, images, and affected manifests before pushing; then verify reconciliation and application health in production.

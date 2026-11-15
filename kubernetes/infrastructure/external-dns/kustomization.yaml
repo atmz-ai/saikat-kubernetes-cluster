@@ -21,7 +21,7 @@ kind: Kustomization
 #   - TSIG key (RFC2136 dynamic updates — shared with cert-manager + ExternalDNS)
 #
 # Flux applies this automatically on git push (see infrastructure-external-dns.yaml
-# in kubernetes/clusters/yral-k8s/). No manual apply needed.
+# in kubernetes/clusters/saikat-kubernetes-cluster/). No manual apply needed.
 resources:
   - namespace.yaml
   - https://raw.githubusercontent.com/kubernetes-sigs/external-dns/v0.24.0/config/crd/standard/dnsendpoints.externaldns.k8s.io.yaml

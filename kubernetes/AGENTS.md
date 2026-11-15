@@ -4,12 +4,17 @@ This tree owns Kubernetes workload, networking, operator, and GitOps declaration
 
 ## Sources of Truth
 
-- [clusters/yral-k8s/kustomization.yaml](clusters/yral-k8s/kustomization.yaml) is the cluster reconciliation entry point. Bootstrap targets this directory, not the whole `kubernetes/` tree.
+- [clusters/saikat-kubernetes-cluster/kustomization.yaml](clusters/saikat-kubernetes-cluster/kustomization.yaml) is the cluster reconciliation entry point. Bootstrap targets this directory, not the whole `kubernetes/` tree.
 - `infrastructure/` owns shared operators and infrastructure services.
 - `apps/` owns application deployment declarations, separate from application source in the root `apps/` tree.
 - [networking/gateway.yaml](networking/gateway.yaml) owns the shared Gateway and its listeners; `networking/routes/` owns service routes.
 
 Ordering is declared through the individual Flux Kustomizations' `dependsOn` fields. Do not substitute manual apply sequences or forced reconciliation for those dependencies.
+
+When moving the reconciliation entry point, retain a forwarding Kustomize
+directory at the old path until the root Flux CR has reconciled its new
+`spec.path`. Removing the only readable source path prevents Flux from applying
+the declaration that would repair it.
 
 ## Upstream Release Bundles
 
@@ -33,6 +38,11 @@ for CI unless branch protection actually requires those checks. Validate compone
 merged by Renovate as well as manually merged updates before continuing.
 
 ## Networking and TLS
+
+Cilium cluster names must satisfy the [official Helm reference](https://docs.cilium.io/en/stable/helm-reference/):
+at most 32 lowercase alphanumeric/dash characters, starting and ending with an
+alphanumeric character. Preserve `cluster.id` during a name-only migration and
+verify the serial agent rollout and Hubble relay before retiring old endpoints.
 
 External traffic reaches the shared Cilium Gateway through inventory-generated DNS and the declared exposure model. Node addresses, regional placement, and component versions are maintained in inventory and manifests, not copied into documentation tables.
 

@@ -7,9 +7,6 @@ Application code lives in `apps/<application>/`. Its cluster deployment declarat
 | Application | Deployment |
 | --- | --- |
 | `my-website` | `saikat.dev` |
-| `yral-auth` | `auth.yral.com` |
-| `yral-metadata` | `metadata.yral.com` |
-| `yral-ios` | App Store and TestFlight, bundle `com.yral.iosApp` |
 
 Rust applications maintained in this repository belong in the root Cargo workspace. Do not add them to its exclusion list. Tools, tasks, local configuration, secrets, and daemons remain centralized at the repository root; follow the root onboarding conventions rather than adding per-application tooling configuration.
 
@@ -18,9 +15,5 @@ Rust applications maintained in this repository belong in the root Cargo workspa
 Rishi independently maintains the Ole-Ole-AI repositories. Do not include his
 code as a submodule or consume his APIs. New application APIs belong in this
 repository; do not replace retired integrations with another Rishi endpoint.
-
-## Retired Legacy Frontend
-
-The legacy Leptos frontend and its dedicated build, routing, and deployment resources were removed. Shared authentication and external object-storage data were retained.
 
 Deployment retirement guidance belongs to `kubernetes/AGENTS.md`; historical one-time recovery and validation waivers do not establish new application-wide rules.

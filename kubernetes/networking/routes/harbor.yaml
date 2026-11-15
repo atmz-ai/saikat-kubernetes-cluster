@@ -10,6 +10,7 @@ spec:
       namespace: kube-system
       sectionName: http
   hostnames:
+    - harbor.saikat.dev
     - harbor.yral.com
   rules:
     - filters:
@@ -28,7 +29,11 @@ spec:
     - name: web-gateway
       namespace: kube-system
       sectionName: https
+    - name: web-gateway
+      namespace: kube-system
+      sectionName: https-saikat-dev
   hostnames:
+    - harbor.saikat.dev
     - harbor.yral.com
   rules:
     - matches:

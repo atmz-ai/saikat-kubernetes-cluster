@@ -27,11 +27,11 @@ spec:
       rollingUpdate:
         maxUnavailable: 1
     cluster:
-      name: yral-k8s-cluster
+      name: saikat-kubernetes-cluster
       id: 1
 
     kubeProxyReplacement: true
-    k8sServiceHost: kubernetes-api.yral.com
+    k8sServiceHost: kubernetes-api.oleole.ai
     k8sServicePort: 6443
 
     ipam:

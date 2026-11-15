@@ -1,9 +1,3 @@
-# my-website build webhook HTTPRoute.
-#
-# Exposes the Tekton EventListener for my-website at
-# https://my-website-build.yral.com/ — GitHub sends push events here
-# to trigger Shipwright BuildRuns.
-#
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -16,6 +10,7 @@ spec:
       namespace: kube-system
       sectionName: http
   hostnames:
+    - my-website-build.saikat.dev
     - my-website-build.yral.com
   rules:
     - filters:
@@ -34,7 +29,11 @@ spec:
     - name: web-gateway
       namespace: kube-system
       sectionName: https
+    - name: web-gateway
+      namespace: kube-system
+      sectionName: https-saikat-dev
   hostnames:
+    - my-website-build.saikat.dev
     - my-website-build.yral.com
   rules:
     - matches:

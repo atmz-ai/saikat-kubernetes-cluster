@@ -1,16 +1,10 @@
 ---
-# ServiceAccount for the Tekton EventListener.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: tekton-trigger-sa
   namespace: my-website
 ---
-# Role — permissions to create BuildRuns in the my-website namespace.
-# Reuses the ClusterRole from yral-auth (tekton-trigger-clusterrole) — only
-# create a RoleBinding here, not a new ClusterRole.
-# Per AGENTS.md: "Define the ClusterRole once (in the first app's tekton-trigger.yaml).
-# Other apps only create a ClusterRoleBinding referencing the existing ClusterRole."
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -38,7 +32,15 @@ roleRef:
   kind: Role
   name: tekton-trigger-role
 ---
-# ClusterRoleBinding — references the ClusterRole defined in yral-auth's tekton-trigger.yaml.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: tekton-trigger-clusterrole
+rules:
+  - apiGroups: ["triggers.tekton.dev"]
+    resources: ["clusterinterceptors", "clustertriggerbindings"]
+    verbs: ["get", "list", "watch"]
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
@@ -52,7 +54,6 @@ roleRef:
   kind: ClusterRole
   name: tekton-trigger-clusterrole
 ---
-# TriggerBinding extracts fields from the GitHub push event payload.
 apiVersion: triggers.tekton.dev/v1beta1
 kind: TriggerBinding
 metadata:
@@ -69,7 +70,6 @@ spec:
     - name: image-tag
       value: $(extensions.image_tag)
 ---
-# TriggerTemplate creates a BuildRun with a timestamp-prefixed image tag.
 apiVersion: triggers.tekton.dev/v1beta1
 kind: TriggerTemplate
 metadata:
@@ -100,9 +100,6 @@ spec:
         output:
           image: harbor.yral.com/my-website/my-website:$(tt.params.image-tag)
 ---
-# EventListener receives GitHub push events and creates BuildRuns.
-# CEL interceptor filters: only main branch, exclude fluxcdbot commits,
-# only trigger when files under apps/my-website/ or kubernetes/apps/my-website/ changed.
 apiVersion: triggers.tekton.dev/v1beta1
 kind: EventListener
 metadata:

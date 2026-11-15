@@ -1,93 +1,28 @@
 [workspace]
 resolver = "3"
-members = [
-  "apps/my-website",
-  "apps/yral-auth",
-  "apps/yral-auth/client",
-  "apps/yral-metadata/client",
-  "apps/yral-metadata/server",
-  "apps/yral-metadata/types",
-]
-
-[[workspace.metadata.leptos]]
-name = "yral-auth"
-bin-package = "yral-auth"
-lib-package = "yral-auth-client"
-bin-target = "yral-auth"
-output-name = "yral-auth"
-site-root = "target/site"
-site-pkg-dir = "pkg"
-tailwind-input-file = "apps/yral-auth/style/tailwind.css"
-assets-dir = "apps/yral-auth/public"
-site-addr = "127.0.0.1:3000"
-reload-port = 3001
-browserquery = "defaults"
-bin-features = ["release-bin"]
-lib-features = ["release-lib"]
-lib-profile-release = "wasm-release"
-hash-files = false
+members = ["apps/my-website"]
 
 [workspace.dependencies]
 anyhow = "1.0.103"
-async-channel = "2.5.0"
 axum = "0.8.7"
-axum-extra = "0.12.5"
-base64 = "0.23.1"
-candid = "0.10.39"
 chrono = "0.4"
-chrono-tz = "0.10"
 comrak = "0.59.0"
-config = "0.15.25"
 console_error_panic_hook = "0.1.7"
 console_log = "1.1.0"
-crc32fast = "1.5.1"
-enum_dispatch = "0.3"
-futures = "0.3.30"
 getrandom = "0.4.3"
-hex = "0.4.3"
-hmac = "0.13.0"
-http-body-util = "0.1.2"
-ic-agent = "0.49.0"
-jsonwebtoken = "11.0.0"
-k256 = "0.14.0"
 leptos = "0.8.20"
 leptos_axum = "0.8.7"
 leptos_meta = "0.8.7"
 leptos_router = "0.8.11"
 log = "0.4.34"
 noyalib = "0.0.58"
-num-traits = "0.2.19"
-openidconnect = "4.0.0"
-p256 = "0.14.0"
-postcard = "1.1.1"
-regex = "1.11.1"
-reqwest = "0.13.5"
-rustls = "0.23.26"
 serde = "1.0.229"
-serde_bytes = "0.11.15"
 serde_json = "1.0.145"
-sha1 = "0.11.0"
-sha2 = "0.11.1"
-strum = "0.28.0"
-strum_macros = "0.28.0"
-thiserror = "2.0.21"
-time = "0.3.36"
 tokio = "1.53.1"
-tower = "0.5"
-tower-http = "0.7.1"
 tracing = "0.1"
 tracing-subscriber = "0.3"
-url = "2.5.4"
-utoipa = "6.0.0"
-utoipa-axum = "0.3.0"
-utoipa-swagger-ui = "10.0.2"
-uuid = "1.26.0"
 wasm-bindgen = "0.2.130"
-web-time = "1.0.0"
-yral-auth = { path = "apps/yral-auth" }
 
-# Size-optimized profile for WASM client bundles (used by all Leptos apps).
-# Must live at workspace root — Cargo ignores profiles defined in member crates.
 [profile.wasm-release]
 inherits = "release"
 opt-level = "z"

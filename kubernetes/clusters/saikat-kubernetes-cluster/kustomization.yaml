@@ -1,0 +1,37 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - flux-system/
+  - app-dashboard.yaml
+  - app-my-website.yaml
+  - infrastructure-alloy.yaml
+  - infrastructure-beszel.yaml
+  - infrastructure-cert-manager-issuers.yaml
+  - infrastructure-cert-manager.yaml
+  - infrastructure-cilium.yaml
+  - infrastructure-cloudnative-pg.yaml
+  - infrastructure-containerized-data-importer-operator.yaml
+  - infrastructure-containerized-data-importer.yaml
+  - infrastructure-coredns.yaml
+  - infrastructure-external-dns.yaml
+  - infrastructure-flux-receiver.yaml
+  - infrastructure-gateway-api-crds.yaml
+  - infrastructure-harbor.yaml
+  - infrastructure-headlamp.yaml
+  - infrastructure-kubevirt-operator.yaml
+  - infrastructure-kubevirt.yaml
+  - infrastructure-longhorn-backup.yaml
+  - infrastructure-longhorn.yaml
+  - infrastructure-loki.yaml
+  - infrastructure-metrics-server.yaml
+  - infrastructure-monitoring.yaml
+  - infrastructure-oauth2-proxy.yaml
+  - infrastructure-reloader.yaml
+  - infrastructure-rustfs.yaml
+  - infrastructure-shipwright.yaml
+  - infrastructure-stirling-pdf.yaml
+  - infrastructure-tekton-pipelines.yaml
+  - infrastructure-tekton-triggers-config.yaml
+  - infrastructure-tekton-triggers.yaml
+  - infrastructure-uptime-kuma.yaml
+  - networking.yaml

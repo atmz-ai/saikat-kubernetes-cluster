@@ -23,9 +23,3 @@ updates:
       - "/"
     schedule:
       interval: "weekly"
-
-  - package-ecosystem: "swift"
-    directories:
-      - "/apps/yral-ios/packages/YralApp/"
-    schedule:
-      interval: "weekly"

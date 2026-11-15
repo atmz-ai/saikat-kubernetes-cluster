@@ -106,7 +106,7 @@ for path in sorted(Path("kubernetes").rglob("*.yaml")):
         jsonschema.Draft7Validator(schemas[identity]).validate(resource)
         print("PASS: upstream CRD contract", path, *identity)
 
-result = subprocess.run(["kubectl", "kustomize", "kubernetes/clusters/yral-k8s"], capture_output=True, text=True)
+result = subprocess.run(["kubectl", "kustomize", "kubernetes/clusters/saikat-kubernetes-cluster"], capture_output=True, text=True)
 if result.stderr:
     print(result.stderr)
 result.check_returncode()
@@ -171,7 +171,7 @@ for scenario in ("complete", "missing-startup-config", "old-eventlistener-image"
         assert scenario == "complete", "broken configuration accepted: " + scenario
         print("PASS: complete startup configuration and matching EventListener image")
 
-cluster = Path("kubernetes/clusters/yral-k8s")
+cluster = Path("kubernetes/clusters/saikat-kubernetes-cluster")
 entrypoint = yaml.safe_load((cluster / "kustomization.yaml").read_text())
 assert "infrastructure-tekton-triggers-config.yaml" in entrypoint["resources"]
 configuration = yaml.safe_load((cluster / "infrastructure-tekton-triggers-config.yaml").read_text())
@@ -180,6 +180,26 @@ assert configuration["spec"]["path"] == "./kubernetes/infrastructure/tekton-trig
 assert {"name": configuration["metadata"]["name"]} in triggers["spec"]["dependsOn"]
 assert {"name": "infrastructure-tekton-triggers"} not in configuration["spec"]["dependsOn"]
 print("PASS: startup configuration reconciles before, and independently of, admission resources")
+
+result = subprocess.run(["kubectl", "kustomize", "kubernetes/apps/my-website"], capture_output=True, text=True)
+if result.stderr:
+    print(result.stderr)
+result.check_returncode()
+website_resources = [resource for resource in yaml.safe_load_all(result.stdout) if resource]
+for scenario in ("complete", "missing-trigger-clusterrole"):
+    candidate = [resource for resource in website_resources if scenario == "complete" or resource["kind"] != "ClusterRole"]
+    roles = {resource["metadata"]["name"] for resource in candidate if resource["kind"] == "ClusterRole"}
+    bindings = [resource for resource in candidate if resource["kind"] == "ClusterRoleBinding"]
+    assert bindings, "website trigger bindings must be validated"
+    try:
+        for binding in bindings:
+            assert binding["roleRef"]["name"] in roles, "undefined trigger ClusterRole: " + binding["roleRef"]["name"]
+    except AssertionError:
+        assert scenario != "complete", "website depends on a retired application's ClusterRole"
+        print("PASS: rejected regression", scenario)
+    else:
+        assert scenario == "complete", "missing trigger permissions accepted"
+        print("PASS: website owns every referenced trigger ClusterRole")
 '''
 
 [dns-generate]
@@ -272,7 +292,7 @@ const floatingPattern = new RegExp(floating.matchCurrentValue.slice(1, -1));
 for (const tag of ['latest', 'alpine']) assert(floatingPattern.test(tag));
 for (const tag of ['1.0.1', 'v0.37.0', '20261102050204-5a17bbdf']) assert(!floatingPattern.test(tag));
 const privateImages = configuration.packageRules.find(rule => rule.enabled === false);
-assert(new RegExp(privateImages.matchDepNames[0].slice(1, -1)).test('harbor.yral.com/yral-auth/yral-auth'));
+assert(new RegExp(privateImages.matchDepNames[0].slice(1, -1)).test('harbor.yral.com/my-website/my-website'));
 assert(!new RegExp(privateImages.matchDepNames[0].slice(1, -1)).test('rustfs/rustfs'));
 console.log('PASS: floating public images get digest PRs; Flux-owned private images remain untouched');
 """], check=True)
@@ -303,7 +323,7 @@ for owner in ("rustfs", "longhorn", "longhorn-backup", "cloudnative-pg", "harbor
     rendered[owner] = [resource for resource in yaml.safe_load_all(result.stdout) if resource]
     print("PASS: rendered", owner)
 
-entrypoint = yaml.safe_load(Path("kubernetes/clusters/yral-k8s/kustomization.yaml").read_text())
+entrypoint = yaml.safe_load(Path("kubernetes/clusters/saikat-kubernetes-cluster/kustomization.yaml").read_text())
 assert "infrastructure-velero.yaml" not in entrypoint["resources"]
 print("PASS: Velero is absent from the reconciliation entrypoint")
 
@@ -405,7 +425,7 @@ with tempfile.TemporaryDirectory(prefix="backup-chart-checks-") as directory:
                 assert len(set(destinations)) == 2
 
 graph = {}
-for path in Path("kubernetes/clusters/yral-k8s").glob("*.yaml"):
+for path in Path("kubernetes/clusters/saikat-kubernetes-cluster").glob("*.yaml"):
     for resource in yaml.safe_load_all(path.read_text()):
         if resource and resource.get("apiVersion", "").startswith("kustomize.toolkit.fluxcd.io/"):
             graph[resource["metadata"]["name"]] = [dependency["name"] for dependency in resource.get("spec", {}).get("dependsOn", [])]

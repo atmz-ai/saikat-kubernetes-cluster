@@ -216,10 +216,10 @@ When the operator makes manual changes in parallel with agent work (dependency b
 ### Colocated Code over Abstractions (Hard Rule)
 **Operating procedure: inline by default; abstractions only with explicit approval.** Most code should be written inline at the call site. Extract a helper/wrapper/protocol/manager ONLY when duplication is massive AND an abstraction genuinely requires it — and even then, ASK the operator before introducing it. Prefer calling methods directly at the call site rather than hiding a single expression behind a helper function. A one-line helper that wraps `ctx.sender_auth().jwt().map(|c| c.subject().to_string()).unwrap_or_else(|| ctx.sender().to_hex().to_string())` is worse than inlining it — the reader has to jump to the helper to understand what it does, when the expression itself is already readable at the call site. Simple expressions, even if repeated, are better inlined for scannability. Example: no custom HTTP-client wrapper classes around platform defaults (`URLSession`, Ktor `HttpClient`) — construct requests and check statuses inline at each call site.
 
-**Colocate logic beside its caller (Hard Rule).** Business/data logic lives in the same folder as the UI (or other code) that calls it — feature-local by default, not in a parallel "core/common/utils" tree. Only when MULTIPLE features consume the same logic should it graduate to a shared location (and ask before creating that shared module). Do not pre-create shared/core modules "for later" — dead code ahead of its first consumer is speculative structure. Example (yral-ios): a feature's API client belongs in `Features/<Feature>/`, not `Core/Networking/`; promote to shared only when a second feature imports it.
+**Colocate logic beside its caller (Hard Rule).** Business/data logic lives in the same folder as the UI (or other code) that calls it — feature-local by default, not in a parallel "core/common/utils" tree. Only when MULTIPLE features consume the same logic should it graduate to a shared location (and ask before creating that shared module). Do not pre-create shared/core modules "for later" — dead code ahead of its first consumer is speculative structure.
 
 ### UI File Organisation: Suffixes, Previews, Atomic Components (Hard Rule)
-**Applies to every UI we write, in every stack** — SwiftUI (`apps/yral-ios`), Leptos (`apps/yral-auth`, `apps/my-website`), and any future UI. The platform-specific spelling is in the app's own AGENTS.md (see `apps/yral-ios/AGENTS.md` for the Swift version, which includes the exact suffix table); the shape is the same everywhere:
+**Applies to every UI we write, in every stack**, including Leptos (`apps/my-website`) and any future UI. Platform-specific spelling belongs in the app's own AGENTS.md; the shape is the same everywhere:
 
 1. **Organise by top-level feature, one folder per feature.** Logic is colocated inside the feature folder beside the UI that calls it — no per-layer folders, no core/utils tree (this is the Colocated Code rule above, applied to UI).
 
@@ -553,7 +553,6 @@ DNS is self-hosted, not Cloudflare. PowerDNS Authoritative runs from `kubernetes
   other changes to the outbound system or bypass production mutation restrictions.
 - Rishi issue drafts belong in the matching `Ole-Ole-AI` repository:
   `oleole-api` for service/API work and `swarm-infra` for shared infrastructure.
-  Do not file them in the retired `dolr-ai/yral-rishi-agent` repository.
 
 ### Local Environment & Parity
 The root `mise.toml` is the single source of truth for tool versions, plaintext environment values, age-encrypted local secrets, and daemon definitions. Task definitions live in owner-scoped `mise/tasks/<owner>.toml` files, selected explicitly by root `[task_config].includes`. Do not add per-application tooling or secret configuration files. Keep application-specific values beside their existing root declarations.
@@ -711,12 +710,12 @@ Two components are in play — Shipwright for builds, Tekton Triggers for the gi
 
 Never push code changes to git without first verifying they compile and run locally. Waiting for an in-cluster Shipwright build to discover a compile error or runtime failure wastes 10+ minutes per iteration.
 
-**Ignore patterns are explicit paths, never globs (Hard Rule).** In `.dockerignore` (and equally for anything that walks the tree — `.gitignore`, `.helmignore`, tool-specific ignore files), spell out the **specific** directory or file that must be excluded (`target/`, `apps/yral-ios/packages/YralApp/.build/`, `.venv/`). Never use `**`-prefixed globs (`**/target/`, `**/.build/`) and never a broad `**`.
+**Ignore patterns are explicit paths, never globs (Hard Rule).** In `.dockerignore` (and equally for anything that walks the tree — `.gitignore`, `.helmignore`, tool-specific ignore files), spell out the **specific** directory or file that must be excluded (`target/`, `.venv/`). Never use `**`-prefixed globs (`**/target/`, `**/.build/`) and never a broad `**`.
 
 - **Measured, not assumed** (Apple CLI 1.4.1, 2026-09-24): an identical build context transferred **1.07 GB** with the glob set `**/target/` `**/node_modules/` `**/.build/` `**/DerivedData/`, and **66 MB** with the equivalent explicit paths. `dockerignore` matching is effectively all-or-nothing — an unhandled pattern degrades filtering rather than failing loudly, so the build still succeeds while transferring far more than intended. Explicit paths are unambiguous, are what the docs prescribe, and cannot silently defeat a rule set.
 - **For `*.dockerignore` naming:** Apple's `container` CLI derives the ignore path from the `-f` value (`<dockerfile>.dockerignore`), so each app carries `apps/<app>/Dockerfile.buildkit.dockerignore` symlinked to the root `.dockerignore` for one source of truth (podman/Linux reads the root file directly, so that file must exist and stay authoritative).
 - **List only paths that exist**, and re-check after each change — stale entries imply filtering that is not happening.
-- **Build-context cost has two components that need different fixes.** *Transferred* size is what `dockerignore` reduces. *Walked-tree* size is what it does **not** — the CLI stats every path before applying ignore rules, so an excluded 111k-file tree still costs ~80 s of start-up latency. When image builds are slow to start or exhaust memory, delete the regenerable tree from disk (`rm -rf target/ apps/yral-ios/packages/YralApp/.build/ .venv/ ansible/collections/`) — the ignore rule is a safety net, not the fix.
+- **Build-context cost has two components that need different fixes.** *Transferred* size is what `dockerignore` reduces. *Walked-tree* size is what it does **not** — the CLI stats every path before applying ignore rules, so an excluded 111k-file tree still costs ~80 s of start-up latency. When image builds are slow to start or exhaust memory, delete only specific regenerable trees (`target/`, `.venv/`, `ansible/collections/`) — the ignore rule is a safety net, not the fix.
 - **Verify the number, one build at a time.** Measure `transferring context:` from the build's own log. Never infer it from a side channel such as the newest `*/…/*.tar` in `$TMPDIR` — that file may belong to a different, concurrent build, which produces convincing but wrong results. (This mistake cost most of a debugging session.)
 
 **Local image builds on macOS need explicit builder sizing (Hard Rule).** The Apple `container` builder VM defaults to 2 CPUs / 2048 MB, which **OOM-kills** our Rust builds. Measured 2026-09-24 on the Leptos image (`cargo leptos build`, ~200 crates across a WASM front + musl server target):
@@ -738,10 +737,10 @@ So every `<app>-image` task passes `--cpus 17 --memory 40gb` on macOS (all but o
 - Per-app Tekton Trigger resources in `kubernetes/apps/<app>/tekton-trigger.yaml`.
 - GitHub webhook → EventListener Service (exposed via Cilium Gateway HTTPRoute).
 - **Build webhook setup (per new app):** When adding a new app with Tekton build triggers:
-  1. Create HTTPRoute for `<app>-build.yral.com` in `kubernetes/networking/routes/<app>-build.yaml` (HTTP→HTTPS redirect + HTTPS route to `el-<app>-build-listener` in the app namespace).
+  1. Create HTTPRoute for `<app>-build.saikat.dev` in `kubernetes/networking/routes/<app>-build.yaml` (HTTP→HTTPS redirect + HTTPS route to `el-<app>-build-listener` in the app namespace).
   2. Create ReferenceGrant in the app namespace (`kubernetes/apps/<app>/build-reference-grant.yaml`) allowing HTTPRoute from kube-system to reference the EventListener Service.
   3. Add both to their respective kustomization.yaml files.
-  4. Create the GitHub webhook via `gh` CLI: `gh api repos/<owner>/<repo>/hooks --input - <<'EOF' { "name": "web", "active": true, "events": ["push"], "config": { "url": "https://<app>-build.yral.com/", "content_type": "json" } } EOF`
+  4. Create the GitHub webhook via `gh` CLI: `gh api repos/<owner>/<repo>/hooks --input - <<'EOF' { "name": "web", "active": true, "events": ["push"], "config": { "url": "https://<app>-build.saikat.dev/", "content_type": "json" } } EOF`
   5. Push to git and wait for Flux to apply the HTTPRoute.
 - **Filter out fluxcdbot commits**: The CEL interceptor MUST filter `body.head_commit.author.username != 'fluxcdbot'` to prevent a feedback loop.
 

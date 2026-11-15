@@ -2,7 +2,5 @@
 .git/
 .venv/
 ansible/collections/
-apps/yral-ios/build/
-apps/yral-ios/packages/YralApp/.build/
 target/
 video-generation/

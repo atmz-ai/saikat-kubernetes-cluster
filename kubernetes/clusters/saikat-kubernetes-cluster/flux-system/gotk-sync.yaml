@@ -20,7 +20,7 @@ metadata:
   namespace: flux-system
 spec:
   interval: 10m0s
-  path: ./kubernetes/clusters/yral-k8s
+  path: ./kubernetes/clusters/saikat-kubernetes-cluster
   prune: true
   sourceRef:
     kind: GitRepository

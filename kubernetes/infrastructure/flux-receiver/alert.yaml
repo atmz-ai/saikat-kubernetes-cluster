@@ -16,7 +16,7 @@ metadata:
   namespace: flux-system
 spec:
   eventMetadata:
-    cluster: yral-k8s
+    cluster: saikat-kubernetes-cluster
   providerRef:
     name: google-chat
   eventSeverity: error

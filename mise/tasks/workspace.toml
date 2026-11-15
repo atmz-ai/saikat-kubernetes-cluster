@@ -198,14 +198,14 @@ fi
 '''
 
 [dev-build]
-description = "Build the authentication development binary"
+description = "Build maintained development applications"
 depends = ["runtime-config-check"]
 run = '''
-mise run yral-auth-build
+mise run my-website-build
 '''
 
 [dev-start]
-description = "Start the authentication development server"
+description = "Start maintained development applications"
 depends = ["dev-build"]
 run = "mise daemons start dev"
 
@@ -234,16 +234,24 @@ for filename in configuration["task_config"]["includes"]:
   tasks.update(catalog)
   print("Verified task catalog: " + filename)
 daemons = configuration["daemons"]
-for daemon_name in ("yral-auth", "yral-auth-dev"):
-  command = daemons[daemon_name]["run"]
-  assert "../../target/release/yral-auth" in command
-  assert "../../target/x86_64-unknown-linux-musl/release/yral-auth" in command
-  assert "-- ./target/" not in command
-  print(f"Verified workspace-root binary paths: {daemon_name}")
-metadata_daemon = daemons["yral-metadata"]
-assert urllib.parse.urlparse(metadata_daemon["ready_http"]).port == int(configuration["env"]["BIND_ADDRESS"].rsplit(":", 1)[1])
-assert urllib.parse.urlparse(metadata_daemon["ready_http"]).port != 7000
-print("Verified metadata readiness uses its configured non-reserved local port.")
+for scenario in ("complete", "task-as-daemon-dependency"):
+  dependencies = {name: daemon.get("depends", []) for name, daemon in daemons.items()}
+  if scenario == "task-as-daemon-dependency":
+    dependencies["my-website-container"] = ["container-system-start"]
+  try:
+    for name, required_daemons in dependencies.items():
+      assert all(required_daemon in daemons for required_daemon in required_daemons), "Undefined daemon dependency: " + name
+  except AssertionError:
+    assert scenario != "complete", "Daemon dependencies reference a task instead of a daemon"
+    print("Verified rejection of task-as-daemon-dependency regression.")
+  else:
+    assert scenario == "complete", "Invalid daemon dependency accepted"
+    print("Verified daemon dependency references.")
+website_daemon = daemons["my-website"]
+assert "../../target/release/my-website" in website_daemon["run"]
+assert "../../target/x86_64-unknown-linux-musl/release/my-website" in website_daemon["run"]
+assert urllib.parse.urlparse(website_daemon["ready_http"]).port == int(website_daemon["env"]["LEPTOS_SITE_ADDR"].rsplit(":", 1)[1])
+print("Verified website workspace-root binary paths and readiness port.")
 for group_name, daemon_names in configuration["daemon_groups"].items():
   assert all(daemon_name in daemons for daemon_name in daemon_names)
   print(f"Verified daemon group references: {group_name}")
