@@ -27,14 +27,6 @@ public struct KeychainStore: Sendable {
     case idToken = "ID_TOKEN"
     case accessToken = "ACCESS_TOKEN"
     case refreshToken = "REFRESH_TOKEN"
-    /// OAuth subject of the active (possibly AI account) identity.
-    /// rawValue keeps the legacy PRINCIPAL string — the persisted
-    /// keychain entries (written by the Kotlin app and existing
-    /// installs) read by this key.
-    case lastActiveSubject = "LAST_ACTIVE_PRINCIPAL"
-    /// OAuth subject of the main (human) account. Same legacy
-    /// rawValue rationale as `lastActiveSubject`.
-    case mainSubject = "MAIN_PRINCIPAL"
   }
 
   // MARK: - CRUD

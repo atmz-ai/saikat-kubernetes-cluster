@@ -231,7 +231,6 @@ pub fn login_content(auth: Box<AuthQuery>) -> impl IntoView {
 
 #[cfg(any(feature = "google-oauth", feature = "apple-oauth"))]
 fn build_login_buttons(auth_store: StoredValue<Box<AuthQuery>>) -> Vec<AnyView> {
-    // TODO add Apple sign-in to /account and replace its placeholder PKCE challenge.
     let mut login_buttons: Vec<AnyView> = Vec::new();
 
     #[cfg(feature = "google-oauth")]

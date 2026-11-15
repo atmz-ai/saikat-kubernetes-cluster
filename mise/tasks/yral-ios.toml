@@ -12,22 +12,12 @@ description = "Resolve SPM dependencies for the YralApp package"
 dir = "apps/yral-ios/packages/YralApp"
 run = "swift package resolve"
 
-# ! The Firebase plist stays gitignored; build and upload tasks materialize its age value.
 [yral-ios-build]
-description = "Build the iosApp target for the iOS Simulator with the age-encrypted Firebase plist"
+description = "Build the iosApp target for the iOS Simulator"
 dir = "apps/yral-ios"
 run = '''
 #!/usr/bin/env bash
 set -euo pipefail
-
-mise run secrets-check -- YRAL_IOS_FIREBASE_PLIST_BASE64
-
-# ! Validate the temporary plist before replacing the required bundle resource.
-PLIST_TMP=$(mktemp)
-trap 'rm -f "$PLIST_TMP"' EXIT
-printf '%s' "$YRAL_IOS_FIREBASE_PLIST_BASE64" | base64 -d > "$PLIST_TMP"
-plutil -lint "$PLIST_TMP"
-mv "$PLIST_TMP" iosApp/GoogleService-Info.plist
 
 xcodebuild build \
   -project iosApp.xcodeproj \
@@ -66,6 +56,7 @@ set -euo pipefail
 
 git ls-files --cached --others --exclude-standard -z -- '*.swift' |
   while IFS= read -r -d '' swift_file; do
+    [[ -f "$swift_file" ]] || continue
     printf 'Formatting %s\n' "$swift_file"
     swift format format --in-place -- "$swift_file"
   done
@@ -80,6 +71,7 @@ set -euo pipefail
 
 git ls-files --cached --others --exclude-standard -z -- '*.swift' |
   while IFS= read -r -d '' swift_file; do
+    [[ -f "$swift_file" ]] || continue
     printf 'Linting %s\n' "$swift_file"
     swift format lint --strict -- "$swift_file"
   done
@@ -96,13 +88,12 @@ depends = ["yral-ios-format"]
 run = "mise run yral-ios-ci-checks"
 
 [yral-ios-clean]
-description = "Clean SPM and Xcode build outputs, including the generated Firebase plist"
+description = "Clean SPM and Xcode build outputs"
 dir = "apps/yral-ios"
 run = '''
 swift package --package-path packages/YralApp clean
 rm -rf packages/YralApp/.build build
 rm -rf iosApp.xcodeproj/xcuserdata
-rm -f iosApp/GoogleService-Info.plist
 '''
 
 [yral-ios-upload-testflight]
@@ -113,15 +104,7 @@ run = '''
 #!/usr/bin/env bash
 set -euo pipefail
 
-mise run secrets-check -- YRAL_IOS_DIST_CERT_P12_BASE64 YRAL_IOS_DIST_PROFILE_BASE64 YRAL_IOS_CERT_PASSWORD APP_STORE_CONNECT_API_KEY_BASE64 YRAL_IOS_FIREBASE_PLIST_BASE64
-
-# The Firebase plist is a required bundle resource — materialize it
-# ATOMICALLY (temp → plutil lint → mv): a failed inject must never leave
-# a corrupt 0-byte plist for xcodebuild/Xcode to choke on.
-PLIST_TMP=$(mktemp)
-printf '%s' "$YRAL_IOS_FIREBASE_PLIST_BASE64" | base64 -d > "$PLIST_TMP"
-plutil -lint "$PLIST_TMP"
-mv "$PLIST_TMP" iosApp/GoogleService-Info.plist
+mise run secrets-check -- YRAL_IOS_DIST_CERT_P12_BASE64 YRAL_IOS_DIST_PROFILE_BASE64 YRAL_IOS_CERT_PASSWORD APP_STORE_CONNECT_API_KEY_BASE64
 
 WORKDIR="build/signing"
 mkdir -p "$WORKDIR" ~/Library/MobileDevice/Provisioning\ Profiles
@@ -199,12 +182,4 @@ xcrun altool --upload-app \
   --apiKey "$YRAL_ASC_KEY_ID" \
   --apiIssuer "$YRAL_ASC_ISSUER_ID"
 
-# Upload dSYMs to Crashlytics from the archive (upload-symbols ships inside the
-# SPM checkout of the firebase-ios-sdk, resolved during the archive).
-UPLOAD_SYMBOLS_SCRIPT=$(ls -t "$HOME"/Library/Developer/Xcode/DerivedData/*/SourcePackages/checkouts/firebase-ios-sdk/Crashlytics/upload-symbols 2>/dev/null | head -n 1)
-if [[ -n "$UPLOAD_SYMBOLS_SCRIPT" && -f "$UPLOAD_SYMBOLS_SCRIPT" && -d build/YralApp.xcarchive/dSYMs ]]; then
-  "$UPLOAD_SYMBOLS_SCRIPT" -gsp iosApp/GoogleService-Info.plist -p ios build/YralApp.xcarchive/dSYMs
-else
-  echo '  ⚠ Crashlytics upload-symbols script or dSYMs not found — skipping dSYM upload' >&2
-fi
 '''

@@ -17,8 +17,6 @@ path = "src/jwt_secret_gen.rs"
 required-features = ["ssr"]
 
 [dependencies]
-anyhow = { workspace = true }
-async-trait = { workspace = true }
 axum = { workspace = true, features = ["form", "json", "macros"], optional = true }
 axum-extra = { workspace = true, features = ["cookie", "cookie-private"], optional = true }
 base64 = { workspace = true }
@@ -34,18 +32,13 @@ leptos_meta = { workspace = true }
 leptos_router = { workspace = true }
 log = { workspace = true }
 openidconnect = { workspace = true }
-openssl-sys = { workspace = true, features = ["vendored"], optional = true }
 p256 = { workspace = true, features = ["pkcs8"], optional = true }
 postcard = { workspace = true, features = ["use-std"] }
-rand = { workspace = true, optional = true }
 regex = { workspace = true }
-reqwest = { workspace = true, features = ["json", "rustls"] }
 rustls = { workspace = true, features = ["logging", "ring", "std", "tls12"], optional = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 sha2 = { workspace = true, optional = true }
-simple_logger = { workspace = true, optional = true }
-spacetimedb-sdk = { workspace = true, optional = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread"], optional = true }
 
@@ -57,12 +50,9 @@ wasm-bindgen = { workspace = true, optional = true }
 web-time = { workspace = true }
 
 [dev-dependencies]
-anyhow = { workspace = true }
 jsonwebtoken = { workspace = true, features = ["aws_lc_rs", "use_pem"] }
 p256 = { workspace = true, features = ["pkcs8"] }
-rand = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt"] }
-yral-database-spacetime-bindings = { workspace = true }
 
 # getrandom v0.4 is pulled transitively by leptos_macro's uuid dep.
 # On wasm32-unknown-unknown, it needs the wasm_js feature enabled.
@@ -87,13 +77,9 @@ ssr = [
   "dep:hex",
   "dep:jsonwebtoken",
   "dep:leptos_axum",
-  "dep:openssl-sys",
   "dep:p256",
-  "dep:rand",
   "dep:rustls",
   "dep:sha2",
-  "dep:simple_logger",
-  "dep:spacetimedb-sdk",
   "dep:tokio",
   "dep:tracing",
   "dep:tracing-subscriber",

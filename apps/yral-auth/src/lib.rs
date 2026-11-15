@@ -1,17 +1,3 @@
-// TODO(migrate-to-delete-user-procedure): SpacetimeDB's standalone
-// delete_user_info reducer was REMOVED (2026-09-10) — reducers cannot
-// propagate deletion to external systems, which orphaned the bots'
-// ai_influencers rows on the agent service (names stayed "taken":
-// dolr-ai/yral-rishi-agent#512/#513). yral-auth's user-deletion flow
-// (wherever it deletes a SpacetimeDB user — e.g. the admin/account
-// paths in src/api/) must call the new delete_user PROCEDURE instead:
-// POST /v1/database/{db}/call/delete_user with [subject, id_token] —
-// the procedure runs the same cascade and then soft-deletes the bots'
-// agent rows server-side. DeleteUserResult: [error, deleted_subjects,
-// backend_deletions] (error "" on success; failed backend_deletions are
-// retryable — the call is idempotent). See cascade_delete_user and
-// delete_user in apps/yral-database-spacetime/src/user_info.rs.
-
 // TODO(auth-page-all-providers): the web app's login surfaces support
 // only a subset of the providers the mobile apps offer. Add:
 //   - Sign in with Apple (oauth flow in src/oauth_provider.rs + the
@@ -35,15 +21,11 @@ pub mod consts;
 pub mod context;
 pub mod error;
 #[cfg(feature = "ssr")]
-pub mod kv;
-#[cfg(feature = "ssr")]
 pub mod middleware;
 pub mod oauth;
 #[cfg(feature = "ssr")]
 pub mod oauth_provider;
 mod page;
-#[cfg(feature = "ssr")]
-pub mod spacetime;
 pub mod utils;
 
 #[cfg(feature = "hydrate")]

@@ -17,7 +17,6 @@ use leptos_router::{
 use crate::{
     context::provide_client_id_validator,
     page::{
-        account::{oauth_callback::OauthCallbackPage, page::AccountPage},
         auth::auth_page,
         error_page::ErrorPage,
         oauth_login::{oauth_callback::OAuthCallbackPage, oauth_redirector::oauth_redirector_page},
@@ -86,13 +85,10 @@ pub fn app() -> impl IntoView {
                                     Route(
                                         RouteProps::builder()
                                             .path(path!("/account"))
-                                            .view(AccountPage)
-                                            .build(),
-                                    ),
-                                    Route(
-                                        RouteProps::builder()
-                                            .path(path!("/account/callback"))
-                                            .view(OauthCallbackPage)
+                                            .view(|| {
+                                                html::p()
+                                                    .child("Account management is unavailable.")
+                                            })
                                             .build(),
                                     ),
                                     Route(
@@ -132,10 +128,14 @@ pub fn app() -> impl IntoView {
 #[cfg(all(test, feature = "ssr"))]
 mod tests {
     #[test]
-    fn retained_account_route_is_registered_without_phone_routes() {
+    fn authentication_routes_remain_without_account_callback_or_phone_routes() {
         let routes = leptos_axum::generate_route_list(super::app);
         let paths = routes.iter().map(|route| route.path()).collect::<Vec<_>>();
         assert!(paths.contains(&"/account"), "Registered routes: {paths:?}");
+        for path in ["/oauth/auth", "/oauth_redirector", "/oauth_callback"] {
+            assert!(paths.contains(&path), "Registered routes: {paths:?}");
+        }
+        assert!(!paths.contains(&"/account/callback"));
         assert!(!paths.iter().any(|path| path.starts_with("/phone/")));
     }
 }

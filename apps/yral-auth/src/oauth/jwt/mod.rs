@@ -6,13 +6,32 @@ use super::CodeChallenge;
 
 pub mod generate;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TokenUse {
+    AuthorizationCode,
+    Access,
+    Id,
+    Refresh,
+}
+
+pub struct TokenIdentity {
+    pub subject: String,
+    pub client_identifier: String,
+    pub nonce: Option<String>,
+    pub is_anonymous: bool,
+    pub email: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthCodeClaims {
     aud: String,
-    exp: usize,
+    pub exp: usize,
     iat: usize,
     iss: String,
     pub sub: String,
+    pub token_use: TokenUse,
+    pub jti: String,
     pub ext_redirect_uri: Url,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub nonce: Option<String>,
@@ -28,6 +47,7 @@ pub struct AccessTokenClaims {
     iat: usize,
     iss: String,
     sub: String,
+    token_use: TokenUse,
     #[serde(skip_serializing_if = "Option::is_none")]
     nonce: Option<String>,
     ext_is_anonymous: bool,
@@ -40,20 +60,12 @@ pub struct IdTokenClaims {
     iat: usize,
     iss: String,
     sub: String,
+    token_use: TokenUse,
     #[serde(skip_serializing_if = "Option::is_none")]
     nonce: Option<String>,
     ext_is_anonymous: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     email: Option<String>,
-    /// AI account user IDs owned by this user (for influencer bots).
-    #[serde(default)]
-    ext_ai_account_ids: Vec<String>,
-    /// Signals to clients that this `id_token` is also a valid SpacetimeDB
-    /// token — pass it to `DbConnection::builder().with_token(id_token)`.
-    /// SpacetimeDB derives a deterministic `Identity` from the `iss` + `sub`
-    /// claims. See `apps/yral-auth/src/spacetime/mod.rs` for details.
-    #[serde(default)]
-    ext_spacetimedb_token: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -63,6 +75,7 @@ pub struct RefreshTokenClaims {
     iat: usize,
     iss: String,
     pub sub: String,
+    pub token_use: TokenUse,
     #[serde(skip_serializing_if = "Option::is_none")]
     nonce: Option<String>,
     pub ext_is_anonymous: bool,

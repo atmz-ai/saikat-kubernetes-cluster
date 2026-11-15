@@ -23,9 +23,9 @@ use p256::pkcs8::DecodePublicKey;
 
 use crate::{
     consts::AUTH_TOKEN_KID,
-    kv::KVStoreImpl,
     oauth::{
-        client_validation::ClientIdValidatorImpl, jwt::JsonWebKeySet, SupportedOAuthProviders,
+        client_validation::ClientIdValidatorImpl, jwt::JsonWebKeySet,
+        pending_grants::PendingGrants, SupportedOAuthProviders,
     },
     oauth_provider::{OAuthProviderImpl, StdOAuthClient},
 };
@@ -137,7 +137,8 @@ pub struct ServerCtx {
     pub oauth_providers: HashMap<SupportedOAuthProviders, OAuthProviderImpl>,
     pub cookie_key: axum_extra::extract::cookie::Key,
     pub jwk_pairs: JwkPairs,
-    pub kv_store: KVStoreImpl,
+    pub pending_oauth_states: PendingGrants,
+    pub pending_authorization_codes: PendingGrants,
     pub validator: ClientIdValidatorImpl,
 }
 
@@ -290,13 +291,6 @@ impl ServerCtx {
         axum_extra::extract::cookie::Key::from(&cookie_key_raw)
     }
 
-    pub async fn init_kv_store() -> KVStoreImpl {
-        use crate::kv::spacetime_kv::SpacetimeKV;
-
-        log::info!("Initializing SpacetimeDB KV store");
-        KVStoreImpl::Spacetime(SpacetimeKV::new().expect("Failed to initialize SpacetimeKV"))
-    }
-
     pub async fn new() -> Self {
         let oauth_http_client = reqwest::ClientBuilder::new()
             // Following redirects opens the client up to SSRF vulnerabilities.
@@ -308,15 +302,13 @@ impl ServerCtx {
 
         let cookie_key = Self::init_cookie_key();
 
-        //SpacetimeDB KV store
-        let kv_store = Self::init_kv_store().await;
-
         Self {
             oauth_http_client,
             oauth_providers,
             cookie_key,
             jwk_pairs: JwkPairs::default(),
-            kv_store,
+            pending_oauth_states: PendingGrants::default(),
+            pending_authorization_codes: PendingGrants::default(),
             validator: ClientIdValidatorImpl::Const(Default::default()),
         }
     }

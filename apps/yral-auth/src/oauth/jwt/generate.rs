@@ -1,6 +1,8 @@
 use web_time::Duration;
 
-use super::{AccessTokenClaims, AuthCodeClaims, IdTokenClaims, RefreshTokenClaims};
+use super::{
+    AccessTokenClaims, AuthCodeClaims, IdTokenClaims, RefreshTokenClaims, TokenIdentity, TokenUse,
+};
 use crate::{consts::AUTH_TOKEN_KID, oauth::AuthQuery, utils::time::current_epoch_secs};
 
 pub fn generate_code_grant_jwt(
@@ -20,6 +22,8 @@ pub fn generate_code_grant_jwt(
             exp: iat + 10 * 60,
             iss: server_url.to_string(),
             sub: user_id.to_string(),
+            token_use: TokenUse::AuthorizationCode,
+            jti: uuid::Uuid::new_v4().to_string(),
             ext_redirect_uri: query.redirect_uri,
             nonce: query.nonce,
             ext_code_challenge_s256: query.code_challenge,
@@ -30,8 +34,6 @@ pub fn generate_code_grant_jwt(
     .expect("Failed to encode JWT")
 }
 
-// TODO verify issued JWTs include a kid header matching the published JWKS key ID.
-// TODO also iss, sub, aud, exp, iat
 fn jwt_header() -> jsonwebtoken::Header {
     let mut header = jsonwebtoken::Header::new(jsonwebtoken::Algorithm::ES256);
     header.kid = Some(AUTH_TOKEN_KID.to_string());
@@ -39,45 +41,35 @@ fn jwt_header() -> jsonwebtoken::Header {
     header
 }
 
-// TODO(self-service-account-tokens, 2026-10-20): let authenticated users export
-// tokens from /account with login-equivalent access to their own accounts only.
-// Reuse login issuance and preserve consumer-required audiences/claims (including
-// the SpacetimeDB ID token); provide expiry/revocation, never elevated privileges.
 /// * Returns the access token followed by the ID token.
-#[allow(clippy::too_many_arguments)]
 pub fn generate_access_token_and_id_token_jwt(
     encoding_key: &jsonwebtoken::EncodingKey,
-    user_id: &str,
-    client_id: &str,
-    nonce: Option<String>,
-    is_anonymous: bool,
+    identity: &TokenIdentity,
     max_age: Duration,
-    email: Option<String>,
-    ai_account_ids: Vec<String>,
     server_url: &str,
 ) -> (String, String) {
     let iat = current_epoch_secs();
 
     let access_claims = AccessTokenClaims {
-        aud: client_id.to_string(),
+        aud: identity.client_identifier.clone(),
         exp: iat + max_age.as_secs() as usize,
         iat,
         iss: server_url.to_string(),
-        sub: user_id.to_string(),
-        nonce: nonce.clone(),
-        ext_is_anonymous: is_anonymous,
+        sub: identity.subject.clone(),
+        token_use: TokenUse::Access,
+        nonce: identity.nonce.clone(),
+        ext_is_anonymous: identity.is_anonymous,
     };
     let id_claims = IdTokenClaims {
-        aud: client_id.to_string(),
+        aud: identity.client_identifier.clone(),
         exp: iat + max_age.as_secs() as usize,
         iat,
         iss: server_url.to_string(),
-        sub: user_id.to_string(),
-        nonce,
-        ext_is_anonymous: is_anonymous,
-        email,
-        ext_ai_account_ids: ai_account_ids,
-        ext_spacetimedb_token: true,
+        sub: identity.subject.clone(),
+        token_use: TokenUse::Id,
+        nonce: identity.nonce.clone(),
+        ext_is_anonymous: identity.is_anonymous,
+        email: identity.email.clone(),
     };
 
     let header = jwt_header();
@@ -90,15 +82,10 @@ pub fn generate_access_token_and_id_token_jwt(
     (access_token, id_token)
 }
 
-#[allow(clippy::too_many_arguments)]
 pub fn generate_refresh_token_jwt(
     encoding_key: &jsonwebtoken::EncodingKey,
-    user_id: &str,
-    client_id: &str,
-    nonce: Option<String>,
-    is_anonymous: bool,
+    identity: &TokenIdentity,
     max_age: Duration,
-    email: Option<String>,
     server_url: &str,
 ) -> String {
     let iat = current_epoch_secs();
@@ -106,14 +93,15 @@ pub fn generate_refresh_token_jwt(
     jsonwebtoken::encode(
         &jwt_header(),
         &RefreshTokenClaims {
-            aud: client_id.to_string(),
+            aud: identity.client_identifier.clone(),
             exp: iat + max_age.as_secs() as usize,
             iat,
             iss: server_url.to_string(),
-            sub: user_id.to_string(),
-            nonce,
-            ext_is_anonymous: is_anonymous,
-            ext_email: email,
+            sub: identity.subject.clone(),
+            token_use: TokenUse::Refresh,
+            nonce: identity.nonce.clone(),
+            ext_is_anonymous: identity.is_anonymous,
+            ext_email: identity.email.clone(),
         },
         encoding_key,
     )

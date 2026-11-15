@@ -6,12 +6,10 @@ metadata:
   annotations:
     secret.reloader.stakater.com/reload: "yral-auth-secrets"
 spec:
-  replicas: 2
+  # ! OAuth grants are process-local; overlapping replicas cannot share one-time state.
+  replicas: 1
   strategy:
-    type: RollingUpdate
-    rollingUpdate:
-      maxUnavailable: 1
-      maxSurge: 1
+    type: Recreate
   selector:
     matchLabels:
       app: yral-auth

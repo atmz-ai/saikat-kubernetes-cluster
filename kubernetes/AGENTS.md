@@ -45,3 +45,13 @@ Cross-namespace backend references require a ReferenceGrant in the target namesp
 Render the affected tree locally with `mise exec -- kubectl kustomize <directory>` before pushing. After a push, verify the exact source revision, Kustomization readiness, workload health, and public endpoints. Validate DNS against authoritative nameservers rather than only recursive caches or controller status.
 
 Remove ordinary resources from Git and let Flux prune them. For complete removal of a Flux Kustomization, first reconcile an empty resource set with the CR resumed, verify its inventory and resources are gone, then remove the empty CR. Deleting a suspended CR orphans its resources. Stateful storage and external data require their own explicit retention or migration decision.
+
+RustFS supports server-side bucket removal with a signed `DELETE /<bucket>` and
+`x-rustfs-force-delete: true`; ordinary S3 bucket deletion requires an empty
+bucket. Check the deployed version's
+[request handler](https://github.com/rustfs/rustfs/blob/1.0.1/rustfs/src/app/bucket_usecase.rs)
+and [header contract](https://github.com/rustfs/rustfs/blob/1.0.1/crates/utils/src/http/header_compat.rs)
+before using this extension. Retire writers first, scope a GitOps Job to the
+explicitly approved bucket, and require an authenticated `HEAD` to return 404
+before removing the completed declaration. Do not confuse removing a bucket
+provisioning Job with deleting the bucket's external data.
