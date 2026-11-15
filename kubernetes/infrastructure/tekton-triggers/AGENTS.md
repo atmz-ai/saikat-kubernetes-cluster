@@ -1,8 +1,9 @@
 # Tekton Triggers
 
-Keep the vendored release and interceptor declarations aligned with one explicit
+Consume the release and interceptor bundles from one explicit upstream
 release from the [official installation manifests](https://tekton.dev/docs/triggers/install/).
-An image-only update is not a complete release upgrade. Run
+Renovate updates both bundles and the startup configuration reference together.
+Do not copy bundles or override their images locally. Run
 `mise run tekton-triggers-configuration-checks` before deploying changes.
 
 The startup ConfigMap in `config/` has its own Flux Kustomization. Keep it outside

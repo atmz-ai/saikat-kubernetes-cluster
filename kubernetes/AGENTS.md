@@ -11,6 +11,23 @@ This tree owns Kubernetes workload, networking, operator, and GitOps declaration
 
 Ordering is declared through the individual Flux Kustomizations' `dependsOn` fields. Do not substitute manual apply sequences or forced reconciliation for those dependencies.
 
+## Upstream Release Bundles
+
+Consume official, version-pinned release bundles in Kustomize `resources`, not
+copied controller/CRD snapshots or independently overridden bundled images.
+Keep cluster-specific behavior in patches; append arguments rather than replacing
+upstream lists that contain versioned helper images. Renovate's generic release
+URL managers update all references to the same project together, including startup
+configuration reconciled separately. New GitHub release assets, tagged raw GitHub
+manifests, and official Tekton mirror URLs need no per-image extractor.
+
+Run `mise run infrastructure-release-checks` and
+`mise run renovate-configuration-checks` before deploying bundle changes. The
+Infrastructure Releases workflow runs without credentials on both Linux and
+macOS, including bot PRs. Renovate performs check-gated merging itself rather
+than delegating to platform automerge. Do not rely on native automerge to wait
+for CI unless branch protection actually requires those checks.
+
 ## Networking and TLS
 
 External traffic reaches the shared Cilium Gateway through inventory-generated DNS and the declared exposure model. Node addresses, regional placement, and component versions are maintained in inventory and manifests, not copied into documentation tables.

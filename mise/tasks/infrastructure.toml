@@ -1,3 +1,112 @@
+[infrastructure-release-checks]
+description = "Render every upstream infrastructure bundle and validate release integrity and consumed CRD contracts"
+depends = ["tekton-triggers-configuration-checks"]
+run = '''
+#!/usr/bin/env -S ./.venv/bin/python -u
+import json
+import re
+import subprocess
+import urllib.request
+from pathlib import Path
+
+import jsonschema
+import yaml
+
+configuration = json.loads(Path("renovate.json").read_text())
+tekton_template = "tektoncd/" + "{" * 2 + "project" + "}" * 2
+managers = [manager for manager in configuration["customManagers"] if manager.get("datasourceTemplate") == "github-releases" and ("depNameTemplate" not in manager or manager.get("depNameTemplate") == tekton_template)]
+versions = {}
+schemas = {}
+for path in sorted(Path("kubernetes/infrastructure").rglob("kustomization.yaml")):
+    declaration = yaml.safe_load(path.read_text())
+    addresses = [resource for resource in declaration.get("resources", []) if resource.startswith("https://")]
+    if not addresses:
+        continue
+    expected = {}
+    for address in addresses:
+        extracted = []
+        for manager in managers:
+            for pattern in manager["matchStrings"]:
+                match = re.search(pattern.replace("(?<", "(?P<"), address)
+                if match:
+                    groups = match.groupdict()
+                    repository = groups.get("depName", manager.get("depNameTemplate", ""))
+                    for key, value in groups.items():
+                        repository = repository.replace("{" * 2 + key + "}" * 2, value)
+                    extracted.append((repository, groups["currentValue"]))
+        assert len(extracted) == 1, "release URL is not unambiguously discoverable: " + address
+        repository, version = extracted[0]
+        versions.setdefault(repository, set()).add(version)
+        with urllib.request.urlopen(address, timeout=60) as response:
+            upstream = [resource for resource in yaml.load_all(response.read(), Loader=yaml.CSafeLoader) if resource]
+        for resource in upstream:
+            identity = (resource["apiVersion"], resource["kind"], resource["metadata"].get("namespace", ""), resource["metadata"]["name"])
+            assert identity not in expected, "duplicate upstream resource: " + str(identity)
+            expected[identity] = resource
+        print("PASS: discoverable upstream bundle", repository, version, address)
+    result = subprocess.run(
+        ["kubectl", "kustomize", "--load-restrictor", "LoadRestrictionsNone", str(path.parent)],
+        capture_output=True, text=True,
+    )
+    if result.stderr:
+        print(result.stderr)
+    result.check_returncode()
+    rendered = [resource for resource in yaml.load_all(result.stdout, Loader=yaml.CSafeLoader) if resource]
+    actual = {(resource["apiVersion"], resource["kind"], resource["metadata"].get("namespace", ""), resource["metadata"]["name"]) for resource in rendered}
+    missing = expected.keys() - actual
+    if path.parent.name == "tekton-triggers":
+        missing.discard(("v1", "ConfigMap", "tekton-pipelines", "config-triggers-core-interceptors"))
+    assert not missing, "upstream bundle resources omitted: " + str(missing)
+    for resource in rendered:
+        identity = (resource["apiVersion"], resource["kind"], resource["metadata"].get("namespace", ""), resource["metadata"]["name"])
+        if resource["kind"] == "Deployment" and identity in expected:
+            bundled = expected[identity]["spec"]["template"]["spec"]
+            deployed = resource["spec"]["template"]["spec"]
+            for section in ("containers", "initContainers"):
+                assert {container["name"]: container["image"] for container in deployed.get(section, [])} == {container["name"]: container["image"] for container in bundled.get(section, [])}, "independent image override: " + str(identity)
+        if resource["kind"] == "CustomResourceDefinition":
+            for version in resource["spec"]["versions"]:
+                if version["served"]:
+                    schemas[(resource["spec"]["group"] + "/" + version["name"], resource["spec"]["names"]["kind"])] = version["schema"]["openAPIV3Schema"]
+        print("PASS: rendered", *identity)
+    if path.parent.name == "cert-manager":
+        controller = next(resource for resource in rendered if resource["kind"] == "Deployment" and resource["metadata"]["name"] == "cert-manager")
+        assert "--enable-gateway-api" in controller["spec"]["template"]["spec"]["containers"][0]["args"]
+    if path.parent.name == "shipwright":
+        for resource in rendered:
+            if resource["kind"] == "CustomResourceDefinition":
+                assert resource["metadata"]["annotations"]["cert-manager.io/inject-ca-from"] == "shipwright-build/shipwright-build-webhook-cert"
+            if resource["kind"] == "Service" and resource["metadata"]["name"] == "shipwright-triggers":
+                assert resource["spec"]["ports"][0]["port"] == 8080
+                assert resource["spec"]["ports"][0]["targetPort"] == "webhook"
+            if resource["kind"] == "Deployment" and resource["metadata"]["name"] == "shipwright-triggers":
+                assert resource["spec"]["template"]["spec"]["containers"][0]["ports"][0]["containerPort"] == 8080
+
+for repository, declared in versions.items():
+    assert len(declared) == 1, "mixed release references: " + repository + " " + str(declared)
+    print("PASS: coherent release", repository, *declared)
+
+for path in sorted(Path("kubernetes").rglob("*.yaml")):
+    for resource in yaml.load_all(path.read_text(), Loader=yaml.CSafeLoader):
+        if not isinstance(resource, dict):
+            continue
+        identity = (resource.get("apiVersion"), resource.get("kind"))
+        if identity not in schemas:
+            if any(kind == identity[1] and version.split("/")[0] == str(identity[0]).split("/")[0] for version, kind in schemas):
+                raise AssertionError("unserved upstream CRD version: " + str(path) + " " + str(identity))
+            continue
+        jsonschema.Draft7Validator(schemas[identity]).validate(resource)
+        print("PASS: upstream CRD contract", path, *identity)
+
+result = subprocess.run(["kubectl", "kustomize", "kubernetes/clusters/yral-k8s"], capture_output=True, text=True)
+if result.stderr:
+    print(result.stderr)
+result.check_returncode()
+for resource in yaml.load_all(result.stdout, Loader=yaml.CSafeLoader):
+    if resource:
+        print("PASS: cluster entrypoint", resource["kind"], resource["metadata"]["name"])
+'''
+
 [tekton-triggers-configuration-checks]
 description = "Validate Tekton release alignment and independently reconcilable startup configuration"
 run = '''
@@ -126,7 +235,7 @@ description = "Regenerate the PowerDNS zone artifacts from the pdns_zones list (
 run = "./.venv/bin/ansible-playbook ansible/playbooks/operations/update-dns-zone-config.yml"
 
 [renovate-configuration-checks]
-description = "Validate Renovate schema, image extraction, floating-tag tracking, and manual merging"
+description = "Validate Renovate schema, generic bundle and image extraction, and check-gated merging"
 run = '''
 #!/usr/bin/env -S ./.venv/bin/python -u
 import json
@@ -171,10 +280,39 @@ for (const owner of [configuration.flux, configuration.kubernetes, manager]) {
 assert(!configuration.customManagers.some(manager => manager.depNameTemplate === 'rustfs/rustfs'));
 console.log('PASS: existing and previously unknown YAML paths are discovered without per-image rules');
 
-assert.equal(configuration.automerge, false);
-assert(!configuration.packageRules.some(rule => rule.automerge === true));
+assert.equal(configuration.automerge, true);
+assert.equal(configuration.platformAutomerge, false);
+assert.notEqual(configuration.ignoreTests, true);
+assert.notEqual(configuration.requiredStatusChecks, null);
 assert.equal(configuration.schedule, undefined);
-console.log('PASS: manual merging and unrestricted PR timing');
+console.log('PASS: Renovate waits for checks instead of relying on unavailable branch protection');
+
+const tektonTemplate = 'tektoncd/' + '{'.repeat(2) + 'project' + '}'.repeat(2);
+const releaseManagers = configuration.customManagers.filter(manager => manager.datasourceTemplate === 'github-releases' && (manager.depNameTemplate === undefined || manager.depNameTemplate === tektonTemplate));
+for (const [address, repository, version] of [
+    ['https://github.com/new-owner/new-controller/releases/download/v2.3.4/release.yaml', 'new-owner/new-controller', 'v2.3.4'],
+    ['https://raw.githubusercontent.com/new-owner/new-controller/v2.3.4/config/crd.yaml', 'new-owner/new-controller', 'v2.3.4'],
+    ['https://infra.tekton.dev/tekton-releases/new-project/previous/v2.3.4/release.yaml', 'tektoncd/new-project', 'v2.3.4'],
+]) {
+    const extracted = releaseManagers.flatMap(manager => manager.matchStrings.flatMap(pattern => {
+        const match = new RegExp(pattern).exec(address);
+        if (!match) return [];
+        assert(new RegExp(manager.managerFilePatterns[0].slice(1, -1)).test('new-service/arbitrary.yml'));
+        let dependency = match.groups.depName ?? manager.depNameTemplate;
+        for (const [key, value] of Object.entries(match.groups)) dependency = dependency.replaceAll('{'.repeat(2) + key + '}'.repeat(2), value);
+        return [{repository: dependency, version: match.groups.currentValue}];
+    }));
+    assert.deepEqual(extracted, [{repository, version}]);
+    console.log('PASS: unknown release bundle is automatically discoverable', address);
+}
+for (const address of [
+    'https://github.com/new-owner/new-controller/releases/download/latest/release.yaml',
+    'https://raw.githubusercontent.com/new-owner/new-controller/main/config/crd.yaml',
+    'https://infra.tekton.dev/tekton-releases/pipeline/latest/release.yaml',
+]) {
+    assert(!releaseManagers.some(manager => manager.matchStrings.some(pattern => new RegExp(pattern).test(address))));
+    console.log('PASS: floating release reference is not accepted as a pinned version', address);
+}
 
 const floating = configuration.packageRules.find(rule => rule.pinDigests === true);
 assert.deepEqual(floating.matchDatasources, ['docker']);
