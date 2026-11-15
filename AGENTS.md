@@ -603,6 +603,8 @@ For multiline or Base64 input, use `--stdin` instead of `--prompt`, keeping plai
 
 **Version locking (Preference):** Prefer `"latest"` requests for local mise tools such as `uv`; keep exact resolved versions, checksums, and provenance in the committed `mise.lock`. Update a tool with `mise lock --bump <tool>` without replacing its floating request with an exact version. Use an explicit local tool pin only when the operator requests one or a verified compatibility constraint requires it, not merely to select a release or prevent bot branch rewrites. Deployed cluster components retain their explicit version declarations.
 
+The root `github:wasm-bindgen/wasm-bindgen` tool must match the resolved Rust `wasm-bindgen` crate version. Its official prebuilt release supplies the CLI for cargo-leptos without a crates.io installation. See [mise's GitHub backend](https://mise.jdx.dev/dev-tools/backends/github.html) and [the wasm-bindgen CLI](https://wasm-bindgen.github.io/wasm-bindgen/reference/cli.html).
+
 **Declarative-only tooling (no imperative system installs):** The local environment must be fully reproducible from `mise.toml` alone — a Nix-like experience. Never run `sudo apt-get install`, `brew install`, or any imperative system package manager command to satisfy a build dependency. If a tool or library is needed:
 1. Check if mise provides it (add to `[tools]` in `mise.toml`).
 2. If it's a Rust/Cargo tool, install via `cargo binstall` in a mise task.

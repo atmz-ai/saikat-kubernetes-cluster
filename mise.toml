@@ -20,6 +20,7 @@ gh = "latest"
 # ! The vfox gcloud backend imports an unavailable Lua python module before installation.
 "asdf:mise-plugins/mise-gcloud" = { version = "latest", depends = ["python"] }
 helm = "latest"
+"github:wasm-bindgen/wasm-bindgen" = "0.2.130"
 jq = "latest"
 kubectl = "latest"
 node = "latest"

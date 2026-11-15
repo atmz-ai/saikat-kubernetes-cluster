@@ -25,15 +25,10 @@ fn test_context() -> ServerCtx {
         .public_key()
         .to_public_key_pem(LineEnding::LF)
         .unwrap();
-    let client_private_der = hex::decode(concat!(
-        "302e020100300506032b657004220420",
-        "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60"
-    ))
-    .unwrap();
-    let client_public_der = hex::decode(concat!(
-        "302a300506032b6570032100",
-        "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a"
-    ))
+    let client_private_der = hex::decode("302e020100300506032b6570042204209d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60").unwrap();
+    let client_public_der = hex::decode(
+        "302a300506032b6570032100d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
+    )
     .unwrap();
     let client_private_pem = format!(
         "-----BEGIN PRIVATE KEY-----\n{}\n-----END PRIVATE KEY-----",
