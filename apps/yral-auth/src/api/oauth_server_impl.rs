@@ -17,9 +17,11 @@ use axum_extra::extract::{
 use base64::{prelude::BASE64_URL_SAFE, Engine};
 use leptos::prelude::{expect_context, ServerFnError};
 use leptos_axum::{extract_with_state, ResponseOptions};
+#[cfg(any(feature = "google-oauth", feature = "apple-oauth"))]
+use openidconnect::Scope;
 use openidconnect::{
     core::CoreAuthenticationFlow, AuthorizationCode, CsrfToken, Nonce, PkceCodeChallenge,
-    PkceCodeVerifier, RedirectUrl, Scope,
+    PkceCodeVerifier, RedirectUrl,
 };
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
@@ -118,9 +120,6 @@ pub async fn get_oauth_url_impl(
             authorize_builder
         }
     };
-
-    #[cfg(not(feature = "google-oauth"))]
-    let authorize_builder = authorize_builder;
 
     let (auth_url, oauth_csrf_token, _) = authorize_builder.url();
 

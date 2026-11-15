@@ -1,13 +1,10 @@
 use std::sync::Arc;
 
 #[cfg(any(feature = "google-oauth", feature = "apple-oauth"))]
-use std::{
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        RwLock,
-    },
-    time::Duration,
-};
+use std::sync::{atomic::AtomicU64, RwLock};
+
+#[cfg(feature = "apple-oauth")]
+use std::{sync::atomic::Ordering, time::Duration};
 
 use enum_dispatch::enum_dispatch;
 use openidconnect::Nonce;

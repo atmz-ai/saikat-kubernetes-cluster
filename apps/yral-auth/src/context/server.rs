@@ -7,14 +7,18 @@ use base64::{prelude::BASE64_URL_SAFE_NO_PAD, Engine};
 use jsonwebtoken::jwk::{self, Jwk};
 use leptos::{config::LeptosOptions, prelude::expect_context};
 use leptos_axum::AxumRouteListing;
-use openidconnect::{
-    core::CoreClient, reqwest, AuthUrl, ClientId, IssuerUrl, RedirectUrl, TokenUrl,
-};
+use openidconnect::reqwest;
 
 #[cfg(any(feature = "google-oauth", feature = "apple-oauth"))]
-use openidconnect::core::CoreProviderMetadata;
+use openidconnect::{
+    core::{CoreClient, CoreProviderMetadata},
+    ClientId, IssuerUrl,
+};
 
-#[cfg(feature = "google-oauth")]
+#[cfg(feature = "apple-oauth")]
+use openidconnect::{AuthUrl, TokenUrl};
+
+#[cfg(feature = "apple-oauth")]
 use openidconnect::core::CoreJsonWebKeySet;
 
 #[cfg(feature = "google-oauth")]
@@ -27,7 +31,7 @@ use crate::{
         client_validation::ClientIdValidatorImpl, jwt::JsonWebKeySet,
         pending_grants::PendingGrants, SupportedOAuthProviders,
     },
-    oauth_provider::{OAuthProviderImpl, StdOAuthClient},
+    oauth_provider::OAuthProviderImpl,
 };
 
 #[cfg(feature = "google-oauth")]
@@ -143,29 +147,6 @@ pub struct ServerCtx {
 }
 
 impl ServerCtx {
-    #[allow(dead_code)]
-    #[cfg(any(feature = "google-oauth", feature = "apple-oauth"))]
-    async fn init_oauth_client(
-        client_id_env: &str,
-        issuer_url: IssuerUrl,
-        redirect_url: RedirectUrl,
-        http_client: &reqwest::Client,
-    ) -> Result<StdOAuthClient, String> {
-        let client_id =
-            env::var(client_id_env).unwrap_or_else(|_| panic!("`{client_id_env}` is required!"));
-
-        let oauth_metadata = CoreProviderMetadata::discover_async(issuer_url, http_client)
-            .await
-            .map_err(|e| format!("Failed to discover OAuth metadata: {e}"))?;
-
-        let client =
-            CoreClient::from_provider_metadata(oauth_metadata, ClientId::new(client_id), None)
-                .set_redirect_uri(redirect_url)
-                .set_auth_type(openidconnect::AuthType::RequestBody);
-
-        Ok(client)
-    }
-
     /// Initialize Google OAuth client with JWK rotation support
     ///
     /// This creates a GoogleOAuthProvider that handles JWK rotation automatically.
@@ -264,6 +245,7 @@ impl ServerCtx {
         Ok(())
     }
 
+    #[cfg(any(feature = "google-oauth", feature = "apple-oauth"))]
     async fn init_oauth_providers(
         http_client: &reqwest::Client,
     ) -> HashMap<SupportedOAuthProviders, OAuthProviderImpl> {
@@ -298,7 +280,10 @@ impl ServerCtx {
             .build()
             .expect("Client should build");
 
+        #[cfg(any(feature = "google-oauth", feature = "apple-oauth"))]
         let oauth_providers = Self::init_oauth_providers(&oauth_http_client).await;
+        #[cfg(not(any(feature = "google-oauth", feature = "apple-oauth")))]
+        let oauth_providers = HashMap::new();
 
         let cookie_key = Self::init_cookie_key();
 
