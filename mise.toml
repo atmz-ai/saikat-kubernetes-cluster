@@ -75,7 +75,7 @@ ruff = "latest"
 ] }
 sops = "latest"
 sqlite = "latest"
-uv = "0.13.8"
+uv = "latest"
 yq = "latest"
 
 # System packages — project-specific build dependencies (apt on Debian/Ubuntu).
