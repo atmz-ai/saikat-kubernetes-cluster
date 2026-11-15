@@ -10,13 +10,13 @@ import YralApp
 /// here.
 final class YralAppDelegate: NSObject, UIApplicationDelegate {
 
-    func application(
-        _ application: UIApplication,
-        didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
-    ) -> Bool {
-        // Firebase first: Crashlytics must capture every launch, and Analytics
-        // session data must be attributed to the full launch window.
-        YralAppRoot.configureFirebase()
-        return true
-    }
+  func application(
+    _ application: UIApplication,
+    didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
+  ) -> Bool {
+    // Firebase first: Crashlytics must capture every launch, and Analytics
+    // session data must be attributed to the full launch window.
+    YralAppRoot.configureFirebase()
+    return true
+  }
 }

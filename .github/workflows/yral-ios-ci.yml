@@ -1,11 +1,10 @@
 name: Yral iOS CI
 
-# Single workflow for the native iOS app (apps/yral-ios). Local and CI run
-# the SAME mise checks task — CI needs only: a working mise + the Ansible vault
-# password (the root repo's only GitHub secret). `mise run bootstrap`
+# * CI runs read-only checks; local yral-ios-checks formats before the same checks.
+# * CI needs mise + the Ansible vault password (the root repo's only GitHub secret).
 # * Bootstrap extracts the SSH identity; mise decrypts the Firebase plist from mise.toml.
 #
-#   pull_request          → mise run yral-ios-checks (lint + tests + sim build)
+# * pull_request → mise run yral-ios-ci-checks (lint + tests + sim build)
 #   push/merge to main    → same checks (deploys run locally — see the
 #                           commented-out deploy job below)
 #
@@ -75,13 +74,13 @@ jobs:
           mise run bootstrap
 
       - name: Run checks (lint + package tests + simulator build)
-        run: mise run yral-ios-checks
+        run: mise run yral-ios-ci-checks
 
   # TestFlight deploy DISABLED (2026-09-01): macOS runners on the free
   # public pool queue for 1h+ and the deploy job can be starved entirely —
   # it also raced ahead of the latest commit on at least one occasion.
   # * Deploys run locally with mise run yral-ios-upload-testflight.
-  # (identical mise task — local and CI run the same checks either way).
+  # * Local checks format first; CI checks do not rewrite Swift files.
   # To re-enable: uncomment this job (and the bootstrap step it needs).
   # upload-testflight:
   #   needs: checks

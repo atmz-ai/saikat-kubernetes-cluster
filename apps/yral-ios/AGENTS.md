@@ -373,7 +373,10 @@ catalog work. Adding a Swift file in the package = zero xcodeproj changes.
 mise run yral-ios-setup   # resolve SPM deps
 mise run yral-ios-build   # simulator build (Debug, unsigned)
 mise run yral-ios-test    # package unit tests (Swift Testing)
-mise run yral-ios-lint    # swift-format lint (strict)
+mise run yral-ios-format  # format repository Swift files in place
+mise run yral-ios-lint    # strict lint without rewriting files
+mise run yral-ios-checks  # local loop: format, then lint + tests + simulator build
+mise run yral-ios-ci-checks # CI loop: lint + tests + simulator build, no formatting
 mise run yral-ios-clean   # clean build outputs
 ```
 
@@ -404,10 +407,18 @@ unwrapping is a review-time concern, not a tooling one. Treat `!` as a
 deliberate escape hatch that needs a reason (a compile-time-constant config
 string is fine; decoded network data is not).
 
-**Formatting is not optional polish.** `mise run yral-ios-lint` gates on
-`swift format lint --strict`, so any file that drifts from the formatter fails
-CI. Run the formatter (`swift format format --in-place --recursive <paths>`)
-before committing, or let format-on-save handle it.
+**Formatting is automatic.** `mise run yral-ios-format` uses the toolchain's
+`swift format format --in-place` command to format every tracked and non-ignored
+untracked `.swift` file across the repository, including package manifests and
+the app shell. Git's file discovery excludes ignored build outputs and downloaded
+dependencies. `yral-ios-checks` is the local development loop: it finishes
+formatting before invoking `yral-ios-ci-checks` for strict lint, package tests,
+and the simulator build. `yral-ios-lint` checks the same file set without
+rewriting it. CI runs `yral-ios-ci-checks` directly and never formats Swift
+files, so formatting drift in committed code still fails CI. Standalone test
+and build tasks do not format files. Commit the local formatting changes.
+
+Official CLI reference: https://github.com/swiftlang/swift-format#command-line-usage.
 
 ## CI / Distribution
 
@@ -415,7 +426,8 @@ before committing, or let format-on-save handle it.
 The CI deploy job is DISABLED (2026-09-01): the free public macOS runner pool
 queues 1h+ and starved the deploy job entirely; a local deploy (~2.5 min)
 is the iteration loop. CI runs CHECKS ONLY (lint + tests + simulator build)
-— the identical `yral-ios-checks` mise task both places. The deploy job is
+via `yral-ios-ci-checks`; local `yral-ios-checks` formats before that same suite.
+The deploy job is
 kept as a commented block in `yral-ios-ci.yml` for easy re-enabling.
 
 **Checks parity:** CI needs only a working mise + the root repo's

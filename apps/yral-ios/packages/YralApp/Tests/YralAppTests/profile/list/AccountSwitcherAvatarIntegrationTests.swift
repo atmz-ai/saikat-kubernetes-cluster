@@ -90,11 +90,13 @@ struct AccountSwitcherAvatarIntegrationTests {
     #expect(profileBody.contains(Fixtures.secondBotSubject))
   }
 
-  @Test("missing and retired profile avatars use placeholders", arguments: [
-    nil,
-    "",
-    "https://prakash-yral.hel1.your-objectstorage.com/gobgob/gob.77.png",
-  ] as [String?])
+  @Test(
+    "missing and retired profile avatars use placeholders",
+    arguments: [
+      nil,
+      "",
+      "https://prakash-yral.hel1.your-objectstorage.com/gobgob/gob.77.png",
+    ] as [String?])
   func unavailableAvatarUsesPlaceholder(_ avatarURL: String?) async throws {
     let keychain = KeychainStore(service: "switcher-avatar-tests-\(UUID().uuidString)")
     defer { keychain.removeAll() }

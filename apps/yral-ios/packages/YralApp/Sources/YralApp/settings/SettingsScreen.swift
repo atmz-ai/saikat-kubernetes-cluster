@@ -74,7 +74,8 @@ struct SettingsScreen: View {
       HStack(spacing: 12) {
         if let storedProfilePictureURL = sessionStore.profilePic {
           let profilePictureURL = ProfilePicture.resolveURL(storedProfilePictureURL)
-          AsyncImage(url: profilePictureURL.isEmpty ? nil : URL(string: profilePictureURL)) { image in
+          AsyncImage(url: profilePictureURL.isEmpty ? nil : URL(string: profilePictureURL)) {
+            image in
             image.resizable().scaledToFill()
           } placeholder: {
             Color.gray.opacity(0.25)

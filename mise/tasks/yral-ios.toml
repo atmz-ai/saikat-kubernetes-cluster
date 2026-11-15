@@ -57,35 +57,43 @@ xcodebuild test \
   -skipPackagePluginValidation
 '''
 
-[yral-ios-lint]
-description = "Lint the YralApp SPM package with swift-format (Apple's first-party formatter and linter, shipped in the Xcode toolchain)."
-dir = "apps/yral-ios"
+[yral-ios-format]
+description = "Format every tracked and non-ignored untracked Swift file in the repository in place with Apple's swift-format"
+dir = "{{config_root}}"
 run = '''
 #!/usr/bin/env bash
 set -euo pipefail
 
-# `swift format` (note the space) is the toolchain-provided entry point — Swift 6
-# ships swift-format inside Xcode 16+, so there is nothing to install via mise.
-# No .swift-format config: we use the toolchain defaults verbatim. That is what
-# makes this consistent with format-on-save, which goes through SourceKit-LSP
-# and therefore applies the SAME defaults (plus the editor's indentation).
-#
-# The codebase is 2-space indented to match swift-format's default. VS Code's
-# `editor.detectIndentation` (default true) matches whatever a file already
-# uses, so saves stay self-consistent in both editors.
-#
-# --strict makes warnings fail the gate. Only the two hand-written trees are
-# passed: the generated OpenAPI sources live under .build/plugins/outputs/, so
-# they are never traversed (their warnings are fixed upstream — see the Zero
-# Warnings rule, not suppressed here).
-swift format lint --strict --recursive \
-  packages/YralApp/Sources packages/YralApp/Tests iosAppUITests
+git ls-files --cached --others --exclude-standard -z -- '*.swift' |
+  while IFS= read -r -d '' swift_file; do
+    printf 'Formatting %s\n' "$swift_file"
+    swift format format --in-place -- "$swift_file"
+  done
 '''
 
-[yral-ios-checks]
-description = "CI-equivalent check suite: lint + package tests + simulator build (same task local and CI run)"
+[yral-ios-lint]
+description = "Check every tracked and non-ignored untracked Swift file with strict swift-format lint without modifying files"
+dir = "{{config_root}}"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+
+git ls-files --cached --others --exclude-standard -z -- '*.swift' |
+  while IFS= read -r -d '' swift_file; do
+    printf 'Linting %s\n' "$swift_file"
+    swift format lint --strict -- "$swift_file"
+  done
+'''
+
+[yral-ios-ci-checks]
+description = "Read-only CI check suite: strict lint + package tests + simulator build"
 depends = ["yral-ios-lint", "yral-ios-test", "yral-ios-build"]
 run = "echo 'yral-ios checks: all green'"
+
+[yral-ios-checks]
+description = "Local development loop: format in place, then run the CI lint + package tests + simulator build"
+depends = ["yral-ios-format"]
+run = "mise run yral-ios-ci-checks"
 
 [yral-ios-clean]
 description = "Clean SPM and Xcode build outputs, including the generated Firebase plist"
