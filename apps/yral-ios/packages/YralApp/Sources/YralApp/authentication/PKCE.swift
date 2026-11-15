@@ -57,7 +57,7 @@ public struct TokenClaims: Equatable {
   public let issuedAtTime: Int64
   /// `iss` — issuer host ("auth.yral.com").
   public let issuerHost: String
-  /// `sub` — the user's subject (SpacetimeDB identity source).
+  /// * `sub` is the OAuth subject.
   public let subject: String
   /// `nonce` — optional.
   public let nonce: String?
@@ -65,8 +65,6 @@ public struct TokenClaims: Equatable {
   public let isAnonymous: Bool
   /// `email` — optional.
   public let email: String?
-  /// `ext_ai_account_ids` — AI account ids; null elements dropped.
-  public let aiAccountIds: [String]?
 
   /// Matches Kotlin `TokenClaims.isValid`: expiry strictly greater than now.
   public func isValid(currentTimeInEpochSeconds: Int64) -> Bool {
@@ -90,7 +88,6 @@ public enum JWTParser {
     static let subject = "sub"
     static let nonce = "nonce"
     static let isAnonymous = "ext_is_anonymous"
-    static let aiAccountIds = "ext_ai_account_ids"
     static let email = "email"
   }
 
@@ -106,7 +103,6 @@ public enum JWTParser {
     let nonce = optionalString(payloadJSON[ClaimKey.nonce])
     let isAnonymous = (payloadJSON[ClaimKey.isAnonymous] as? Bool) ?? false
     let email = optionalString(payloadJSON[ClaimKey.email])
-    let aiAccountIds = parseStringList(payloadJSON[ClaimKey.aiAccountIds])
 
     return TokenClaims(
       audience: audience,
@@ -116,8 +112,7 @@ public enum JWTParser {
       subject: subject,
       nonce: nonce,
       isAnonymous: isAnonymous,
-      email: email,
-      aiAccountIds: aiAccountIds
+      email: email
     )
   }
 
@@ -188,12 +183,6 @@ public enum JWTParser {
     return value
   }
 
-  /// `ext_ai_account_ids` — array of strings, null elements dropped.
-  private static func parseStringList(_ value: Any?) -> [String]? {
-    guard let array = value as? [Any] else { return nil }
-    let strings = array.compactMap { $0 as? String }
-    return strings
-  }
 }
 
 /// Auth-domain failures.

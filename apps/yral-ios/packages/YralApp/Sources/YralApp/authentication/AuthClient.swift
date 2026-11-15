@@ -1,382 +1,88 @@
 import Foundation
 
-/// Auth session machine — port of Kotlin `DefaultAuthClient`.
-///
-/// Responsibilities (faithful to the Kotlin contract):
-///   - `initialize()`: cold-start decision tree (restore cached AI account session /
-///     validate ID token / refresh / anonymous identity).
-///   - `logout()`: clear tokens + cached session + subject prefs, reset, reset
-///     session properties, return to `.initial`.
-///   - Token pipeline: `handleToken` → claims-based session or refresh.
-///
-/// Social/phone sign-in flows live in `AuthClient+SignIn.swift`;
-/// cached-session persistence in `AuthClient+Persistence.swift` —
-/// the Kotlin god class (917 lines) split across files by concern for the
-/// 400-line lint limit. They are the SAME class (extensions), not layers.
-///
-/// Differences from Kotlin, by design:
-///   - No analytics/telemetry dependency (Firebase Analytics wiring lands
-///     with the analytics phase; call sites are documented inline).
-///   - Token storage is the Keychain (not NSUserDefaults) via
-///     `KeychainStore` — see its header comment.
-///   - AI account-identity persistence (`ext_ai_account_ids` merge) lands with
-///     the account-switcher phase that consumes it.
-///
-/// Storage layout (Kotlin `PrefKeys` split by secrecy):
-///   - Keychain: ID_TOKEN / ACCESS_TOKEN / REFRESH_TOKEN,
-///     LAST_ACTIVE_PRINCIPAL, MAIN_PRINCIPAL.
-///   - UserDefaults (display data, not secrets): USER_PRINCIPAL,
-///     PROFILE_PIC, USERNAME, PHONE_NUMBER,
-///     SOCIAL_SIGN_IN_SUCCESSFUL. (The Kotlin canister-era keys
-///     CANISTER_ID / IS_CREATED_FROM_SERVICE_CANISTER are dropped —
-///     ICP legacy; the fields duplicated USER_PRINCIPAL and were
-///     never read. Existing installs' stale entries are simply
-///     ignored and overwritten by cacheSession.)
 @MainActor @Observable
 public final class AuthClient {
-
-  /// Auth data source (yral-auth + metadata + off-chain endpoints).
   let authDataSource: AuthDataSource
-
-  /// SpacetimeDB data plane — used to hydrate AI-identity avatar URLs
-  /// (bots created before the URL was persisted locally have no
-  /// hostedAvatarURL; their real picture lives in the profile table).
-  /// Injectable for tests; defaults to the real client reading the
-  /// current id token.
-  let spacetimeDataSource: SpacetimeDBRemoteDataSource
-
-  /// Redirect scheme (from Info.plist via the app shell).
   let redirectScheme: String
-
-  /// Keychain-backed token cache.
   let keychain: KeychainStore
-
-  /// Cached session display fields (non-secret) — Kotlin's Preferences.
-  let defaults: UserDefaults
-
-  /// Session state (the app's observable session).
   let sessionStore: SessionStore
 
-  /// Analytics facade. Optional so tests and previews construct an
-  /// `AuthClient` with no tracker (see `AnalyticsClient`'s "not a singleton"
-  /// note) — a unit test must never enqueue events into Snowplow's SQLite
-  /// store or reach the collector.
-  let analytics: AnalyticsClient?
-
-  /// PKCE verifier of the in-flight flow — needed at code exchange
-  /// (Kotlin holds it on `AuthRepositoryImpl`).
-  var pendingCodeVerifier: String?
-
-  /// Code challenge of the in-flight flow; doubles as the anti-CSRF
-  /// `state` (social) / `client_state` (phone).
-  var currentCodeChallenge: String?
-
-  /// Provider of the in-flight social flow (callback handling + analytics).
-  var currentProvider: SocialProvider?
-
-  /// Most recent token-expiry logout cause (nil after a user logout) —
-  /// test hook mirroring Kotlin's telemetry cause parameter. Internal:
-  /// tests read it via @testable; the persistence extension writes it.
   internal var lastLogoutCause: AuthExpiryCause?
-
-  /// Session-storage keys in UserDefaults for the cached session fields.
-  /// The rawValue strings keep the legacy PRINCIPAL naming — they are
-  /// the persisted keys on existing installs (written by the Kotlin
-  /// app's PrefKeys); only the Swift case names read as `subject`.
-  /// The Kotlin canister-era keys (CANISTER_ID,
-  /// IS_CREATED_FROM_SERVICE_CANISTER) are dropped — ICP legacy; the
-  /// fields duplicated userSubject and were never read.
-  enum CachedSessionKey: String {
-    case userSubject = "USER_PRINCIPAL"
-    case profilePic = "PROFILE_PIC"
-    case username = "USERNAME"
-    case phoneNumber = "PHONE_NUMBER"
-    case socialSignInSuccessful = "SOCIAL_SIGN_IN_SUCCESSFUL"
-  }
 
   public init(
     authDataSource: AuthDataSource,
     redirectScheme: String,
     keychain: KeychainStore = KeychainStore(),
-    defaults: UserDefaults = .standard,
-    spacetimeDataSource: SpacetimeDBRemoteDataSource? = nil,
-    sessionStore: SessionStore,
-    analytics: AnalyticsClient? = nil
+    sessionStore: SessionStore
   ) {
     self.authDataSource = authDataSource
     self.redirectScheme = redirectScheme
     self.keychain = keychain
-    self.defaults = defaults
-    self.analytics = analytics
-    // Default: the real client reading the current id token. Built
-    // BEFORE the property is assigned — the closure captures self.
-    self.spacetimeDataSource =
-      spacetimeDataSource
-      ?? {
-        let keychain = keychain
-        return SpacetimeDBRemoteDataSource(
-          idTokenProvider: { keychain.string(forKey: .idToken) }
-        )
-      }()
     self.sessionStore = sessionStore
-    // Wire the machine's effects once, here: the store owns the state,
-    // AuthClient owns the credentials. Assigning AFTER all stored
-    // properties are initialised is what makes capturing self legal.
     sessionStore.effectHandler = { [weak self] effect in
-      switch effect {
-      case .clearStoredSession:
-        self?.clearStoredSessionData()
-      case .none:
-        break
-      }
+      if effect == .clearStoredSession { self?.clearStoredSessionData() }
     }
   }
 
-  // MARK: - Cold start (initialize + refreshAuthIfNeeded)
-
-  /// Restores or obtains a session. Decision tree, Kotlin-faithful:
-  ///
-  ///  1. lastActive == cached AI account (≠ main) → restore immediately, then
-  ///     validate/refresh AI account tokens.
-  ///  2. ID token present → validate; if expired use the refresh token
-  ///     (valid refresh → refresh; else logout with cause).
-  ///  3. Nothing cached → anonymous identity.
   public func initialize() async {
     sessionStore.send(.restoreStarted)
-    await refreshAuthIfNeeded()
-  }
-
-  private func refreshAuthIfNeeded() async {
-    let lastActiveSubject = keychain.string(forKey: .lastActiveSubject)
-    let mainSubject = keychain.string(forKey: .mainSubject)
-
-    // 1. AI account (or non-main) last-active → restore from cache directly.
-    if let lastActiveSubject, lastActiveSubject != mainSubject {
-      if let cached = cachedSession(),
-        cached.userSubject == lastActiveSubject
-      {
-        sessionStore.send(.sessionEstablished(cached))
-        await refreshBotColdStartTokensIfNeeded()
-        return
-      }
-    }
-
-    // 2. Main-account ID token → validate/refresh through handleToken.
     if let idToken = keychain.string(forKey: .idToken) {
-      let shouldPersistTokenState =
-        lastActiveSubject == nil || lastActiveSubject == mainSubject
-      await handleToken(
-        idToken: idToken,
-        accessToken: "",
-        refreshToken: "",
-        persistTokenState: shouldPersistTokenState,
-        persistBotIdentities: false
-      )
+      await handleToken(idToken: idToken, accessToken: "", refreshToken: "")
       return
     }
-
-    // 3. Fresh install → anonymous identity.
-    await obtainAnonymousIdentity()
-  }
-
-  /// AI account cold-start token hygiene — Kotlin
-  /// `refreshBotColdStartTokensIfNeeded` verbatim.
-  private func refreshBotColdStartTokensIfNeeded() async {
-    let now = currentEpochSeconds
-    let idToken = keychain.string(forKey: .idToken)
-    let shouldRefresh = idToken.map { !isTokenValid($0, now: now) } ?? true
-    guard shouldRefresh else { return }
-
-    guard let refreshToken = keychain.string(forKey: .refreshToken),
-      !refreshToken.isEmpty
-    else {
-      await trackAndLogoutForTokenExpiry(cause: .refreshTokenMissing)
+    if keychain.string(forKey: .refreshToken) != nil {
+      await refreshStoredSession()
       return
     }
-    guard isTokenValid(refreshToken, now: now) else {
-      await trackAndLogoutForTokenExpiry(cause: .refreshTokenExpiredOrInvalid)
-      return
-    }
-    await refreshBotColdStartTokens(refreshToken: refreshToken)
-  }
-
-  func isTokenValid(_ token: String, now: Int64) -> Bool {
-    guard let claims = try? JWTParser.parsePayload(of: token) else { return false }
-    return claims.isValid(currentTimeInEpochSeconds: now)
-  }
-
-  private func refreshBotColdStartTokens(refreshToken: String) async {
     do {
-      let tokenResponse = try await authDataSource.refreshToken(refreshToken)
-      saveTokens(
-        idToken: tokenResponse.idToken,
-        refreshToken: tokenResponse.refreshToken,
-        accessToken: tokenResponse.accessToken,
-        persistBotIdentities: false
-      )
+      let response = try await authDataSource.obtainAnonymousIdentity()
+      try establishSession(response)
     } catch {
-      await trackAndLogoutForTokenExpiry(cause: .refreshAccessTokenFailed)
-      CrashReporter.record(error, context: "cold-start-token-refresh")
-    }
-  }
-
-  private func obtainAnonymousIdentity() async {
-    do {
-      let tokenResponse = try await authDataSource.obtainAnonymousIdentity()
-      await handleToken(
-        idToken: tokenResponse.idToken,
-        accessToken: tokenResponse.accessToken,
-        refreshToken: tokenResponse.refreshToken,
-        resetCachedSession: true
-      )
-      sessionStore.updateSocialSignInStatus(false)
-    } catch {
-      // Kotlin rethrows YralAuthException; without a session there is
-      // nothing to restore — back to the sign-in surface (a fresh
-      // install that could not get an anonymous identity, NOT an
-      // expiry: `.nothingCached` keeps that distinction).
       sessionStore.send(.nothingCached)
     }
   }
 
-  // MARK: - Token handling pipeline
-
-  /// Kotlin `handleToken` — the single entry for every token arrival
-  /// (cold start, refresh, social exchange, phone exchange). Branches:
-  /// valid → claims-based session; expired → refresh-token path.
-  ///
-  /// A malformed persisted ID token is treated like an expired one (and
-  /// so recovers via the refresh path). Kotlin instead lets the parse
-  /// error propagate out of `initialize()` — a cold-start crash; this is
-  /// an intentional improvement over the Kotlin behavior.
-  func handleToken(
-    idToken: String,
-    accessToken: String,
-    refreshToken: String,
-    resetCachedSession: Bool = false,
-    persistTokenState: Bool = true,
-    persistBotIdentities: Bool = true
-  ) async {
-    if persistTokenState {
-      saveTokens(
-        idToken: idToken,
-        refreshToken: refreshToken,
-        accessToken: accessToken,
-        persistBotIdentities: persistBotIdentities
-      )
-    }
-
-    guard let tokenClaims = try? JWTParser.parsePayload(of: idToken),
-      tokenClaims.isValid(currentTimeInEpochSeconds: currentEpochSeconds)
+  func handleToken(idToken: String, accessToken: String, refreshToken: String) async {
+    guard let claims = try? JWTParser.parsePayload(of: idToken),
+      claims.isValid(currentTimeInEpochSeconds: currentEpochSeconds)
     else {
-      guard let refreshToken = keychain.string(forKey: .refreshToken),
-        !refreshToken.isEmpty
-      else {
-        await trackAndLogoutForTokenExpiry(cause: .refreshTokenMissing)
-        return
-      }
-      if isTokenValid(refreshToken, now: currentEpochSeconds) {
-        await refreshAccessToken(refreshToken: refreshToken)
-      } else {
-        await trackAndLogoutForTokenExpiry(cause: .refreshTokenExpiredOrInvalid)
-      }
+      await refreshStoredSession()
       return
     }
-
-    if resetCachedSession { resetCachedSessionData() }
-    handleTokenClaims(tokenClaims)
-    if let email = tokenClaims.email {
-      sessionStore.updateLoggedInUserEmail(email)
-    }
+    saveTokens(idToken: idToken, refreshToken: refreshToken, accessToken: accessToken)
+    sessionStore.send(
+      .sessionEstablished(
+        Session(
+          userSubject: claims.subject, email: claims.email, isAnonymous: claims.isAnonymous
+        )))
   }
 
-  /// Kotlin `handleTokenClaims` — builds the session from claims. The
-  /// foreign-subject guard: if the main account is active and this
-  /// token's subject differs, the cached MAIN session is restored
-  /// instead (a stale token for another account must not hijack the
-  /// active session).
-  private func handleTokenClaims(_ tokenClaims: TokenClaims) {
-    let storedMainSubject = keychain.string(forKey: .mainSubject)
-    let lastActiveSubject = keychain.string(forKey: .lastActiveSubject)
-    let subject = tokenClaims.subject
+  func establishSession(_ response: TokenResponse) throws {
+    let claims = try JWTParser.parsePayload(of: response.idToken)
+    guard claims.isValid(currentTimeInEpochSeconds: currentEpochSeconds) else {
+      throw AuthError.oauthFailed(errorDescription: "Authentication returned an expired ID token")
+    }
+    saveTokens(
+      idToken: response.idToken, refreshToken: response.refreshToken,
+      accessToken: response.accessToken
+    )
+    sessionStore.send(
+      .sessionEstablished(
+        Session(
+          userSubject: claims.subject, email: claims.email, isAnonymous: claims.isAnonymous
+        )))
+  }
 
-    if let storedMainSubject,
-      lastActiveSubject == storedMainSubject,
-      subject != storedMainSubject
-    {
-      if let cachedMain = cachedSession(),
-        cachedMain.userSubject == storedMainSubject
-      {
-        sessionStore.send(.sessionEstablished(cachedMain))
-        sessionStore.updateFirebaseLoginState(true)
-      }
+  private func refreshStoredSession() async {
+    guard let refreshToken = keychain.string(forKey: .refreshToken), !refreshToken.isEmpty else {
+      await trackAndLogoutForTokenExpiry(cause: .refreshTokenMissing)
       return
     }
-
-    let profilePictureURL = ""
-    cacheSession(
-      userSubject: subject,
-      profilePic: profilePictureURL,
-      username: nil,
-      isAIAccount: false
-    )
-
-    let session = Session(
-      userSubject: subject,
-      profilePic: profilePictureURL,
-      // Deterministic pseudonym for a fresh main account (no server
-      // username yet) — the fallback tier, per the display rules.
-      username: UsernameGenerator.resolveUsername(
-        preferred: nil, subject: subject
-      ),
-      isAIAccount: false
-    )
-    // NOTE: no `updateCoinBalance(0)` here — the `.sessionEstablished`
-    // transition clears per-session properties (coin balance included),
-    // so the explicit call was immediately overwritten and removed.
-    sessionStore.send(.sessionEstablished(session))
-    sessionStore.updateFirebaseLoginState(true)
-    postLogin()
-  }
-
-  // MARK: - Manual token refresh (Kotlin refreshTokens)
-
-  /// Kotlin `refreshAccessToken` — the main-account refresh path (distinct
-  /// from `refreshBotColdStartTokens`, which only persists tokens without
-  /// re-running the claims pipeline). Refresh failure logs the caller
-  /// out with `REFRESH_ACCESS_TOKEN_FAILED`.
-  private func refreshAccessToken(refreshToken: String) async {
     do {
-      let tokenResponse = try await authDataSource.refreshToken(refreshToken)
-      await handleToken(
-        idToken: tokenResponse.idToken,
-        accessToken: tokenResponse.accessToken,
-        refreshToken: tokenResponse.refreshToken
-      )
+      let response = try await authDataSource.refreshToken(refreshToken)
+      try establishSession(response)
     } catch {
       await trackAndLogoutForTokenExpiry(cause: .refreshAccessTokenFailed)
-      CrashReporter.record(error, context: "cold-start-token-refresh")
-    }
-  }
-
-  /// Kotlin `refreshTokens` — manual refresh used by account-management
-  /// flows (AI account deletion). Missing refresh token → no-op; refresh failure
-  /// → logged-only no-op (Kotlin parity: it never throws).
-  public func refreshTokens() async {
-    guard let refreshToken = keychain.string(forKey: .refreshToken),
-      !refreshToken.isEmpty
-    else { return }
-    do {
-      let tokenResponse = try await authDataSource.refreshToken(refreshToken)
-      saveTokens(
-        idToken: tokenResponse.idToken,
-        refreshToken: tokenResponse.refreshToken,
-        accessToken: tokenResponse.accessToken
-      )
-    } catch {
-      // Kotlin logs and returns; the failure now reaches
-      // Crashlytics as a non-fatal.
-      CrashReporter.record(error, context: "manual-token-refresh")
     }
   }
 }

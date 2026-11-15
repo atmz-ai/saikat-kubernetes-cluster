@@ -9,7 +9,6 @@ Application code lives in `apps/<application>/`. Its cluster deployment declarat
 | `my-website` | `saikat.dev` |
 | `yral-auth` | `auth.yral.com` |
 | `yral-metadata` | `metadata.yral.com` |
-| `yral-database-spacetime` | SpacetimeDB Maincloud; Rust workspace member |
 | `yral-ios` | App Store and TestFlight, bundle `com.yral.iosApp` |
 
 Rust applications maintained in this repository belong in the root Cargo workspace. Do not add them to its exclusion list. Tools, tasks, local configuration, secrets, and daemons remain centralized at the repository root; follow the root onboarding conventions rather than adding per-application tooling configuration.
@@ -22,6 +21,6 @@ repository; do not replace retired integrations with another Rishi endpoint.
 
 ## Retired Legacy Frontend
 
-The legacy Leptos frontend and its dedicated build, routing, and deployment resources were removed. Shared authentication, SpacetimeDB, and external object-storage data were retained.
+The legacy Leptos frontend and its dedicated build, routing, and deployment resources were removed. Shared authentication and external object-storage data were retained.
 
 Deployment retirement guidance belongs to `kubernetes/AGENTS.md`; historical one-time recovery and validation waivers do not establish new application-wide rules.

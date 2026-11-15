@@ -8,12 +8,13 @@ final class MenuScreenTests: XCTestCase {
     let application = XCUIApplication()
     application.launch()
 
-    let menuButton = application.tabBars.buttons["Menu"]
-    XCTAssertTrue(menuButton.waitForExistence(timeout: 30))
-    menuButton.tap()
-
-    XCTAssertTrue(application.staticTexts["Settings"].waitForExistence(timeout: 10))
-    XCTAssertTrue(application.staticTexts["Notifications"].exists)
+    XCTAssertTrue(application.staticTexts["Settings"].waitForExistence(timeout: 30))
+    XCTAssertTrue(application.staticTexts["settings.version"].exists)
+    XCTAssertTrue(application.buttons["settings.authentication"].exists)
+    XCTAssertFalse(application.buttons["Switch account"].exists)
+    XCTAssertFalse(application.buttons["Delete account"].exists)
+    XCTAssertFalse(application.tabBars.buttons["Profile"].exists)
+    XCTAssertFalse(application.switches["Notifications"].exists)
 
     let screenshot = XCTAttachment(screenshot: application.screenshot())
     screenshot.name = "Settings"

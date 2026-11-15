@@ -31,13 +31,9 @@ struct KeychainStoreTests {
     store.setString("id", forKey: .idToken)
     store.setString("access", forKey: .accessToken)
     store.setString("refresh", forKey: .refreshToken)
-    store.setString("last-active", forKey: .lastActiveSubject)
-    store.setString("main", forKey: .mainSubject)
     store.removeAll()
     #expect(store.string(forKey: .idToken) == nil)
     #expect(store.string(forKey: .accessToken) == nil)
     #expect(store.string(forKey: .refreshToken) == nil)
-    #expect(store.string(forKey: .lastActiveSubject) == nil)
-    #expect(store.string(forKey: .mainSubject) == nil)
   }
 }

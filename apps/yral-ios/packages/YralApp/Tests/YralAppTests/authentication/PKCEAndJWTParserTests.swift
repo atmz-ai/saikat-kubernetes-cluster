@@ -57,7 +57,7 @@ struct PKCEAndJWTParserTests {
     let payloadJSON = #"""
       {"aud":"e1a6a7fb-8a1d-42dc-87b4-13ff94ecbe34","exp":1767225600,"iat":1767139200,
       "iss":"auth.yral.com","sub":"auth0|user-77","nonce":"n-1","ext_is_anonymous":false,
-      "email":"user@example.com","ext_ai_account_ids":["auth0|AI account-1",null,"auth0|AI account-2"]}
+      "email":"user@example.com","token_use":"id"}
       """#
     let jwt = Self.makeJWT(payloadJSON: payloadJSON)
     let claims = try JWTParser.parsePayload(of: jwt)
@@ -70,8 +70,6 @@ struct PKCEAndJWTParserTests {
     #expect(claims.nonce == "n-1")
     #expect(claims.isAnonymous == false)
     #expect(claims.email == "user@example.com")
-    // null elements in ext_ai_account_ids are dropped.
-    #expect(claims.aiAccountIds == ["auth0|AI account-1", "auth0|AI account-2"])
     #expect(claims.isValid(currentTimeInEpochSeconds: 1_767_139_201))
     #expect(!claims.isValid(currentTimeInEpochSeconds: 1_767_225_600))
   }
@@ -89,6 +87,23 @@ struct PKCEAndJWTParserTests {
       payloadJSON: #"{"exp":1,"iat":1,"iss":"auth.yral.com","sub":"s"}"#
     )
     #expect(try JWTParser.parsePayload(of: absentJWT).audience.isEmpty)
+  }
+
+  @Test("optional extensions are not required and unknown fields cannot change identity")
+  func optionalExtensionsAreNotRequired() throws {
+    let requiredClaims = #"""
+      {"exp":4000000000,"iat":1,"iss":"auth.yral.com","sub":"oauth-subject",
+      "email":"user@example.com","ext_is_anonymous":true}
+      """#
+    let claims = try JWTParser.parsePayload(of: Self.makeJWT(payloadJSON: requiredClaims))
+    let unknownClaims =
+      requiredClaims.dropLast() + #", "unknown_extension":{"sub":"wrong-subject"}}"#
+    let extended = try JWTParser.parsePayload(of: Self.makeJWT(payloadJSON: String(unknownClaims)))
+    #expect(claims == extended)
+    #expect(claims.subject == "oauth-subject")
+    #expect(claims.subject != "wrong-subject")
+    #expect(claims.email == "user@example.com")
+    #expect(claims.isAnonymous)
   }
 
   @Test("missing required claim throws")

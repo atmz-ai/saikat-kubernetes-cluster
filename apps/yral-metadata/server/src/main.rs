@@ -1,20 +1,17 @@
-// rebuild trigger
 mod api;
-mod auth;
 mod config;
 mod consts;
 mod services;
 mod session;
-mod signup;
 mod state;
 mod utils;
 
+#[cfg(test)]
+mod tests;
+
 use std::sync::Arc;
 
-use axum::{
-    routing::{delete, get, post},
-    Router,
-};
+use axum::{routing::get, Router};
 use config::AppConfig;
 use state::AppState;
 use tower_http::cors::CorsLayer;
@@ -30,61 +27,28 @@ fn setup_tracing_subscriber() {
 }
 
 async fn main_impl() -> Result<()> {
-    let conf = AppConfig::load()?;
+    let configuration = AppConfig::load()?;
+    let state = Arc::new(AppState::new(&configuration)?);
+    let application = application_router(state);
+    let listener = tokio::net::TcpListener::bind(configuration.bind_address)
+        .await
+        .map_err(Error::Io)?;
 
-    let state = Arc::new(AppState::new(&conf).await?);
+    log::info!("Server starting on {}", configuration.bind_address);
+    axum::serve(listener, application)
+        .await
+        .map_err(Error::Io)?;
+    Ok(())
+}
 
-    // Build the application router with all routes defined here
-    let app = Router::new()
-        // API routes
-        .route(
-            "/metadata/{user_principal}",
-            post(api::handlers::set_user_metadata),
-        )
-        .route(
-            "/admin/metadata/{user_principal}",
-            post(api::handlers::admin_set_user_metadata),
-        )
-        .route(
-            "/metadata/{user_principal}",
-            get(api::handlers::get_user_metadata),
-        )
-        .route(
-            "/metadata/bulk",
-            delete(api::handlers::delete_metadata_bulk),
-        )
-        .route(
-            "/metadata-bulk",
-            post(api::handlers::get_user_metadata_bulk),
-        )
-        // Session routes
-        .route(
-            "/v2/update_session_as_registered",
-            post(session::update_session_as_registered_v2),
-        )
-        // Signup routes
-        .route("/email/{user_principal}", post(signup::set_user_email))
-        .route(
-            "/signup/{user_principal}",
-            post(signup::set_signup_datetime),
-        )
-        // OpenAPI/Swagger UI routes
+fn application_router(state: Arc<AppState>) -> Router {
+    Router::new()
+        .route("/session", get(session::get_session))
         .route("/explorer/{*tail}", get(services::openapi::get_swagger))
         .route("/explorer/", get(services::openapi::get_swagger_root))
         .route("/healthz", get(api::handlers::healthz))
         .layer(CorsLayer::permissive())
-        // Add shared state
-        .with_state(state.clone());
-
-    let listener = tokio::net::TcpListener::bind(conf.bind_address)
-        .await
-        .map_err(Error::IO)?;
-
-    log::info!("Server starting on {}", conf.bind_address);
-
-    axum::serve(listener, app).await.map_err(Error::IO)?;
-
-    Ok(())
+        .with_state(state)
 }
 
 fn main() {

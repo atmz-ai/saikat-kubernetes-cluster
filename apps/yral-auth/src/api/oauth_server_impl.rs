@@ -1,10 +1,9 @@
 use crate::{
-    api::identity_provider::user_id_from_oauth_or_create,
     context::server::expect_server_ctx,
     error::AuthErrorKind,
     oauth::{jwt::generate::generate_code_grant_jwt, AuthQuery, SupportedOAuthProviders},
     oauth_provider::OAuthProvider,
-    utils::server_url::get_server_url_from_request,
+    utils::{server_url::get_server_url_from_request, time::current_epoch_secs},
 };
 use axum::{
     extract::Form,
@@ -152,6 +151,10 @@ pub async fn get_oauth_url_impl(
 
     let resp: ResponseOptions = expect_context();
 
+    let now = current_epoch_secs();
+    ctx.pending_oauth_states
+        .issue(oauth_csrf_token.secret(), now + 10 * 60, now)
+        .map_err(ServerFnError::new)?;
     set_cookies(&resp, jar);
 
     Ok(auth_url.to_string())
@@ -221,9 +224,7 @@ async fn generate_oauth_login_code(
         email
     );
 
-    let user_id =
-        user_id_from_oauth_or_create(provider, &ctx.kv_store, sub_id.as_str(), email.as_deref())
-            .await?;
+    let user_id = sub_id.as_str();
 
     let server_url = get_server_url_from_request().await.map_err(|e| {
         log::error!("Failed to get server url for code_grant: {}", e);
@@ -232,12 +233,16 @@ async fn generate_oauth_login_code(
 
     let code_grant = generate_code_grant_jwt(
         &ctx.jwk_pairs.auth_tokens.encoding_key,
-        &user_id,
+        user_id,
         &server_url,
         query,
         email,
     );
 
+    let now = current_epoch_secs();
+    ctx.pending_authorization_codes
+        .issue(&code_grant, now + 10 * 60, now)
+        .map_err(AuthErrorKind::unexpected)?;
     Ok(code_grant)
 }
 
@@ -274,6 +279,16 @@ pub async fn perform_oauth_login_impl(
         ServerFnError::new(err_msg)
     })?;
     let pkce_verifier = PkceCodeVerifier::new(pkce_cookie.value().to_owned());
+
+    if !ctx
+        .pending_oauth_states
+        .consume(&state, current_epoch_secs())
+        .map_err(ServerFnError::new)?
+    {
+        return Err(ServerFnError::new(
+            "OAuth state expired, already used, or unknown",
+        ));
+    }
 
     jar = jar.remove(PKCE_VERIFIER_COOKIE);
     jar = jar.remove(CSRF_TOKEN_COOKIE);

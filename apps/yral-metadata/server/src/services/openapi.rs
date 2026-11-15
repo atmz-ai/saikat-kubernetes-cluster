@@ -7,9 +7,8 @@ use std::sync::Arc;
 use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
 use utoipa::{Modify, OpenApi};
 
-use crate::session::YralAuthClaim;
 use crate::utils::error::Error as AppError;
-use types::*;
+use types::{error::ApiError, SessionClaims};
 
 struct BearerAuth;
 
@@ -29,29 +28,15 @@ impl Modify for BearerAuth {
     }
 }
 
-/// Main structure to generate OpenAPI documentation
 #[derive(OpenApi)]
 #[openapi(
     paths(
-        crate::api::handlers::set_user_metadata,
-        crate::api::handlers::admin_set_user_metadata,
-        crate::api::handlers::get_user_metadata,
-        crate::api::handlers::delete_metadata_bulk,
-        crate::api::handlers::get_user_metadata_bulk,
-        crate::session::update_session_as_registered_v2
+        crate::api::handlers::healthz,
+        crate::session::get_session
     ),
     components(schemas(
-        AppError,
-        DeviceRegistrationToken,
-        NotificationKey,
-        UserMetadata,
-        UserMetadataV2,
-        SetUserMetadataReqMetadata,
-        SetUserMetadataReq,
-        BulkUsers,
-        BulkGetUserMetadataReq,
-        CanisterSessionRegisteredRes,
-        YralAuthClaim
+        ApiError,
+        SessionClaims
     )),
     modifiers(&BearerAuth)
 )]

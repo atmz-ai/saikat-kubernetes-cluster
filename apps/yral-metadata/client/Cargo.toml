@@ -3,10 +3,7 @@ name = "yral-metadata-client"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
-ic-agent = { workspace = true }
 reqwest = {
   workspace = true,
   features = [
@@ -14,8 +11,10 @@ reqwest = {
     "json",
   ]
 }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
-types = { package = "yral-metadata-types", path = "../types", features = ["ic-agent"] }
+types = { package = "yral-metadata-types", path = "../types", default-features = false }
+url = { workspace = true }
 
 [features]
 default = []
