@@ -24,7 +24,7 @@ kind: Kustomization
 # in kubernetes/clusters/yral-k8s/). No manual apply needed.
 resources:
   - namespace.yaml
-  - dnsendpoint-crd.yaml
+  - https://raw.githubusercontent.com/kubernetes-sigs/external-dns/v0.24.0/config/crd/standard/dnsendpoints.externaldns.k8s.io.yaml
   - pdns-config.yaml
   - pdns-deployment.yaml
   - pdns-service-dns.yaml

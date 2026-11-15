@@ -7,6 +7,7 @@
     "prConcurrentLimit": 20,
     "prHourlyLimit": 0,
     "automerge": true,
+    "platformAutomerge": false,
     "minimumReleaseAge": "4 days",
     "minimumReleaseAgeBehaviour": "timestamp-required",
     "rebaseWhen": "behind-base-branch",
@@ -39,27 +40,37 @@
             "versioningTemplate": "docker"
         },
         {
-            "description": "cert-manager release URL in kustomization resources list",
+            "description": "Discover complete GitHub release assets in any YAML declaration",
             "customType": "regex",
             "managerFilePatterns": [
-                "/kubernetes/infrastructure/cert-manager/kustomization\\.yaml/"
+                "/\\.ya?ml$/"
             ],
             "matchStrings": [
-                "github\\.com/cert-manager/cert-manager/releases/download/(?<currentValue>v[\\d.]+)/cert-manager\\.yaml"
+                "https://github\\.com/(?<depName>[^/\\s]+/[^/\\s]+)/releases/download/(?<currentValue>v?\\d[^/\\s]*)/"
             ],
-            "depNameTemplate": "cert-manager/cert-manager",
             "datasourceTemplate": "github-releases"
         },
         {
-            "description": "cert-manager acmesolver image arg (must stay in sync with release URL above)",
+            "description": "Discover tagged upstream manifests in any raw GitHub YAML reference",
             "customType": "regex",
             "managerFilePatterns": [
-                "/kubernetes/infrastructure/cert-manager/kustomization\\.yaml/"
+                "/\\.ya?ml$/"
             ],
             "matchStrings": [
-                "acme-http01-solver-image=quay\\.io/jetstack/cert-manager-acmesolver:(?<currentValue>v[\\d.]+)"
+                "https://raw\\.githubusercontent\\.com/(?<depName>[^/\\s]+/[^/\\s]+)/(?<currentValue>v?\\d[^/\\s]*)/"
             ],
-            "depNameTemplate": "cert-manager/cert-manager",
+            "datasourceTemplate": "github-releases"
+        },
+        {
+            "description": "Discover official Tekton release mirrors without extracting individual images",
+            "customType": "regex",
+            "managerFilePatterns": [
+                "/\\.ya?ml$/"
+            ],
+            "matchStrings": [
+                "https://infra\\.tekton\\.dev/tekton-releases/(?<project>[^/\\s]+)/previous/(?<currentValue>v?\\d[^/\\s]*)/"
+            ],
+            "depNameTemplate": "tektoncd/{{project}}",
             "datasourceTemplate": "github-releases"
         },
         {
@@ -131,7 +142,17 @@
             "enabled": false
         },
         {
-            "description": "Group the two cert-manager version references (URL + acmesolver image) into one PR",
+            "description": "Keep all references to each upstream release in one tested PR",
+            "matchManagers": [
+                "custom.regex"
+            ],
+            "matchDatasources": [
+                "github-releases"
+            ],
+            "groupName": "{{depName}} release bundle"
+        },
+        {
+            "description": "Group the cert-manager release references into one PR",
             "matchFileNames": [
                 "kubernetes/infrastructure/cert-manager/kustomization.yaml"
             ],
