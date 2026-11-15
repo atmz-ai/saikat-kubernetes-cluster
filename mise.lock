@@ -326,7 +326,7 @@ url_api = "https://api.github.com/repos/cargo-bins/cargo-binstall/releases/asset
 provenance = "github-attestations"
 
 [[tools."cargo:cargo-leptos"]]
-version = "0.3.11"
+version = "0.3.12"
 backend = "cargo:cargo-leptos"
 
 [[tools."cargo:trunk"]]
