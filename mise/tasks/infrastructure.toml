@@ -238,7 +238,7 @@ description = "Regenerate the PowerDNS zone artifacts from the pdns_zones list (
 run = "./.venv/bin/ansible-playbook ansible/playbooks/operations/update-dns-zone-config.yml"
 
 [renovate-configuration-checks]
-description = "Validate Renovate schema, generic bundle and image extraction, and reviewed-only merging"
+description = "Validate Renovate schema, generic bundle and image extraction, and check-gated merging"
 run = '''
 #!/usr/bin/env -S ./.venv/bin/python -u
 import json
@@ -283,13 +283,12 @@ for (const owner of [configuration.flux, configuration.kubernetes, manager]) {
 assert(!configuration.customManagers.some(manager => manager.depNameTemplate === 'rustfs/rustfs'));
 console.log('PASS: existing and previously unknown YAML paths are discovered without per-image rules');
 
-assert.equal(configuration.automerge, false);
-assert(!configuration.packageRules.some(rule => rule.automerge === true));
+assert.equal(configuration.automerge, true);
 assert.equal(configuration.platformAutomerge, false);
 assert.notEqual(configuration.ignoreTests, true);
 assert.notEqual(configuration.requiredStatusChecks, null);
 assert.equal(configuration.schedule, undefined);
-console.log('PASS: Renovate proposes updates without automatically merging them');
+console.log('PASS: Renovate waits for checks instead of relying on unavailable branch protection');
 
 const tektonTemplate = 'tektoncd/' + '{'.repeat(2) + 'project' + '}'.repeat(2);
 const releaseManagers = configuration.customManagers.filter(manager => manager.datasourceTemplate === 'github-releases' && (manager.depNameTemplate === undefined || manager.depNameTemplate === tektonTemplate));

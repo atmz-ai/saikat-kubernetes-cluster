@@ -26,9 +26,10 @@ Run `mise run infrastructure-release-checks` and
 Infrastructure Releases workflow runs without credentials on both Linux and
 macOS, including bot PRs. It installs only `kubectl`, Python and Node via
 mise-action and uses `mise run --skip-tools` to avoid installing unrelated
-project runtimes during validation. Renovate proposes updates with automatic merging
-disabled. Review and merge components individually after checks pass, then verify
-the deployed component before merging the next update.
+project runtimes during validation. Renovate performs check-gated merging itself rather
+than delegating to platform automerge. Do not rely on native automerge to wait
+for CI unless branch protection actually requires those checks. Validate components
+merged by Renovate as well as manually merged updates before continuing.
 
 ## Networking and TLS
 
