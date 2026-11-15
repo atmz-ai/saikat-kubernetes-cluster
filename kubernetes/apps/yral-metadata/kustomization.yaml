@@ -1,20 +1,3 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-resources:
-  - namespace.yaml
-  - configmap.yaml
-  - deployment.yaml
-  - service.yaml
-  - reference-grant.yaml
-  - harbor-pull-secret.sops.yaml
-  - secrets.sops.yaml
-  - github-clone-secret.sops.yaml
-  - github-ssh-secret.sops.yaml
-  - build.yaml
-  - image-repository.yaml
-  - image-policy.yaml
-  - image-update-automation.yaml
-  # harbor-scan-secret is NOT included here — it's defined once in yral-auth
-  # and shared across all apps (same Secret in flux-system namespace).
-  # Including it here causes "id matched 2 resources" kustomize error.
-  - tekton-trigger.yaml
+resources: []

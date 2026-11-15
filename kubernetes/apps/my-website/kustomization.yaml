@@ -13,6 +13,7 @@ resources:
   - github-ssh-secret.sops.yaml
   - build.yaml
   - image-repository.yaml
+  - harbor-scan-secret.sops.yaml
   - image-policy.yaml
   - image-update-automation.yaml
   - tekton-trigger.yaml

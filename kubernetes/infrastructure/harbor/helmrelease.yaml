@@ -129,9 +129,7 @@ spec:
     # When the Harbor admin password or robot account credentials change, update ALL:
     #   1. kubernetes/infrastructure/harbor/harbor-admin-secret.sops.yaml  (admin password)
     #   2. kubernetes/apps/<app>/harbor-pull-secret.sops.yaml             (robot creds, per-app)
-    # * Per-app credentials: yral-auth, yral-metadata, my-website.
-    #   3. kubernetes/apps/yral-auth/harbor-scan-secret.sops.yaml         (robot creds, Flux image scan)
-    #   4. kubernetes/apps/yral-metadata/harbor-scan-secret.sops.yaml      (robot creds, Flux image scan)
+    # * Website image scans use kubernetes/apps/my-website/harbor-scan-secret.sops.yaml.
     # Use: mise run sops-decrypt <file> / mise run sops-encrypt <file>
     - kind: Secret
       name: harbor-secrets
