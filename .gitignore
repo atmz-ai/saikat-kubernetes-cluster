@@ -3,6 +3,7 @@
 .ruff_cache/
 .saikat-machine-access-ed25519
 .venv/
+ansible/.ansible/
 ansible/.vault_pass
 ansible/collections/
 apps/yral-ios/.build/
