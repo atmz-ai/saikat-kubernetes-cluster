@@ -35,7 +35,7 @@ spec:
     spec:
       containers:
         - name: beszel
-          image: henrygd/beszel:0.20.0
+          image: henrygd/beszel:0.21.1
           ports:
             - containerPort: 8090
               name: http
