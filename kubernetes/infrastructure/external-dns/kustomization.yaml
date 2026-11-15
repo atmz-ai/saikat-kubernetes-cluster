@@ -113,17 +113,6 @@ resources:
 # listing it under `resources` fails with "missing Resource metadata". The target
 # lives here (stable) while the operations are generated per zone.
 patches:
-  # ! Temporary recovery for image digest updates to completed immutable Jobs.
-  - target:
-      kind: Job
-      name: pdns-(db-seed|static-records|apex-records-.*)
-    patch: |-
-      apiVersion: batch/v1
-      kind: Job
-      metadata:
-        name: recovery
-        annotations:
-          kustomize.toolkit.fluxcd.io/force: enabled
   - target:
       kind: Secret
       name: loki-rustfs-credentials
