@@ -132,9 +132,6 @@
       changed_when: "'deleted' in result.stdout"
       register: result
 
-    # Wait until all PDBs covering pods on this node allow at least 1
-    # disruption. This prevents draining a Kafka node when the Kafka cluster
-    # is already degraded (e.g. another broker is still starting up).
     - name: Wait for PDBs covering pods on this node to allow disruption
       ansible.builtin.shell: |
         set -o pipefail

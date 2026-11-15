@@ -185,7 +185,7 @@ pdns_nameservers_previous_ips:
 # Every node here already reaches every other node over its public address, so no
 # private L2 network is needed and no cross-region route needs inventing: Cilium
 # encapsulates pod traffic to whatever address a node advertises. That was true before
-# Kilo was added (etcd ran 5 replicas in HEL against 2 in FSN, Kafka 4/1, CoreDNS 4/4),
+# Kilo was added (etcd ran 5 replicas in HEL against 2 in FSN, CoreDNS 4/4),
 # which is the proof that nothing about it depended on a mesh overlay.
 #
 # The full reasoning, the measurements, and what was ruled out are recorded at

@@ -7,11 +7,11 @@ name: API Version Audit
 # Why this exists: whether an apiVersion is served is decided by the CRD that
 # defines it, and a version/channel change can stop serving a version we use.
 # That happened here: switching the Gateway API CRDs to the standard channel
-# dropped `v1alpha2`, and every Kafka TLSRoute using it failed to apply with
+# dropped `v1alpha2`, and TLSRoutes using it failed to apply with
 # "the server could not find the requested resource". Renovate's kubernetes-api
 # datasource cannot cover this — it is a manually maintained table limited to
 # core Kubernetes, Flux and External Secrets resources, so third-party operator
-# CRDs (Gateway API, Tekton, Strimzi, Cilium, Longhorn, ...) are out of its
+# CRDs (Gateway API, Tekton, Cilium, Longhorn, ...) are out of its
 # scope entirely.
 #
 # Runs standalone: the runner holds only mise plus the Ansible vault password,

@@ -296,7 +296,7 @@
   # ! forever. Deleting it is safe and is what makes a NON-forced drain possible: the
   # ! pod is pinned to this node and cannot reschedule, and Longhorn recreates the PDB
   # ! when the instance-manager restarts. This replaces the old `--disable-eviction`
-  # ! flag, which bypassed EVERY PDB (Kafka's included) rather than only the one that
+  # ! flag, which bypassed EVERY PDB rather than only the one that
   # ! can never be satisfied.
   ansible.builtin.shell: |
     set -o pipefail
@@ -326,7 +326,7 @@
 - name: Drain the node
   # ! NO --force and NO --disable-eviction. --disable-eviction bypasses every
   # ! PodDisruptionBudget, which is how a drain can evict the last healthy replica of a
-  # ! volume (Kafka's PDB is minAvailable: 2 of 3) and leave a workload unable to
+  # ! volume and leave a workload unable to
   # ! attach. Without it, drain honours the PDBs and fails loudly instead of destroying
   # ! data. --force is also omitted: it is only needed for unmanaged pods, and a node
   # ! that cannot drain cleanly must be investigated, not forced.

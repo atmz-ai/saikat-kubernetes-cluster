@@ -177,5 +177,4 @@ all:
         # entries declare only what distinguishes each node (address, provider,
         # datacenter, and for ns1–ns11 the nameserver glue record).
         #
-        # Kafka DNS entries were removed — *.yral.com wildcard + SNI passthrough handles routing.
         # All DNS records are grey cloud (proxied: false) — Cloudflare proxy removed to avoid upload limits.

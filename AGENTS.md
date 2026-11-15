@@ -48,7 +48,7 @@ Nodes are **never patched in place**. Reprovision from a clean slate on every ru
 ### 2. Immutable Data Operations (Stateful Stores)
 Never `UPDATE`/`DELETE` on live production tables or in-place schema changes that lose data.
 
-All migrations/enrichments (ClickHouse, Kafka topics, object storage, DB schemas) use the 4-step pattern:
+All migrations/enrichments (ClickHouse, object storage, DB schemas) use the 4-step pattern:
 1. Dual-write (new writes go to both old and new versioned object)
 2. Backfill historical data
 3. Validate (counts, spot checks)
@@ -90,7 +90,7 @@ Never use terminal commands (`sed`, `awk`, `echo >`, `cat >`, `tee`, `tr`, `perl
 ### Default-First Configuration
 Prefer component defaults. Add explicit config only when a concrete problem requires deviation. Explicitly matching the default creates maintenance burden and obscures intent.
 
-**Almost always prefer the developer-set defaults unless our specific use case requires tuning.** The developers of a tool/operator know its sensible defaults best — overriding them without a concrete, observed reason is more likely to introduce regressions than improvements. Only deviate when: (a) a specific symptom (OOMKilled, latency, throughput, errors) is observed in production, AND (b) the default is genuinely the cause (not just correlated). Document the symptom and rationale in a comment on the manifest where the override lives. This applies to JVM options, resource limits, Kafka broker config, operator env vars, Helm chart values, etc.
+**Almost always prefer the developer-set defaults unless our specific use case requires tuning.** The developers of a tool/operator know its sensible defaults best — overriding them without a concrete, observed reason is more likely to introduce regressions than improvements. Only deviate when: (a) a specific symptom (OOMKilled, latency, throughput, errors) is observed in production, AND (b) the default is genuinely the cause (not just correlated). Document the symptom and rationale in a comment on the manifest where the override lives. This applies to JVM options, resource limits, operator env vars, Helm chart values, etc.
 
 ### Docs-First for Tooling (Hard Rule)
 When using a tool or library for the first time (or encountering a non-trivial configuration question), **always check the official documentation first** before trial-and-error. Find the canonical/prescribed way to do it, implement that, and record it in AGENTS.md under the relevant tooling section. Never guess at API shapes, configuration fields, or patterns — fetch the docs, read the prescribed approach, and follow it exactly. This prevents hours of wasted iteration on wrong assumptions.
@@ -115,7 +115,7 @@ When making changes to a codebase (fixing bugs, migrating APIs, adding features)
 ### Sweeping Changes — Per-Component Verification (Hard Rule)
 When making sweeping changes (removing a feature, restructuring workspaces, bumping shared deps, etc.) that touch multiple components, **verify each affected component individually** before pushing:
 1. **Compile** — `cargo check` / `cargo build` / `mise run <app>-build` for each affected component.
-2. **Test** — `cargo test` / `mise run <app>-test`. Tests requiring external services (Kafka, PostgreSQL) that fail with "Connection refused" are expected locally; verify no *new* test failures from the change.
+2. **Test** — `cargo test` / `mise run <app>-test`. Tests requiring external services (PostgreSQL) that fail with "Connection refused" are expected locally; verify no *new* test failures from the change.
 3. **Run locally** — `mise run <app>-run` (starts the app's daemon via mise) to verify the app starts and the health endpoint responds.
 4. **Push** — once all components pass, push to git and let CI/CD handle deployment.
 5. **Validate on prod** — after deployment, verify the service is healthy in production (read-only `kubectl get/describe/logs`, health endpoint, smoke test).
@@ -430,7 +430,6 @@ Maintain a top-level `constants.rs` beside `lib.rs` for constants shared between
 3. The write amplification from layering both is measurable and unacceptable
 
 Workloads currently using 1-replica:
-- **Kafka** (3 brokers, `replication.factor=3` — app-layer RF=3 tolerates 2/3 node failures; Longhorn 2-replica only tolerates 1/2)
 - **CNPG PostgreSQL** (streaming replication — primary + replicas, each with their own PVC)
 
 Do NOT use 1-replica for workloads without app-layer replication. Losing the single node that holds the data means permanent data loss.
