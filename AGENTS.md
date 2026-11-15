@@ -98,7 +98,7 @@ When using a tool or library for the first time (or encountering a non-trivial c
 **Binary search debugging for procedural code:** When stuck after a couple of failed iterations on Dockerfiles, scripts, or any multi-step procedural code, comment out everything except the first essential step. Verify it works (locally + in-cluster). Then uncomment one line/step at a time, verifying each works before proceeding to the next. This isolates the exact failing step without rewriting from scratch.
 
 ### Component Versioning
-**Always ask the user for an explicit version number from the project's releases page before adding/upgrading.** Pin exactly in `roles/<role>/defaults/main.yml` only.
+For **deployed cluster components**, always ask the user for an explicit version number from the project's releases page before adding/upgrading. Pin exactly in `roles/<role>/defaults/main.yml` only. Local mise tool requests follow the local version-locking preference below, not this rule.
 
 - Never "latest".
 - Downgrade only if latest incompatible with current K8s (document reason).
@@ -600,7 +600,7 @@ For multiline or Base64 input, use `--stdin` instead of `--prompt`, keeping plai
 
 **Start daemons per task, not all at once.** A task declares what it needs with `daemons = ["<name>"]` (or `daemons = true` for every project daemon); mise starts them, waits for readiness, then runs the task body, and reuses anything already running. `auto = ["start", "stop"]` and `pitchfork activate` are gone — **nothing starts merely by entering the repo.** Prefer `mise run <app>-run` (which adds the `depends = ["<app>-build"]` it needs) over calling `mise daemons start` directly. Stop with `mise run <app>-stop` or `mise daemons stop`.
 
-**Version locking:** `mise.lock` is committed. Bump tool versions explicitly in `mise.toml`, then `mise lock` to refresh the lockfile. Never use floating `"latest"` without a lockfile entry.
+**Version locking (Preference):** Prefer `"latest"` requests for local mise tools such as `uv`; keep exact resolved versions, checksums, and provenance in the committed `mise.lock`. Update a tool with `mise lock --bump <tool>` without replacing its floating request with an exact version. Use an explicit local tool pin only when the operator requests one or a verified compatibility constraint requires it, not merely to select a release or prevent bot branch rewrites. Deployed cluster components retain their explicit version declarations.
 
 **Declarative-only tooling (no imperative system installs):** The local environment must be fully reproducible from `mise.toml` alone — a Nix-like experience. Never run `sudo apt-get install`, `brew install`, or any imperative system package manager command to satisfy a build dependency. If a tool or library is needed:
 1. Check if mise provides it (add to `[tools]` in `mise.toml`).
