@@ -1,5 +1,4 @@
 # * Beszel handles authentication directly; backend access requires its ReferenceGrant.
-# ! Keep the old endpoint until running node agents no longer use its HUB_URL.
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -13,7 +12,6 @@ spec:
       sectionName: http
   hostnames:
     - beszel.saikat.dev
-    - beszel.saikat.oleole.ai
   rules:
     - filters:
         - type: RequestRedirect
@@ -30,13 +28,9 @@ spec:
   parentRefs:
     - name: web-gateway
       namespace: kube-system
-      sectionName: https-beszel
-    - name: web-gateway
-      namespace: kube-system
       sectionName: https-saikat-dev
   hostnames:
     - beszel.saikat.dev
-    - beszel.saikat.oleole.ai
   rules:
     - backendRefs:
         - name: beszel

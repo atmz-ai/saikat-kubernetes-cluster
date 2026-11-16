@@ -24,23 +24,23 @@ beszel_hostname = urlparse(beszel_configuration["data"]["APP_URL"]).hostname
 assert beszel_configuration["data"]["APP_URL"] == node_configuration["beszel_hub_url"]
 assert beszel_configuration["data"]["DISABLE_PASSWORD_AUTH"] == "true"
 assert beszel_configuration["data"].get("USER_CREATION", "false") == "false"
-for scenario in ("complete", "missing-agent-compatibility", "missing-new-hostname"):
+for scenario in ("complete", "retired-hostname-restored", "missing-new-hostname"):
     candidate = copy.deepcopy(beszel_routes)
-    if scenario == "missing-agent-compatibility":
-        candidate[0]["spec"]["hostnames"].remove("beszel.saikat.oleole.ai")
+    if scenario == "retired-hostname-restored":
+        candidate[0]["spec"]["hostnames"].append("beszel.saikat.oleole.ai")
     elif scenario == "missing-new-hostname":
         candidate[0]["spec"]["hostnames"].remove(beszel_hostname)
     try:
         for route in candidate:
-            assert {beszel_hostname, "beszel.saikat.oleole.ai"} <= set(route["spec"]["hostnames"]), "Beszel migration must preserve existing agents and the new UI origin"
+            assert route["spec"]["hostnames"] == [beszel_hostname], "Beszel must serve only the migrated hub origin"
         secure_route = next(route for route in candidate if route["metadata"]["name"] == "beszel")
-        assert "https-saikat-dev" in {parent["sectionName"] for parent in secure_route["spec"]["parentRefs"]}
+        assert {parent["sectionName"] for parent in secure_route["spec"]["parentRefs"]} == {"https-saikat-dev"}
     except AssertionError:
-        assert scenario != "complete", "Beszel staged domain migration is invalid"
+        assert scenario != "complete", "Beszel domain migration is invalid"
         print("PASS: rejected Beszel migration regression", scenario)
     else:
         assert scenario == "complete", "missing Beszel endpoint accepted"
-        print("PASS: Beszel UI, future agents, and existing-agent compatibility remain coherent")
+        print("PASS: Beszel UI and agent declarations use only the migrated hub origin")
 agent_tasks = yaml.safe_load(Path("ansible/roles/beszel-agent/tasks/main.yml").read_text())
 for scenario in ("complete", "missing-restart-flush"):
     candidate = [task for task in agent_tasks if scenario == "complete" or task.get("ansible.builtin.meta") != "flush_handlers"]
