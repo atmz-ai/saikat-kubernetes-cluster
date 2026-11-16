@@ -5,12 +5,11 @@ resources:
   - secret.sops.yaml
   - deployment-harbor.yaml
   - service-harbor.yaml
-  - deployment-hubble-ui.yaml
-  - service-hubble-ui.yaml
   - deployment-grafana.yaml
   - grafana-allowed-emails.yaml
   - service-grafana.yaml
   - deployment-headlamp.yaml
+  - headlamp-allowed-emails.yaml
   - service-headlamp.yaml
   - deployment-dashboard.yaml
   - dashboard-allowed-emails.yaml

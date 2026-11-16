@@ -15,38 +15,57 @@ import jsonschema
 import yaml
 
 configuration = json.loads(Path("renovate.json").read_text())
-grafana_deployment = yaml.safe_load(Path("kubernetes/infrastructure/oauth2-proxy/deployment-grafana.yaml").read_text())
-grafana_allowlist = yaml.safe_load(Path("kubernetes/infrastructure/oauth2-proxy/grafana-allowed-emails.yaml").read_text())
-for scenario in ("complete", "legacy-google-group", "domain-bypasses-allowlist", "missing-email-file", "additional-user"):
-    candidate = copy.deepcopy(grafana_deployment)
-    emails = grafana_allowlist["data"]["allowed-emails"].splitlines()
-    container = candidate["spec"]["template"]["spec"]["containers"][0]
-    if scenario == "legacy-google-group":
-        container["args"].append("--google-group=developer-admin@gobazzinga.io")
-    elif scenario == "domain-bypasses-allowlist":
-        container["args"].append("--email-domain=atmz.ai")
-    elif scenario == "missing-email-file":
-        candidate["spec"]["template"]["spec"]["volumes"] = []
-    elif scenario == "additional-user":
-        emails.append("another@atmz.ai")
-    try:
-        assert emails == ["saikat@atmz.ai"], "Grafana must admit only the operator"
-        assert "--authenticated-emails-file=/etc/oauth2-proxy/allowed-emails" in container["args"]
-        assert not any(argument.startswith(("--email-domain=", "--google-group=", "--google-admin-email=", "--google-service-account-json=")) for argument in container["args"]), "legacy checks or domain grants override the exact-email policy"
-        volume = next((volume for volume in candidate["spec"]["template"]["spec"]["volumes"] if volume["name"] == "allowed-emails"), {})
-        assert volume.get("configMap", {}).get("name") == grafana_allowlist["metadata"]["name"]
-        assert {"name": "allowed-emails", "mountPath": "/etc/oauth2-proxy", "readOnly": True} in container["volumeMounts"]
-    except AssertionError:
-        assert scenario != "complete", "Grafana exact-email policy is invalid"
-        print("PASS: rejected Grafana access regression", scenario)
-    else:
-        assert scenario == "complete", "overbroad or unusable Grafana policy accepted"
-        print("PASS: Grafana admits only saikat@atmz.ai through its mounted allowlist")
+for filename in ("kubernetes/infrastructure/cilium/helmrelease.yaml", "ansible/manifests/cilium-values.yaml"):
+    declaration = yaml.safe_load(Path(filename).read_text())
+    values = declaration["spec"]["values"] if "spec" in declaration else declaration
+    for scenario in ("complete", "ui-enabled", "relay-disabled"):
+        candidate = copy.deepcopy(values["hubble"])
+        if scenario == "ui-enabled":
+            candidate["ui"]["enabled"] = True
+        elif scenario == "relay-disabled":
+            candidate["relay"]["enabled"] = False
+        try:
+            assert candidate["enabled"] and candidate["relay"]["enabled"] and candidate["metrics"]["enabled"], "Hubble observability must remain enabled"
+            assert not candidate["ui"]["enabled"], "retired Hubble UI must remain disabled"
+        except AssertionError:
+            assert scenario != "complete", "invalid Hubble UI retirement: " + filename
+            print("PASS: rejected Hubble retirement regression", filename, scenario)
+        else:
+            assert scenario == "complete", "invalid Hubble configuration accepted"
+            print("PASS: Hubble UI retired while relay and metrics remain enabled", filename)
+for application in ("grafana", "headlamp"):
+    deployment = yaml.safe_load(Path("kubernetes/infrastructure/oauth2-proxy/deployment-" + application + ".yaml").read_text())
+    allowlist = yaml.safe_load(Path("kubernetes/infrastructure/oauth2-proxy/" + application + "-allowed-emails.yaml").read_text())
+    for scenario in ("complete", "legacy-google-group", "domain-bypasses-allowlist", "missing-email-file", "additional-user"):
+        candidate = copy.deepcopy(deployment)
+        emails = allowlist["data"]["allowed-emails"].splitlines()
+        container = candidate["spec"]["template"]["spec"]["containers"][0]
+        if scenario == "legacy-google-group":
+            container["args"].append("--google-group=developer-admin@gobazzinga.io")
+        elif scenario == "domain-bypasses-allowlist":
+            container["args"].append("--email-domain=atmz.ai")
+        elif scenario == "missing-email-file":
+            candidate["spec"]["template"]["spec"]["volumes"] = []
+        elif scenario == "additional-user":
+            emails.append("another@atmz.ai")
+        try:
+            assert emails == ["saikat@atmz.ai"], application + " must admit only the operator"
+            assert "--authenticated-emails-file=/etc/oauth2-proxy/allowed-emails" in container["args"]
+            assert not any(argument.startswith(("--email-domain=", "--google-group=", "--google-admin-email=", "--google-service-account-json=")) for argument in container["args"]), "legacy checks or domain grants override the exact-email policy"
+            volume = next((volume for volume in candidate["spec"]["template"]["spec"]["volumes"] if volume["name"] == "allowed-emails"), {})
+            assert volume.get("configMap", {}).get("name") == allowlist["metadata"]["name"]
+            assert {"name": "allowed-emails", "mountPath": "/etc/oauth2-proxy", "readOnly": True} in container["volumeMounts"]
+        except AssertionError:
+            assert scenario != "complete", application + " exact-email policy is invalid"
+            print("PASS: rejected access regression", application, scenario)
+        else:
+            assert scenario == "complete", "overbroad or unusable policy accepted: " + application
+            print("PASS: operator-only mounted allowlist", application)
 dashboard_addresses = re.findall(r'href="(https://[^"]+)"', Path("kubernetes/apps/dashboard/index.html").read_text())
 for scenario in ("complete", "dashboard-before-oauth-cutover"):
     candidate = list(dashboard_addresses)
     callbacks = []
-    for name in ("grafana", "headlamp", "hubble-ui"):
+    for name in ("grafana", "headlamp"):
         deployment = yaml.safe_load(Path("kubernetes/infrastructure/oauth2-proxy/deployment-" + name + ".yaml").read_text())
         arguments = deployment["spec"]["template"]["spec"]["containers"][0]["args"]
         callback = next(argument.split("=", 1)[1] for argument in arguments if argument.startswith("--redirect-url="))

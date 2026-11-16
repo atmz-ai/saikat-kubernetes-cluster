@@ -45,17 +45,7 @@ hubble:
         cpu: 200m
         memory: 512Mi
   ui:
-    enabled: true
-    replicas: 1
-    resources:
-      limits:
-        cpu: 200m
-        memory: 512Mi
-      requests:
-        cpu: 100m
-        memory: 256Mi
-    ingress:
-      enabled: false # Will create LoadBalancer Service instead
+    enabled: false
   metrics:
     enabled:
       - dns:query
