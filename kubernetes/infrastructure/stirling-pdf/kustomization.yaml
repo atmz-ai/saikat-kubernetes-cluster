@@ -1,5 +1,3 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-resources:
-  - retired-service-backups-cleanup.yaml
-  - backup-metadata-cleanup.yaml
+resources: []
