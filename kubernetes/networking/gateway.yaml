@@ -25,18 +25,6 @@ metadata:
 spec:
   gatewayClassName: cilium
   listeners:
-    - name: https-dashboard
-      port: 443
-      protocol: HTTPS
-      hostname: dashboard.saikat.oleole.ai
-      tls:
-        mode: Terminate
-        certificateRefs:
-          - name: dashboard-tls
-            kind: Secret
-      allowedRoutes:
-        namespaces:
-          from: All
     - name: https-rustfs-console
       port: 443
       protocol: HTTPS

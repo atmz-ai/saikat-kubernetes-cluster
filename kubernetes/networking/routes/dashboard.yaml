@@ -12,7 +12,6 @@ spec:
       sectionName: http
   hostnames:
     - dashboard.saikat.dev
-    - dashboard.saikat.oleole.ai
   rules:
     - filters:
         - type: RequestRedirect
@@ -29,13 +28,9 @@ spec:
   parentRefs:
     - name: web-gateway
       namespace: kube-system
-      sectionName: https-dashboard
-    - name: web-gateway
-      namespace: kube-system
       sectionName: https-saikat-dev
   hostnames:
     - dashboard.saikat.dev
-    - dashboard.saikat.oleole.ai
   rules:
     - backendRefs:
         - name: oauth2-proxy-dashboard
