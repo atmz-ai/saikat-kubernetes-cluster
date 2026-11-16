@@ -15,3 +15,7 @@ before CEL filtering, with a namespace-local SOPS Secret referenced by
 `secretRef.secretName` and `secretRef.secretKey`. Omitting `secretRef` bypasses
 signature verification. Provision the Secret and configure GitHub signing before
 enabling verification; test signed, unsigned, and invalid-signature requests.
+
+An EventListener HTTP 202 acknowledges receipt, not successful interception.
+Verify rejection in the core interceptor's `Continue:false` result and confirm
+no BuildRun has the response event ID in `triggers.tekton.dev/triggers-eventid`.
