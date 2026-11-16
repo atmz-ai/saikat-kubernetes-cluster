@@ -272,7 +272,7 @@ checksum = "sha256:be032742ff205f7f2d7c189010bbb1f3891d0a67be0b1df0fe9d3e7f5fc5a
 url = "https://awscli.amazonaws.com/AWSCLIV2-2.40.3.pkg"
 
 [[tools.azure-cli]]
-version = "2.91.0"
+version = "2.92.0"
 backend = "pypi:azure-cli"
 
 [tools.azure-cli.options]
