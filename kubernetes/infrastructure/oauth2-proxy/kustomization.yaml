@@ -8,6 +8,7 @@ resources:
   - deployment-hubble-ui.yaml
   - service-hubble-ui.yaml
   - deployment-grafana.yaml
+  - grafana-allowed-emails.yaml
   - service-grafana.yaml
   - deployment-headlamp.yaml
   - service-headlamp.yaml

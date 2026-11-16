@@ -521,10 +521,13 @@ DNS is self-hosted, not Cloudflare. PowerDNS Authoritative runs from `kubernetes
 
 ### Browser Browsing & Control
 
-- For all web browsing and browser control, prefer Chrome DevTools MCP connected
-  to the user's installed Chrome and already-open profile over VS Code's embedded
-  browser. Reuse existing tabs where possible and verify the connection, intended
-  profile, and website account in the current agent session before acting.
+- For all web browsing and browser control, always use Chrome DevTools MCP
+  connected to the user's installed Chrome and already-open profile. Do not use
+  Computer Use or VS Code's embedded browser for browser work. Computer Use is
+  reserved for other desktop apps. If Chrome MCP is unavailable, diagnose its
+  connection or report the blocker; do not fall back to another UI tool.
+  Reuse existing tabs where possible and verify the connection, intended profile,
+  and website account in the current agent session before acting.
 - Operator confirmed on 20261028 that installed Chrome, the intended open profile,
   remote debugging, and local MCP setup are already enabled. Do not ask the user
   to repeat setup or sign in to a fresh profile when MCP exposes only blank or

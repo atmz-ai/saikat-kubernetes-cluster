@@ -4,6 +4,7 @@ depends = ["tekton-triggers-configuration-checks"]
 run = '''
 #!/usr/bin/env -S ./.venv/bin/python -u
 import json
+import copy
 import re
 import subprocess
 import urllib.request
@@ -14,6 +15,33 @@ import jsonschema
 import yaml
 
 configuration = json.loads(Path("renovate.json").read_text())
+grafana_deployment = yaml.safe_load(Path("kubernetes/infrastructure/oauth2-proxy/deployment-grafana.yaml").read_text())
+grafana_allowlist = yaml.safe_load(Path("kubernetes/infrastructure/oauth2-proxy/grafana-allowed-emails.yaml").read_text())
+for scenario in ("complete", "legacy-google-group", "domain-bypasses-allowlist", "missing-email-file", "additional-user"):
+    candidate = copy.deepcopy(grafana_deployment)
+    emails = grafana_allowlist["data"]["allowed-emails"].splitlines()
+    container = candidate["spec"]["template"]["spec"]["containers"][0]
+    if scenario == "legacy-google-group":
+        container["args"].append("--google-group=developer-admin@gobazzinga.io")
+    elif scenario == "domain-bypasses-allowlist":
+        container["args"].append("--email-domain=atmz.ai")
+    elif scenario == "missing-email-file":
+        candidate["spec"]["template"]["spec"]["volumes"] = []
+    elif scenario == "additional-user":
+        emails.append("another@atmz.ai")
+    try:
+        assert emails == ["saikat@atmz.ai"], "Grafana must admit only the operator"
+        assert "--authenticated-emails-file=/etc/oauth2-proxy/allowed-emails" in container["args"]
+        assert not any(argument.startswith(("--email-domain=", "--google-group=", "--google-admin-email=", "--google-service-account-json=")) for argument in container["args"]), "legacy checks or domain grants override the exact-email policy"
+        volume = next((volume for volume in candidate["spec"]["template"]["spec"]["volumes"] if volume["name"] == "allowed-emails"), {})
+        assert volume.get("configMap", {}).get("name") == grafana_allowlist["metadata"]["name"]
+        assert {"name": "allowed-emails", "mountPath": "/etc/oauth2-proxy", "readOnly": True} in container["volumeMounts"]
+    except AssertionError:
+        assert scenario != "complete", "Grafana exact-email policy is invalid"
+        print("PASS: rejected Grafana access regression", scenario)
+    else:
+        assert scenario == "complete", "overbroad or unusable Grafana policy accepted"
+        print("PASS: Grafana admits only saikat@atmz.ai through its mounted allowlist")
 dashboard_addresses = re.findall(r'href="(https://[^"]+)"', Path("kubernetes/apps/dashboard/index.html").read_text())
 for scenario in ("complete", "dashboard-before-oauth-cutover"):
     candidate = list(dashboard_addresses)

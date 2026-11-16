@@ -136,8 +136,7 @@ spec:
           # ! Match the OAuth callback origin to prevent post-login redirect loops.
           root_url: https://grafana.saikat.dev
         users:
-          # All users who reach Grafana are already gated by the developer-admin Google group
-          # via oauth2-proxy, so auto-assigning Admin is appropriate.
+          # ! The OAuth proxy admits only the operator's exact email address.
           auto_assign_org_role: Admin
         auth.proxy:
           enabled: true
