@@ -24,7 +24,7 @@ spec:
             - --cookie-secure=true
             - --cookie-name=_oauth2_proxy_dashboard
             - --cookie-expire=720h
-            - --redirect-url=https://dashboard.saikat.oleole.ai/oauth2/callback
+            - --redirect-url=https://dashboard.saikat.dev/oauth2/callback
             - --skip-provider-button=true
           env:
             - name: OAUTH2_PROXY_CLIENT_ID
