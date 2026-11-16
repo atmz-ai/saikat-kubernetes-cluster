@@ -25,18 +25,6 @@ metadata:
 spec:
   gatewayClassName: cilium
   listeners:
-    - name: https-stirling-pdf
-      port: 443
-      protocol: HTTPS
-      hostname: pdf.saikat.oleole.ai
-      tls:
-        mode: Terminate
-        certificateRefs:
-          - name: stirling-pdf-tls
-            kind: Secret
-      allowedRoutes:
-        namespaces:
-          from: All
     - name: https-dashboard
       port: 443
       protocol: HTTPS
@@ -45,18 +33,6 @@ spec:
         mode: Terminate
         certificateRefs:
           - name: dashboard-tls
-            kind: Secret
-      allowedRoutes:
-        namespaces:
-          from: All
-    - name: https-uptime-kuma
-      port: 443
-      protocol: HTTPS
-      hostname: status.saikat.oleole.ai
-      tls:
-        mode: Terminate
-        certificateRefs:
-          - name: uptime-kuma-tls
             kind: Secret
       allowedRoutes:
         namespaces:
