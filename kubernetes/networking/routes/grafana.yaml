@@ -11,7 +11,6 @@ spec:
       sectionName: http
   hostnames:
     - grafana.saikat.dev
-    - grafana.yral.com
   rules:
     - filters:
         - type: RequestRedirect
@@ -28,13 +27,9 @@ spec:
   parentRefs:
     - name: web-gateway
       namespace: kube-system
-      sectionName: https
-    - name: web-gateway
-      namespace: kube-system
       sectionName: https-saikat-dev
   hostnames:
     - grafana.saikat.dev
-    - grafana.yral.com
   rules:
     - backendRefs:
         - name: oauth2-proxy-grafana
