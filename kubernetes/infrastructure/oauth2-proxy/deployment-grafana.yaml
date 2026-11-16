@@ -27,24 +27,20 @@ spec:
             - --cookie-secure=true
             - --cookie-name=_oauth2_proxy_grafana
             - --cookie-expire=720h
-            - --redirect-url=https://grafana.yral.com/oauth2/callback
+            - --redirect-url=https://grafana.saikat.dev/oauth2/callback
             - --skip-provider-button=true
-            # Pass X-Forwarded-Email header to Grafana upstream so auth.proxy can identify the user.
-            # --pass-user-headers forwards X-Forwarded-User and X-Forwarded-Email to the upstream
-            # request. --set-xauthrequest only sets X-Auth-Request-* on the response back to the
-            # browser (for nginx auth_request mode) — it does NOT inject headers into the upstream
-            # proxied request, so Grafana never sees it without --pass-user-headers.
+            # ! --set-xauthrequest does not forward the identity header to Grafana.
             - --pass-user-headers=true
           env:
             - name: OAUTH2_PROXY_CLIENT_ID
               valueFrom:
                 secretKeyRef:
-                  name: oauth2-proxy-secrets
+                  name: atmz-internal-apps-google-oauth
                   key: client-id
             - name: OAUTH2_PROXY_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:
-                  name: oauth2-proxy-secrets
+                  name: atmz-internal-apps-google-oauth
                   key: client-secret
             - name: OAUTH2_PROXY_COOKIE_SECRET
               valueFrom:
