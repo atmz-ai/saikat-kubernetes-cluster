@@ -674,6 +674,12 @@ exist rather than a `hosts:` expression) are in `ansible/AGENTS.md`.
 - Lint before PRs.
 
 ### Flux
+
+For an existing GitHub webhook URL change, use the [configuration-only endpoint](https://docs.github.com/en/rest/repos/webhooks#update-a-webhook-configuration-for-a-repository),
+`PATCH /repos/{owner}/{repo}/hooks/{hook_id}/config`. Patching the parent webhook
+with a replacement `config` removes its signing secret unless supplied again.
+Verify a signed delivery to the new URL before retiring the old route.
+
 Bootstrap with `--token-auth --components-extra=image-reflector-controller,image-automation-controller`.
 Webhook receiver for near-real-time reconcile on push.
 `dependsOn` for ordering.

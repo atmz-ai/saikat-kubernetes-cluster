@@ -12,7 +12,6 @@ spec:
       sectionName: http
   hostnames:
     - flux-webhook.saikat.dev
-    - flux-webhook.yral.com
   rules:
     - filters:
         - type: RequestRedirect
@@ -29,13 +28,9 @@ spec:
   parentRefs:
     - name: web-gateway
       namespace: kube-system
-      sectionName: https
-    - name: web-gateway
-      namespace: kube-system
       sectionName: https-saikat-dev
   hostnames:
     - flux-webhook.saikat.dev
-    - flux-webhook.yral.com
   rules:
     - backendRefs:
         - name: webhook-receiver
