@@ -202,6 +202,14 @@ Beszel agents register through `add-node.yml` and are removed from the hub throu
 is retired; hub authentication setup is not a per-node lifecycle action. Its role
 remains available for a separately reviewed hub recovery or configuration change.
 
+Beszel's host-side systemd agent configuration is not expressible by Kubernetes
+resources. Use `update-beszel-agents.yml` for approved runtime configuration
+changes through the existing agent role, serially and with an explicit target.
+Flush restart handlers before checking the running process's HUB_URL, keep its
+credential-bearing environment out of logs, and verify hub metrics before moving
+to the next node or retiring the previous endpoint. This does not authorize node
+provisioning, binary upgrades, or unrelated host changes.
+
 ## Inventory: one node list, derived role groups
 
 Every node is declared **once** in `ansible/inventory/00-hosts.yml` under a single

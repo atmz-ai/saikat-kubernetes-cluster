@@ -1,8 +1,6 @@
 ---
 - name: Reload systemd and restart the beszel agent
-  # daemon-reload first: the unit file itself may have changed, and systemd will keep
-  # using the old definition until it re-reads it — a restart alone silently applies the
-  # previous unit, which looks like the change did nothing.
+  # ! Reload unit definitions before restarting the agent.
   ansible.builtin.systemd_service:
     name: "{{ beszel_agent_service_name }}"
     state: restarted

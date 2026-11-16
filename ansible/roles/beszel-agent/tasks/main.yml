@@ -1,13 +1,6 @@
 ---
-# beszel-agent — install the binary agent as a systemd service on a cluster node.
-#
-# Idempotent: re-running is safe. The download is skipped when the installed version
-# stamp already matches the pinned version, so a second run makes no changes.
-
 - name: Check for the pinned version stamp
-  # * The stamp is written only after a successful install, so its presence means
-  # * "this exact version is installed". A missing stamp (fresh node, or an operator
-  # * cleaned /opt) simply falls through to the install path.
+  # * The version stamp is written only after a successful install.
   ansible.builtin.stat:
     path: "{{ beszel_agent_install_dir }}/.version"
   register: beszel_agent_version_stamp
@@ -28,7 +21,7 @@
   ansible.builtin.debug:
     msg: >-
       beszel-agent {{ beszel_agent_version }} —
-      {{ 'installing' if beszel_agent_needs_install else 'already at the pinned version, nothing to do' }}
+      {{ 'installing' if beszel_agent_needs_install else 'binary already pinned; reconciling configuration' }}
 
 - name: Ensure the service account exists
   ansible.builtin.user:
@@ -48,8 +41,7 @@
   loop:
     - "{{ beszel_agent_install_dir }}"
     - "{{ beszel_agent_data_dir }}"
-  # The config dir is NOT in this loop: it holds the token env file, which must stay
-  # root-only, so it is created separately below rather than owned by the agent user.
+  # ! The credential-bearing config directory remains root-owned.
 
 - name: Ensure the config directory exists (root-owned — it holds the token)
   ansible.builtin.file:
@@ -65,9 +57,7 @@
   register: beszel_agent_binary
 
 - name: Download and unpack the pinned agent release
-  # ! Download happens only when the version differs. `creates:` would be wrong here
-  # ! because the binary may exist at an OLD version — the stamp, not the file, is the
-  # ! thing that says which version is installed.
+  # ! Binary existence alone cannot identify the installed version.
   ansible.builtin.unarchive:
     src: "https://github.com/henrygd/beszel/releases/download/v{{ beszel_agent_version }}/{{ beszel_agent_asset }}"
     dest: "{{ beszel_agent_install_dir }}"
@@ -93,9 +83,8 @@
     owner: root
     group: root
     mode: "0600"
-  # The token lives in here, so this is always 0600 root:root. It is templated even when
-  # the version matches, because the hub URL / token / key can change independently of
-  # the binary version.
+  diff: false
+  # ! Configuration changes independently of the binary version and contains credentials.
   notify: Reload systemd and restart the beszel agent
 
 - name: Install the systemd unit
@@ -108,26 +97,7 @@
   notify: Reload systemd and restart the beszel agent
 
 - name: Validate the unit file with systemd's own parser
-  # ! There is NO Ansible module that creates systemd unit files — `systemd_service`
-  # ! only controls units that already exist, so a template is the only way to write one.
-  # ! (Checked: ansible-core's systemd_service, and community.general's vendored modules —
-  # ! systemd_info/ini_file/runit/openwrt_init all do something else.)
-  # !
-  # ! `systemd-analyze verify` IS the type-safe check the template cannot give us: it
-  # ! parses the unit with systemd's own grammar, so a typo in a directive name or an
-  # ! unsupported option fails here and loudly, instead of silently degrading to a no-op
-  # ! at runtime. Directives systemd does not recognise are otherwise IGNORED without
-  # ! complaint, which is exactly the silent failure this catches.
-  # !
-  # ! Exit code alone is not enough — the command also reports problems in UNRELATED
-  # ! system units (observed: `xfs_scrub_all.service` warns about a removed CPUAccounting
-  # ! option on Ubuntu 26.04). So the check is scoped to lines naming OUR unit.
-  # !
-  # ! Use a plain substring `in` test, NOT `regex_search`. regex_search returns None when
-  # ! there is no match, and OR-ing None with a boolean is not a boolean — Ansible fails
-  # ! the task with "Conditional result (False) was derived from value of type 'NoneType'"
-  # ! on exactly the healthy case we want to pass. `in` always yields a real boolean.
-  # ! Measured: this bit on the first real run against node-1.
+  # ! systemd_service does not validate unit syntax; unrelated unit diagnostics also appear here.
   ansible.builtin.command:
     cmd: systemd-analyze verify {{ beszel_agent_unit_path }}
   register: beszel_agent_unit_verify
@@ -143,11 +113,11 @@
     state: started
     daemon_reload: true
 
+- name: Apply pending agent configuration before verifying the running process
+  ansible.builtin.meta: flush_handlers
+
 - name: Confirm the agent is running
-  # * Assert on the live unit state rather than the handler's exit code. A unit that
-  # * fails to start (bad token, bad unit file) reports success at the systemd module
-  # * level and only shows up here; without this check the node silently reports no
-  # * metrics to the hub.
+  # ! Verify live process state after restart, not just the handler's exit code.
   ansible.builtin.systemd_service:
     name: "{{ beszel_agent_service_name }}"
   register: beszel_agent_active
@@ -160,3 +130,25 @@
 - name: Report the agent state
   ansible.builtin.debug:
     msg: "beszel-agent {{ beszel_agent_version }} is {{ beszel_agent_active.status.ActiveState }} on {{ inventory_hostname }}"
+
+- name: Read the running agent environment without exposing credentials
+  ansible.builtin.slurp:
+    src: "/proc/{{ beszel_agent_active.status.MainPID }}/environ"
+  register: beszel_agent_runtime_environment
+  no_log: true
+  when: not ansible_check_mode
+
+- name: Verify the running agent uses the declared hub URL
+  ansible.builtin.assert:
+    that:
+      - >-
+        ('HUB_URL=' ~ beszel_hub_url) in
+        (beszel_agent_runtime_environment.content | b64decode).split('\x00')
+    fail_msg: The running Beszel agent did not load its declared HUB_URL.
+  no_log: true
+  when: not ansible_check_mode
+
+- name: Report the verified running hub URL
+  ansible.builtin.debug:
+    msg: "{{ inventory_hostname }} is running Beszel with HUB_URL={{ beszel_hub_url }}"
+  when: not ansible_check_mode

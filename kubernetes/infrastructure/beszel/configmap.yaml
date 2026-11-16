@@ -7,6 +7,6 @@ metadata:
   name: beszel-config
   namespace: beszel
 data:
-  APP_URL: "https://beszel.saikat.oleole.ai"
+  APP_URL: "https://beszel.saikat.dev"
   DISABLE_PASSWORD_AUTH: "true"
   SHARE_ALL_SYSTEMS: "true"

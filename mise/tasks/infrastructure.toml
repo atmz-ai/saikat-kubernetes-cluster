@@ -3,8 +3,9 @@ description = "Render every upstream infrastructure bundle and validate release 
 depends = ["tekton-triggers-configuration-checks"]
 run = '''
 #!/usr/bin/env -S ./.venv/bin/python -u
-import json
+import base64
 import copy
+import json
 import re
 import subprocess
 import urllib.request
@@ -13,8 +14,60 @@ from urllib.parse import urlparse
 
 import jsonschema
 import yaml
+from jinja2 import Environment
 
 configuration = json.loads(Path("renovate.json").read_text())
+beszel_configuration = yaml.safe_load(Path("kubernetes/infrastructure/beszel/configmap.yaml").read_text())
+node_configuration = yaml.safe_load(Path("ansible/inventory/group_vars/all/vars.yml").read_text())
+beszel_routes = [resource for resource in yaml.safe_load_all(Path("kubernetes/networking/routes/beszel.yaml").read_text()) if resource]
+beszel_hostname = urlparse(beszel_configuration["data"]["APP_URL"]).hostname
+assert beszel_configuration["data"]["APP_URL"] == node_configuration["beszel_hub_url"]
+assert beszel_configuration["data"]["DISABLE_PASSWORD_AUTH"] == "true"
+assert beszel_configuration["data"].get("USER_CREATION", "false") == "false"
+for scenario in ("complete", "missing-agent-compatibility", "missing-new-hostname"):
+    candidate = copy.deepcopy(beszel_routes)
+    if scenario == "missing-agent-compatibility":
+        candidate[0]["spec"]["hostnames"].remove("beszel.saikat.oleole.ai")
+    elif scenario == "missing-new-hostname":
+        candidate[0]["spec"]["hostnames"].remove(beszel_hostname)
+    try:
+        for route in candidate:
+            assert {beszel_hostname, "beszel.saikat.oleole.ai"} <= set(route["spec"]["hostnames"]), "Beszel migration must preserve existing agents and the new UI origin"
+        secure_route = next(route for route in candidate if route["metadata"]["name"] == "beszel")
+        assert "https-saikat-dev" in {parent["sectionName"] for parent in secure_route["spec"]["parentRefs"]}
+    except AssertionError:
+        assert scenario != "complete", "Beszel staged domain migration is invalid"
+        print("PASS: rejected Beszel migration regression", scenario)
+    else:
+        assert scenario == "complete", "missing Beszel endpoint accepted"
+        print("PASS: Beszel UI, future agents, and existing-agent compatibility remain coherent")
+agent_tasks = yaml.safe_load(Path("ansible/roles/beszel-agent/tasks/main.yml").read_text())
+for scenario in ("complete", "missing-restart-flush"):
+    candidate = [task for task in agent_tasks if scenario == "complete" or task.get("ansible.builtin.meta") != "flush_handlers"]
+    restart_position = next((position for position, task in enumerate(candidate) if task.get("ansible.builtin.meta") == "flush_handlers"), -1)
+    verification_position = next(position for position, task in enumerate(candidate) if task["name"] == "Confirm the agent is running")
+    try:
+        assert 0 <= restart_position < verification_position, "verify the restarted process, not the previous process"
+    except AssertionError:
+        assert scenario != "complete", "Beszel agent verifies configuration before restarting"
+        print("PASS: rejected agent restart regression", scenario)
+    else:
+        assert scenario == "complete", "missing agent restart accepted"
+        print("PASS: Beszel restart handlers run before process verification")
+runtime_expression = next(task for task in agent_tasks if task["name"] == "Verify the running agent uses the declared hub URL")["ansible.builtin.assert"]["that"][0]
+template_environment = Environment()
+template_environment.filters["b64decode"] = lambda value: base64.b64decode(value).decode()
+for scenario, contents, expected in (
+    ("new-domain", "TOKEN=fixture\x00HUB_URL=https://beszel.saikat.dev\x00", True),
+    ("old-domain", "TOKEN=fixture\x00HUB_URL=https://beszel.saikat.oleole.ai\x00", False),
+    ("token-substring", "TOKEN=HUB_URL=https://beszel.saikat.dev\x00", False),
+):
+    encoded = base64.b64encode(contents.encode()).decode()
+    result = template_environment.from_string("{" * 2 + " " + runtime_expression + " " + "}" * 2).render(
+        beszel_hub_url="https://beszel.saikat.dev", beszel_agent_runtime_environment={"content": encoded}
+    )
+    assert (result == "True") == expected, "incorrect agent runtime URL verification: " + scenario
+    print("PASS: agent runtime HUB_URL verification", scenario)
 for filename in ("kubernetes/infrastructure/cilium/helmrelease.yaml", "ansible/manifests/cilium-values.yaml"):
     declaration = yaml.safe_load(Path(filename).read_text())
     values = declaration["spec"]["values"] if "spec" in declaration else declaration
