@@ -1,9 +1,0 @@
-# ! Adopt this exact backup volume before GitOps pruning deletes its remote data.
-apiVersion: longhorn.io/v1beta2
-kind: BackupVolume
-metadata:
-  name: pvc-ddf4a3e5-fb07-44c4-b7c7-499a7db850cc-17f9e1ce
-  namespace: longhorn-system
-spec:
-  backupTargetName: default
-  volumeName: pvc-ddf4a3e5-fb07-44c4-b7c7-499a7db850cc
