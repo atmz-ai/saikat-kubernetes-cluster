@@ -74,7 +74,7 @@ spec:
       replicas: 1
       initContainers:
         - name: wait-for-rustfs-bucket
-          image: rustfs/rustfs:1.0.1
+          image: rustfs/rustfs:1.0.5
           command: [curl]
           args:
             - --fail-with-body

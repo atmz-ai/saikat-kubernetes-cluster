@@ -12,7 +12,7 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: provision-cluster-backup-buckets
-          image: rustfs/rustfs:1.0.1
+          image: rustfs/rustfs:1.0.5
           command: [/bin/sh, -ec]
           args:
             - |
