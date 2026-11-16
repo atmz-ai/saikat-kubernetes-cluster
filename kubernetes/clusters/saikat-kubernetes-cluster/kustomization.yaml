@@ -29,9 +29,7 @@ resources:
   - infrastructure-reloader.yaml
   - infrastructure-rustfs.yaml
   - infrastructure-shipwright.yaml
-  - infrastructure-stirling-pdf.yaml
   - infrastructure-tekton-pipelines.yaml
   - infrastructure-tekton-triggers-config.yaml
   - infrastructure-tekton-triggers.yaml
-  - infrastructure-uptime-kuma.yaml
   - networking.yaml
