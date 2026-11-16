@@ -221,6 +221,32 @@ for scenario in ("complete", "missing-trigger-clusterrole"):
     else:
         assert scenario == "complete", "missing trigger permissions accepted"
         print("PASS: website owns every referenced trigger ClusterRole")
+
+event_listener = next(resource for resource in website_resources if resource["kind"] == "EventListener")
+interceptors = event_listener["spec"]["triggers"][0]["interceptors"]
+signing_secrets = {resource["metadata"]["name"]: resource for resource in website_resources if resource["kind"] == "Secret"}
+for scenario in ("complete", "unsigned-listener", "missing-signing-secret-reference", "verification-after-filter"):
+    candidate = copy.deepcopy(interceptors)
+    if scenario == "unsigned-listener":
+        candidate = [interceptor for interceptor in candidate if interceptor["ref"]["name"] != "github"]
+    elif scenario == "missing-signing-secret-reference":
+        candidate[0]["params"] = [parameter for parameter in candidate[0]["params"] if parameter["name"] != "secretRef"]
+    elif scenario == "verification-after-filter":
+        candidate.reverse()
+    try:
+        assert candidate[0]["ref"]["name"] == "github", "signature verification must precede CEL filtering"
+        parameters = {parameter["name"]: parameter["value"] for parameter in candidate[0]["params"]}
+        reference = parameters.get("secretRef", {})
+        assert reference.get("secretName") in signing_secrets, "signing secret is missing"
+        secret = signing_secrets[reference["secretName"]]
+        assert reference.get("secretKey") in secret.get("stringData", secret.get("data", {})), "signing secret key is missing"
+        assert parameters.get("eventTypes") == ["push"], "only signed push events may reach the build filter"
+    except AssertionError:
+        assert scenario != "complete", "website build listener is not configured to verify GitHub signatures"
+        print("PASS: rejected regression", scenario)
+    else:
+        assert scenario == "complete", "invalid signature-verification configuration accepted"
+        print("PASS: website verifies signatures before filtering against its declared signing secret")
 '''
 
 [dns-generate]

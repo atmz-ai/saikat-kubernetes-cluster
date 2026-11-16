@@ -9,3 +9,9 @@ Do not copy bundles or override their images locally. Run
 The startup ConfigMap in `config/` has its own Flux Kustomization. Keep it outside
 the admission-resource reconciliation unit: a webhook that cannot start must not
 block the all-resource dry-run needed to create its own configuration.
+
+GitHub build listeners use the [native GitHub interceptor](https://tekton.dev/docs/triggers/interceptors/#github-interceptors)
+before CEL filtering, with a namespace-local SOPS Secret referenced by
+`secretRef.secretName` and `secretRef.secretKey`. Omitting `secretRef` bypasses
+signature verification. Provision the Secret and configure GitHub signing before
+enabling verification; test signed, unsigned, and invalid-signature requests.
