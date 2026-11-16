@@ -61,6 +61,10 @@ into GitOps before pruning them. Their [native finalizer](https://github.com/lon
 deletes remote data only while the BackupTarget is available and no
 `delete-custom-resource-only` label is present. Retire writers first, preserve
 the shared BackupTarget, and verify local volumes and remote backups are gone.
+If remote objects are already verified absent but native cleanup is stalled,
+declare `longhorn.io/delete-custom-resource-only: "true"` on only those exact
+BackupVolume CRs. Longhorn propagates it to their Backup CRs and finalizes its
+own metadata; do not strip finalizers manually.
 
 Helm retains CRDs installed from a chart's `crds/` directory during uninstall.
 For full retirement, verify no custom-resource instances remain, reconcile the
