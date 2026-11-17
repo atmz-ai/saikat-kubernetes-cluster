@@ -7,10 +7,17 @@
 </script>
 
 <MetadataComponent title={entry.title} description={entry.description} />
-<article class="prose prose-emerald max-w-screen-md mx-auto my-8 px-4">
-  <h1 class="!mb-2">{entry.title}</h1>
-  <span class="text-gray-400">worked on between <span class="text-emerald-600 font-medium">{formatDate(entry.startDate, true)}</span> to <span class="text-emerald-600 font-medium">{formatDate(entry.endDate, true)}</span></span>
-  <div>{@html preview ? previewEntry.bodyHtml : entry.bodyHtml}</div>
-  <h2>This Project Uses</h2>
-  <ul>{#each entry.technologiesUsed as technology}<li>{technology}</li>{/each}</ul>
-</article>
+<main class="page-shell reading-shell">
+  <a class="back-link" href="/projects"><span aria-hidden="true">←</span> All projects</a>
+  <article class="prose reading-content">
+    <header class="article-heading">
+      <p class="eyebrow">Project journal</p>
+      <h1>{entry.title}</h1>
+      <p class="content-date">{formatDate(entry.startDate, true)} <span aria-hidden="true">—</span> {formatDate(entry.endDate, true)}</p>
+    </header>
+    <div>{@html preview ? previewEntry.bodyHtml : entry.bodyHtml}</div>
+    <h2>This Project Uses</h2>
+    <ul>{#each entry.technologiesUsed as technology}<li>{technology}</li>{/each}</ul>
+  </article>
+  <a class="back-link article-end" href="/projects"><span aria-hidden="true">←</span> Explore more projects</a>
+</main>

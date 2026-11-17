@@ -237,7 +237,7 @@ for daemon_name, build_task_name in (("my-website", "my-website-build"), ("my-we
   task = tasks[daemon_name.replace("-container", "-image") + "-run"]
   assert task["depends"] == [build_task_name]
   assert not task.get("daemons"), "Task-level daemons start before builds"
-  assert task["run"] == f"mise daemons stop {daemon_name} && mise daemons start {daemon_name}"
+  assert task["run"] == f"mise daemons restart {daemon_name}"
   print("Verified build-before-daemon startup: " + daemon_name)
 assert "--platform linux/amd64" in daemons["my-website-container"]["run"]
 assert "docker.io/test/my-website:latest" in daemons["my-website-container"]["run"]

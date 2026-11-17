@@ -19,7 +19,7 @@ run = "npm run check && npm test && npm run build"
 description = "Run the website production server locally on port 8081"
 depends = ["my-website-build"]
 # ! Task-level daemons start before dependency tasks finish building.
-run = "mise daemons stop my-website && mise daemons start my-website"
+run = "mise daemons restart my-website"
 
 [my-website-watch]
 description = "Run the website with SvelteKit hot reload on port 8080"
@@ -53,7 +53,7 @@ fi
 [my-website-image-run]
 description = "Run the website container locally on port 8083"
 depends = ["my-website-image"]
-run = "mise daemons stop my-website-container && mise daemons start my-website-container"
+run = "mise daemons restart my-website-container"
 
 [my-website-stop]
 description = "Stop my-website dev server and container"
