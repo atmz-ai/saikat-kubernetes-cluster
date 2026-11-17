@@ -197,28 +197,8 @@ if [[ "$(uname)" == "Darwin" ]]; then
 fi
 '''
 
-[dev-build]
-description = "Build maintained development applications"
-depends = ["runtime-config-check"]
-run = '''
-mise run my-website-build
-'''
-
-[dev-start]
-description = "Start maintained development applications"
-depends = ["dev-build"]
-run = "mise daemons start dev"
-
-[dev-stop]
-description = "Stop all dev servers"
-run = "mise daemons stop dev"
-
-[dev-status]
-description = "Show status of all daemons"
-run = "mise daemons ls"
-
 [runtime-config-check]
-description = "Validate local daemon paths, ports, and task/group references"
+description = "Validate local daemon paths, ports, and task dependencies"
 run = '''
 #!/usr/bin/env python3
 import pathlib
@@ -252,10 +232,10 @@ assert "../../target/release/my-website" in website_daemon["run"]
 assert "../../target/x86_64-unknown-linux-musl/release/my-website" in website_daemon["run"]
 assert urllib.parse.urlparse(website_daemon["ready_http"]).port == int(website_daemon["env"]["LEPTOS_SITE_ADDR"].rsplit(":", 1)[1])
 print("Verified website workspace-root binary paths and readiness port.")
-for group_name, daemon_names in configuration["daemon_groups"].items():
-  assert all(daemon_name in daemons for daemon_name in daemon_names)
-  print(f"Verified daemon group references: {group_name}")
 for task_name, task in tasks.items():
+  for dependency in task.get("depends", []):
+    assert dependency in tasks, "Undefined task dependency: " + task_name + " -> " + dependency
+    print(f"Verified task dependency: {task_name} -> {dependency}")
   daemon_names = task.get("daemons", [])
   if isinstance(daemon_names, list):
     assert all(daemon_name in daemons for daemon_name in daemon_names)

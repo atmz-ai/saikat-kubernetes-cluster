@@ -2,6 +2,7 @@
 
 [my-website-build]
 description = "Build my-website (release + WASM client). Linux/WSL: musl x86_64 (mimics prod). macOS: native arm64."
+depends = ["runtime-config-check"]
 dir = "apps/my-website"
 run = '''
 if [[ "$(uname)" == "Darwin" ]]; then
