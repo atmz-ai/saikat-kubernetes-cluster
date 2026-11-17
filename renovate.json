@@ -166,11 +166,17 @@
             "groupName": "oauth2-proxy"
         },
         {
-            "description": "Group all GitHub Actions step version bumps into one PR",
+            "description": "Dependabot owns application dependencies, Dockerfiles, and GitHub Actions",
             "matchManagers": [
-                "github-actions"
+                "cargo",
+                "dockerfile",
+                "github-actions",
+                "npm",
+                "pep621",
+                "pip_requirements",
+                "pip_setup"
             ],
-            "groupName": "github-actions"
+            "enabled": false
         }
     ]
 }

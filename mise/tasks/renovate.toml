@@ -1,0 +1,156 @@
+[renovate-configuration-checks]
+description = "Validate Renovate schema, generic bundle and image extraction, and check-gated merging"
+run = '''
+#!/usr/bin/env -S ./.venv/bin/python -u
+import copy
+import json
+import subprocess
+import tomllib
+import urllib.request
+from pathlib import Path
+
+import jsonschema
+import yaml
+
+configuration = json.loads(Path("renovate.json").read_text())
+with urllib.request.urlopen(configuration["$schema"], timeout=30) as response:
+    schema = json.load(response)
+jsonschema.validate(configuration, schema)
+print("PASS: Renovate configuration matches the published schema")
+dependabot_configuration = yaml.safe_load(Path(".github/dependabot.yml").read_text())
+with urllib.request.urlopen("https://json.schemastore.org/dependabot-2.0.json", timeout=30) as response:
+    dependabot_schema = json.load(response)
+jsonschema.validate(dependabot_configuration, dependabot_schema)
+assert all(update["schedule"]["interval"] == "daily" for update in dependabot_configuration["updates"]), "Dependabot version checks must run daily"
+for ecosystem, directory, filename in (
+    ("npm", "/apps/my-website", "package.json"),
+    ("npm", "/apps/my-website", "package-lock.json"),
+    ("pip", "/", "pyproject.toml"),
+    ("docker", "/apps/my-website", "Dockerfile.buildkit"),
+):
+    manifest = Path(directory.lstrip("/")) / filename
+    assert manifest.is_file(), "Dependabot targets a missing manifest: " + str(manifest)
+    assert any(update["package-ecosystem"] == ecosystem and directory in update.get("directories", [update.get("directory")]) for update in dependabot_configuration["updates"]), "Dependabot does not cover " + str(manifest)
+    print("PASS: daily Dependabot updates cover", ecosystem, manifest)
+assert any(update["package-ecosystem"] == "github-actions" and "/" in update.get("directories", [update.get("directory")]) for update in dependabot_configuration["updates"])
+print("PASS: Dependabot configuration matches the published schema and covers GitHub Actions")
+
+flux_request = tomllib.loads(Path("mise.toml").read_text())["tools"]["flux2"]
+flux_lock = tomllib.loads(Path("mise.lock").read_text())["tools"]["flux2"]
+for scenario in ("verified", "original-tag-only", "missing-issuer", "stale-version", "missing-provenance", "stale-provenance"):
+    request_candidate = copy.deepcopy(flux_request)
+    lock_candidate = copy.deepcopy(flux_lock)
+    if scenario == "original-tag-only":
+        request_candidate = flux_request["version"]
+    elif scenario == "missing-issuer":
+        request_candidate.pop("slsa_signer_issuer", None)
+    elif scenario == "stale-version":
+        lock_candidate[0]["version"] = "2.9.5"
+    elif scenario == "missing-provenance":
+        lock_candidate[0]["platforms.linux-arm64"].pop("provenance", None)
+    elif scenario == "stale-provenance":
+        lock_candidate[0]["platforms.linux-arm64"]["provenance"]["slsa"]["url"] = "https://github.com/fluxcd/flux2/releases/download/v2.9.5/provenance.intoto.jsonl"
+    try:
+        assert isinstance(request_candidate, dict), "Flux requires an explicit SLSA signer"
+        assert all(request_candidate.get(key) for key in ("slsa_signer_identity", "slsa_signer_issuer")), "both signer options are required"
+        assert len(lock_candidate) == 1 and lock_candidate[0]["version"] == request_candidate["version"], "Flux's request and lock must agree"
+        platforms = {key for key in lock_candidate[0] if key.startswith("platforms.")}
+        assert platforms == {"platforms." + platform for platform in ("linux-arm64", "linux-arm64-musl", "linux-x64", "linux-x64-musl", "macos-arm64", "macos-x64", "windows-x64")}, "all supported platforms must be locked"
+        provenance_url = "https://github.com/fluxcd/flux2/releases/download/v" + request_candidate["version"] + "/provenance.intoto.jsonl"
+        assert all(lock_candidate[0][platform].get("provenance", {}).get("slsa", {}).get("url") == provenance_url for platform in platforms), "every Flux artifact must retain current SLSA provenance"
+    except AssertionError:
+        assert scenario != "verified", "Flux signer configuration or lockfile is invalid"
+        print("PASS: rejected Flux provenance regression", scenario)
+    else:
+        assert scenario == "verified", "unsafe Flux lock accepted: " + scenario
+        print("PASS: Flux signer and all seven provenance-bearing lock entries agree")
+
+release = next(resource for resource in yaml.safe_load_all(Path("kubernetes/infrastructure/rustfs/helmrelease.yaml").read_text()) if resource["kind"] == "HelmRelease")
+image = release["spec"]["values"]["image"]["rustfs"]
+assert image["repository"] == "rustfs/rustfs"
+assert isinstance(image["tag"], str) and image["tag"]
+print("PASS: RustFS declares its image repository and tag together")
+
+subprocess.run(["node", "--input-type=module", "-e", r"""
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+
+const configuration = JSON.parse(fs.readFileSync('renovate.json', 'utf8'));
+const manager = configuration.customManagers.find(manager => manager.customType === 'jsonata');
+assert.equal(manager.fileFormat, 'yaml');
+assert.equal(manager.datasourceTemplate, 'docker');
+assert.equal(manager.versioningTemplate, 'docker');
+for (const owner of [configuration.flux, configuration.kubernetes, manager]) {
+    const patterns = owner.managerFilePatterns.map(pattern => new RegExp(pattern.slice(1, -1)));
+    for (const path of ['kubernetes/infrastructure/rustfs/helmrelease.yaml', 'new-service/arbitrary.yml', 'another/previously-unknown.yaml']) {
+        assert(patterns.some(pattern => pattern.test(path)));
+    }
+    assert(!patterns.some(pattern => pattern.test('new-service/notes.md')));
+}
+assert(!configuration.customManagers.some(manager => manager.depNameTemplate === 'rustfs/rustfs'));
+console.log('PASS: existing and previously unknown YAML paths are discovered without per-image rules');
+assert.equal(configuration.automerge, true);
+assert.equal(configuration.platformAutomerge, false);
+assert.notEqual(configuration.ignoreTests, true);
+assert.notEqual(configuration.requiredStatusChecks, null);
+assert.equal(configuration.schedule, undefined);
+console.log('PASS: Renovate waits for checks instead of relying on unavailable branch protection');
+
+const dependabotManagers = ['cargo', 'dockerfile', 'github-actions', 'npm', 'pep621', 'pip_requirements', 'pip_setup'];
+const dependabotRule = configuration.packageRules.find(rule => rule.matchManagers?.includes('npm'));
+for (const scenario of ['single-owner', 'original-overlap', 'npm-overlap', 'infrastructure-disabled']) {
+    const candidate = structuredClone(dependabotRule);
+    if (scenario === 'original-overlap') candidate.enabled = true;
+    else if (scenario === 'npm-overlap') candidate.matchManagers = candidate.matchManagers.filter(manager => manager !== 'npm');
+    else if (scenario === 'infrastructure-disabled') candidate.matchManagers.push('mise');
+    let validationSucceeded = false;
+    try {
+        assert.equal(candidate.enabled, false);
+        assert.deepEqual(new Set(candidate.matchManagers), new Set(dependabotManagers));
+        validationSucceeded = true;
+    } catch (error) {
+        assert.equal(error.code, 'ERR_ASSERTION');
+        assert.notEqual(scenario, 'single-owner', 'Dependabot-owned dependencies still have overlapping Renovate updates');
+        console.log('PASS: rejected dependency ownership regression', scenario);
+    }
+    assert.equal(validationSucceeded, scenario === 'single-owner', 'unsafe dependency ownership was accepted');
+    if (scenario === 'single-owner') console.log('PASS: Dependabot-owned managers are disabled without disabling infrastructure or mise');
+}
+
+const tektonTemplate = 'tektoncd/' + '{'.repeat(2) + 'project' + '}'.repeat(2);
+const releaseManagers = configuration.customManagers.filter(manager => manager.datasourceTemplate === 'github-releases' && (manager.depNameTemplate === undefined || manager.depNameTemplate === tektonTemplate));
+for (const [address, repository, version] of [
+    ['https://github.com/new-owner/new-controller/releases/download/v2.3.4/release.yaml', 'new-owner/new-controller', 'v2.3.4'],
+    ['https://raw.githubusercontent.com/new-owner/new-controller/v2.3.4/config/crd.yaml', 'new-owner/new-controller', 'v2.3.4'],
+    ['https://infra.tekton.dev/tekton-releases/new-project/previous/v2.3.4/release.yaml', 'tektoncd/new-project', 'v2.3.4'],
+]) {
+    const extracted = releaseManagers.flatMap(manager => manager.matchStrings.flatMap(pattern => {
+        const match = new RegExp(pattern).exec(address);
+        if (!match) return [];
+        assert(new RegExp(manager.managerFilePatterns[0].slice(1, -1)).test('new-service/arbitrary.yml'));
+        let dependency = match.groups.depName ?? manager.depNameTemplate;
+        for (const [key, value] of Object.entries(match.groups)) dependency = dependency.replaceAll('{'.repeat(2) + key + '}'.repeat(2), value);
+        return [{repository: dependency, version: match.groups.currentValue}];
+    }));
+    assert.deepEqual(extracted, [{repository, version}]);
+    console.log('PASS: unknown release bundle is automatically discoverable', address);
+}
+for (const address of [
+    'https://github.com/new-owner/new-controller/releases/download/latest/release.yaml',
+    'https://raw.githubusercontent.com/new-owner/new-controller/main/config/crd.yaml',
+    'https://infra.tekton.dev/tekton-releases/pipeline/latest/release.yaml',
+]) {
+    assert(!releaseManagers.some(manager => manager.matchStrings.some(pattern => new RegExp(pattern).test(address))));
+    console.log('PASS: floating release reference is not accepted as a pinned version', address);
+}
+const floating = configuration.packageRules.find(rule => rule.pinDigests === true);
+assert.deepEqual(floating.matchDatasources, ['docker']);
+const floatingPattern = new RegExp(floating.matchCurrentValue.slice(1, -1));
+for (const tag of ['latest', 'alpine']) assert(floatingPattern.test(tag));
+for (const tag of ['1.0.1', 'v0.37.0', '20261102050204-5a17bbdf']) assert(!floatingPattern.test(tag));
+const privateImages = configuration.packageRules.find(rule => rule.enabled === false);
+assert(new RegExp(privateImages.matchDepNames[0].slice(1, -1)).test('harbor.saikat.dev/my-website/my-website'));
+assert(!new RegExp(privateImages.matchDepNames[0].slice(1, -1)).test('rustfs/rustfs'));
+console.log('PASS: floating public images get digest PRs; Flux-owned private images remain untouched');
+"""], check=True)
+'''

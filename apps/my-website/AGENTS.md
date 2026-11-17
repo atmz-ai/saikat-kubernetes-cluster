@@ -30,6 +30,8 @@ Shared color tokens live in `style/tailwind.css`. Native `prefers-color-scheme` 
 
 Navigation uses the existing XState lifecycle, with always-visible desktop navigation at 768px and a collapsible mobile header below that breakpoint. Keep `aria-current`, the skip link, no-JavaScript navigation, and disabled-until-hydrated controls intact.
 
+Page sections, navigation, and footer use the full viewport width with shared responsive gutters. Only reading pages constrain their text column. The document is a full-height flex shell so short pages keep the footer at the viewport bottom. Validate element bounds rather than treating left-aligned text inside a centered column as a positioning bug.
+
 ## Offline previews
 
 Presentation components use same-file typed fixture fallback props, so rendering them with no props works offline. Cards export their same-file fixtures for detail screens. The homepage, icons, metadata and not-found view are already static offline fixtures. `/previews` in development renders populated/empty lists and every screen, exercising nested components and icons. It returns HTTP 404 in production. No preview fetches an API or embeds the real project iframes. Navigation can receive `previewViewport="narrow"` or `"wide"`; normal rendering observes the browser breakpoint at 768px. Do not replace fixtures with live credentials or network dependencies.

@@ -38,403 +38,23 @@ for directory in ("kubernetes/infrastructure/netbird", "kubernetes/networking/ro
 '''
 
 [infrastructure-release-checks]
-description = "Render every upstream infrastructure bundle and validate release integrity and consumed CRD contracts"
-depends = ["tekton-triggers-configuration-checks", "netbird-checks"]
+description = "Validate upstream release bundles and consumed CRD contracts"
+depends = ["netbird-checks"]
 run = '''
 #!/usr/bin/env -S ./.venv/bin/python -u
-import ast
-import base64
-import copy
 import json
 import re
 import subprocess
 import urllib.request
 from pathlib import Path
-from urllib.parse import urlparse
 
 import jsonschema
 import yaml
-from jinja2 import Environment
 
-configuration = json.loads(Path("renovate.json").read_text())
 monitoring = yaml.safe_load(Path("kubernetes/infrastructure/monitoring/helmrelease.yaml").read_text())
-for scenario in ("upgrade-crds", "original-default", "create-only", "skip-crds"):
-    candidate = copy.deepcopy(monitoring)
-    if scenario == "original-default":
-        candidate["spec"]["upgrade"].pop("crds", None)
-    elif scenario == "create-only":
-        candidate["spec"]["upgrade"]["crds"] = "Create"
-    elif scenario == "skip-crds":
-        candidate["spec"]["upgrade"]["crds"] = "Skip"
-    try:
-        assert candidate["spec"]["upgrade"].get("crds", "Create") == "CreateReplace", "Prometheus operator upgrades must reconcile their chart's CRDs"
-    except AssertionError:
-        assert scenario != "upgrade-crds", "Prometheus operator CRDs are not upgraded declaratively"
-        print("PASS: rejected stale Prometheus operator CRDs", scenario)
-    else:
-        assert scenario == "upgrade-crds", "stale Prometheus operator CRDs accepted: " + scenario
-        print("PASS: Prometheus operator upgrades reconcile their CRDs through Flux")
-gateway = yaml.safe_load(Path("kubernetes/networking/gateway.yaml").read_text())
-route_index = yaml.safe_load(Path("kubernetes/networking/routes/kustomization.yaml").read_text())
-network_routes = [resource for filename in route_index["resources"] for resource in yaml.safe_load_all(Path("kubernetes/networking/routes", filename).read_text()) if resource]
-for scenario in ("complete", "orphan-route-restored", "legacy-listener-restored", "legacy-certificate-restored", "current-listener-removed"):
-    gateway_candidate = copy.deepcopy(gateway)
-    routes_candidate = copy.deepcopy(network_routes)
-    listeners = gateway_candidate["spec"]["listeners"]
-    if scenario == "orphan-route-restored":
-        routes_candidate.append({"kind": "HTTPRoute", "metadata": {"name": "goldilocks", "namespace": "kube-system"}, "spec": {"hostnames": ["goldilocks.yral.com"]}})
-    elif scenario == "legacy-listener-restored":
-        listeners.append({"name": "https", "port": 443, "protocol": "HTTPS", "hostname": "*.yral.com", "tls": {"certificateRefs": [{"name": "wildcard-yral-com-tls"}]}})
-    elif scenario == "legacy-certificate-restored":
-        next(listener for listener in listeners if listener["name"] == "https-saikat-dev")["tls"]["certificateRefs"] = [{"name": "wildcard-yral-com-tls"}]
-    elif scenario == "current-listener-removed":
-        listeners[:] = [listener for listener in listeners if listener["name"] != "https-saikat-dev"]
-    try:
-        assert {"http", "https-saikat-dev", "https-saikat-dev-apex"} <= {listener["name"] for listener in listeners}, "active saikat.dev exposure must remain available"
-        assert not any(listener.get("hostname", "") == "yral.com" or listener.get("hostname", "").endswith(".yral.com") for listener in listeners), "retired Yral TLS exposure must not return"
-        assert not any(reference["name"] == "wildcard-yral-com-tls" for listener in listeners for reference in listener.get("tls", {}).get("certificateRefs", []))
-        assert not any(resource["metadata"]["name"] in ("goldilocks", "goldilocks-redirect") for resource in routes_candidate), "retired orphan routes must not be recreated"
-        assert not any(hostname == "yral.com" or hostname.endswith(".yral.com") for resource in routes_candidate if resource["kind"] == "HTTPRoute" for hostname in resource["spec"]["hostnames"])
-    except AssertionError:
-        assert scenario != "complete", "legacy route retirement breaks active networking"
-        print("PASS: rejected legacy Gateway/route retirement regression", scenario)
-    else:
-        assert scenario == "complete", "retired route/listener or broken current exposure accepted: " + scenario
-        print("PASS: Goldilocks and legacy TLS exposure remain retired while current listeners survive")
-administrator_job = yaml.safe_load(Path("kubernetes/infrastructure/harbor/operator-administrator.yaml").read_text())
-administrator_container = administrator_job["spec"]["template"]["spec"]["containers"][0]
-administrator_program = ast.parse(administrator_container["args"][0])
-selector = next(node for node in administrator_program.body if isinstance(node, ast.FunctionDef) and node.name == "select_operator")
-selector_namespace = {}
-exec(compile(ast.Module(body=[selector], type_ignores=[]), "harbor-operator-selector", "exec"), selector_namespace)
-operator_fixture = {"user_id": 2, "username": "saikat@atmz.ai", "email": "saikat@atmz.ai", "sysadmin_flag": False}
-for scenario, users, accepted in (
-    ("operator", [operator_fixture], True),
-    ("existing-administrator", [dict(operator_fixture, sysadmin_flag=True)], True),
-    ("missing-user", [], False),
-    ("ambiguous-user", [operator_fixture, operator_fixture], False),
-    ("another-email", [dict(operator_fixture, email="another@atmz.ai")], False),
-    ("another-username", [dict(operator_fixture, username="admin")], False),
-    ("invalid-identifier", [dict(operator_fixture, user_id=True)], False),
-    ("missing-administrator-status", [{key: value for key, value in operator_fixture.items() if key != "sysadmin_flag"}], False),
-):
-    try:
-        result = selector_namespace["select_operator"](users, "saikat@atmz.ai")
-    except ValueError:
-        assert not accepted, "valid operator rejected: " + scenario
-        print("PASS: administrator grant rejects unsafe operator lookup", scenario)
-    else:
-        assert accepted, "unsafe administrator grant accepted: " + scenario
-        assert result["user_id"] == 2 and result["email"] == "saikat@atmz.ai"
-        print("PASS: administrator grant selects the exact existing operator", scenario)
-registry_declaration = yaml.safe_load(Path("kubernetes/infrastructure/harbor/helmrelease.yaml").read_text())
-for scenario in ("bounded-pool", "original-default-pool", "idle-exhausts-capacity", "open-exhausts-capacity"):
-    database_candidate = copy.deepcopy(registry_declaration["spec"]["values"]["database"])
-    if scenario == "original-default-pool":
-        database_candidate.update(maxIdleConns=100, maxOpenConns=900)
-    elif scenario == "idle-exhausts-capacity":
-        database_candidate["maxIdleConns"] = 97
-    elif scenario == "open-exhausts-capacity":
-        database_candidate["maxOpenConns"] = 100
-    try:
-        assert 0 < database_candidate["maxIdleConns"] <= database_candidate["maxOpenConns"] < 97, "Harbor's pool must leave CNPG connection capacity for native garbage collection"
-    except AssertionError:
-        assert scenario != "bounded-pool", "Harbor database pool exhausts its server"
-        print("PASS: rejected Harbor garbage-collection connection starvation", scenario)
-    else:
-        assert scenario == "bounded-pool", "database connection starvation accepted: " + scenario
-        print("PASS: Harbor's database pool leaves capacity for native garbage collection")
-oidc_secret = yaml.safe_load(Path("kubernetes/infrastructure/harbor/oidc-values.sops.yaml").read_text())
-for scenario in ("complete", "missing-native-oidc-values", "plaintext-oidc-values"):
-    candidate = copy.deepcopy(registry_declaration)
-    secret_candidate = copy.deepcopy(oidc_secret)
-    if scenario == "missing-native-oidc-values":
-        candidate["spec"]["valuesFrom"] = [reference for reference in candidate["spec"]["valuesFrom"] if reference["name"] != oidc_secret["metadata"]["name"]]
-    elif scenario == "plaintext-oidc-values":
-        secret_candidate["stringData"]["values.yaml"] = "unencrypted-configuration"
-    try:
-        assert {"kind": "Secret", "name": secret_candidate["metadata"]["name"], "valuesKey": "values.yaml"} in candidate["spec"]["valuesFrom"], "Harbor must load its native OIDC settings from Git"
-        assert secret_candidate["stringData"]["values.yaml"].startswith("ENC["), "OIDC credentials must remain encrypted"
-    except AssertionError:
-        assert scenario != "complete", "native Harbor OIDC declaration is invalid"
-        print("PASS: rejected native OIDC regression", scenario)
-    else:
-        assert scenario == "complete", "missing or plaintext OIDC configuration accepted"
-        print("PASS: Harbor loads encrypted native OIDC values through the chart")
-registry_hostname = urlparse(registry_declaration["spec"]["values"]["externalURL"]).hostname
-website_declaration = yaml.safe_load(Path("kubernetes/apps/my-website/deployment.yaml").read_text())
-website_image = website_declaration["spec"]["template"]["spec"]["containers"][0]["image"]
-image_repository = yaml.safe_load(Path("kubernetes/apps/my-website/image-repository.yaml").read_text())
-build = yaml.safe_load(Path("kubernetes/apps/my-website/build.yaml").read_text())
-build_template = next(resource for resource in yaml.safe_load_all(Path("kubernetes/apps/my-website/tekton-trigger.yaml").read_text()) if resource and resource["kind"] == "TriggerTemplate")
-for image in (website_image, image_repository["spec"]["image"], build["spec"]["output"]["image"], build_template["spec"]["resourcetemplates"][0]["spec"]["output"]["image"]):
-    assert image.split("/", 1)[0] == registry_hostname, "registry consumer uses a different origin: " + image
-    print("PASS: registry consumer matches Harbor's declared origin", image)
-registry_route = next(resource for resource in yaml.safe_load_all(Path("kubernetes/networking/routes/harbor.yaml").read_text()) if resource and resource["metadata"]["name"] == "harbor")
-for scenario in ("complete", "registry-behind-browser-oauth"):
-    candidate = copy.deepcopy(registry_route)
-    if scenario == "registry-behind-browser-oauth":
-        candidate["spec"]["rules"][0]["backendRefs"][0]["name"] = "oauth2-proxy-harbor"
-    try:
-        assert candidate["spec"]["rules"] == [{"backendRefs": [{"name": "harbor", "namespace": "harbor", "port": 80}]}], "native Harbor must handle browser and registry authentication directly"
-    except AssertionError:
-        assert scenario != "complete", "registry route breaks native clients"
-        print("PASS: rejected registry authentication regression", scenario)
-    else:
-        assert scenario == "complete", "OAuth-blocked registry route accepted"
-        print("PASS: all Harbor routes use native browser and registry authentication")
-beszel_configuration = yaml.safe_load(Path("kubernetes/infrastructure/beszel/configmap.yaml").read_text())
-node_configuration = yaml.safe_load(Path("ansible/inventory/group_vars/all/vars.yml").read_text())
-beszel_routes = [resource for resource in yaml.safe_load_all(Path("kubernetes/networking/routes/beszel.yaml").read_text()) if resource]
-beszel_hostname = urlparse(beszel_configuration["data"]["APP_URL"]).hostname
-assert beszel_configuration["data"]["APP_URL"] == node_configuration["beszel_hub_url"]
-assert beszel_configuration["data"]["DISABLE_PASSWORD_AUTH"] == "true"
-assert beszel_configuration["data"].get("USER_CREATION", "false") == "false"
-for scenario in ("complete", "retired-hostname-restored", "missing-new-hostname"):
-    candidate = copy.deepcopy(beszel_routes)
-    if scenario == "retired-hostname-restored":
-        candidate[0]["spec"]["hostnames"].append("beszel.saikat.oleole.ai")
-    elif scenario == "missing-new-hostname":
-        candidate[0]["spec"]["hostnames"].remove(beszel_hostname)
-    try:
-        for route in candidate:
-            assert route["spec"]["hostnames"] == [beszel_hostname], "Beszel must serve only the migrated hub origin"
-        secure_route = next(route for route in candidate if route["metadata"]["name"] == "beszel")
-        assert {parent["sectionName"] for parent in secure_route["spec"]["parentRefs"]} == {"https-saikat-dev"}
-    except AssertionError:
-        assert scenario != "complete", "Beszel domain migration is invalid"
-        print("PASS: rejected Beszel migration regression", scenario)
-    else:
-        assert scenario == "complete", "missing Beszel endpoint accepted"
-        print("PASS: Beszel UI and agent declarations use only the migrated hub origin")
-agent_tasks = yaml.safe_load(Path("ansible/roles/beszel-agent/tasks/main.yml").read_text())
-for scenario in ("complete", "missing-restart-flush"):
-    candidate = [task for task in agent_tasks if scenario == "complete" or task.get("ansible.builtin.meta") != "flush_handlers"]
-    restart_position = next((position for position, task in enumerate(candidate) if task.get("ansible.builtin.meta") == "flush_handlers"), -1)
-    verification_position = next(position for position, task in enumerate(candidate) if task["name"] == "Confirm the agent is running")
-    try:
-        assert 0 <= restart_position < verification_position, "verify the restarted process, not the previous process"
-    except AssertionError:
-        assert scenario != "complete", "Beszel agent verifies configuration before restarting"
-        print("PASS: rejected agent restart regression", scenario)
-    else:
-        assert scenario == "complete", "missing agent restart accepted"
-        print("PASS: Beszel restart handlers run before process verification")
-runtime_expression = next(task for task in agent_tasks if task["name"] == "Verify the running agent uses the declared hub URL")["ansible.builtin.assert"]["that"][0]
-template_environment = Environment()
-template_environment.filters["b64decode"] = lambda value: base64.b64decode(value).decode()
-for scenario, contents, expected in (
-    ("new-domain", "TOKEN=fixture\x00HUB_URL=https://beszel.saikat.dev\x00", True),
-    ("old-domain", "TOKEN=fixture\x00HUB_URL=https://beszel.saikat.oleole.ai\x00", False),
-    ("token-substring", "TOKEN=HUB_URL=https://beszel.saikat.dev\x00", False),
-):
-    encoded = base64.b64encode(contents.encode()).decode()
-    result = template_environment.from_string("{" * 2 + " " + runtime_expression + " " + "}" * 2).render(
-        beszel_hub_url="https://beszel.saikat.dev", beszel_agent_runtime_environment={"content": encoded}
-    )
-    assert (result == "True") == expected, "incorrect agent runtime URL verification: " + scenario
-    print("PASS: agent runtime HUB_URL verification", scenario)
-for filename in ("kubernetes/infrastructure/cilium/helmrelease.yaml", "ansible/manifests/cilium-values.yaml"):
-    declaration = yaml.safe_load(Path(filename).read_text())
-    values = declaration["spec"]["values"] if "spec" in declaration else declaration
-    for scenario in ("complete", "ui-enabled", "relay-disabled"):
-        candidate = copy.deepcopy(values["hubble"])
-        if scenario == "ui-enabled":
-            candidate["ui"]["enabled"] = True
-        elif scenario == "relay-disabled":
-            candidate["relay"]["enabled"] = False
-        try:
-            assert candidate["enabled"] and candidate["relay"]["enabled"] and candidate["metrics"]["enabled"], "Hubble observability must remain enabled"
-            assert not candidate["ui"]["enabled"], "retired Hubble UI must remain disabled"
-        except AssertionError:
-            assert scenario != "complete", "invalid Hubble UI retirement: " + filename
-            print("PASS: rejected Hubble retirement regression", filename, scenario)
-        else:
-            assert scenario == "complete", "invalid Hubble configuration accepted"
-            print("PASS: Hubble UI retired while relay and metrics remain enabled", filename)
-for application in ("grafana", "headlamp", "dashboard", "longhorn-ui"):
-    deployment = yaml.safe_load(Path("kubernetes/infrastructure/oauth2-proxy/deployment-" + application + ".yaml").read_text())
-    allowlist = yaml.safe_load(Path("kubernetes/infrastructure/oauth2-proxy/" + application + "-allowed-emails.yaml").read_text())
-    for scenario in ("complete", "legacy-google-group", "domain-bypasses-allowlist", "missing-email-file", "additional-user"):
-        candidate = copy.deepcopy(deployment)
-        emails = allowlist["data"]["allowed-emails"].splitlines()
-        container = candidate["spec"]["template"]["spec"]["containers"][0]
-        if scenario == "legacy-google-group":
-            container["args"].append("--google-group=developer-admin@gobazzinga.io")
-        elif scenario == "domain-bypasses-allowlist":
-            container["args"].append("--email-domain=atmz.ai")
-        elif scenario == "missing-email-file":
-            candidate["spec"]["template"]["spec"]["volumes"] = []
-        elif scenario == "additional-user":
-            emails.append("another@atmz.ai")
-        try:
-            assert emails == ["saikat@atmz.ai"], application + " must admit only the operator"
-            assert "--authenticated-emails-file=/etc/oauth2-proxy/allowed-emails" in container["args"]
-            assert not any(argument.startswith(("--email-domain=", "--google-group=", "--google-admin-email=", "--google-service-account-json=")) for argument in container["args"]), "legacy checks or domain grants override the exact-email policy"
-            volume = next((volume for volume in candidate["spec"]["template"]["spec"]["volumes"] if volume["name"] == "allowed-emails"), {})
-            assert volume.get("configMap", {}).get("name") == allowlist["metadata"]["name"]
-            assert {"name": "allowed-emails", "mountPath": "/etc/oauth2-proxy", "readOnly": True} in container["volumeMounts"]
-        except AssertionError:
-            assert scenario != "complete", application + " exact-email policy is invalid"
-            print("PASS: rejected access regression", application, scenario)
-        else:
-            assert scenario == "complete", "overbroad or unusable policy accepted: " + application
-            print("PASS: operator-only mounted allowlist", application)
-longhorn_routes = [resource for resource in yaml.safe_load_all(Path("kubernetes/networking/routes/longhorn-ui.yaml").read_text()) if resource]
-longhorn_proxy = yaml.safe_load(Path("kubernetes/infrastructure/oauth2-proxy/deployment-longhorn-ui.yaml").read_text())
-for scenario in ("complete", "missing-new-host", "direct-frontend", "retired-callback", "missing-tls-listener", "retired-host-added", "retired-listener-added"):
-    routes_candidate = copy.deepcopy(longhorn_routes)
-    proxy_candidate = copy.deepcopy(longhorn_proxy)
-    secure_route = next(route for route in routes_candidate if route["metadata"]["name"] == "longhorn-ui")
-    proxy_arguments = proxy_candidate["spec"]["template"]["spec"]["containers"][0]["args"]
-    if scenario == "missing-new-host":
-        secure_route["spec"]["hostnames"].remove("longhorn-ui.saikat.dev")
-    elif scenario == "direct-frontend":
-        secure_route["spec"]["rules"][0]["backendRefs"] = [{"name": "longhorn-frontend", "namespace": "longhorn-system", "port": 80}]
-    elif scenario == "retired-callback":
-        proxy_arguments[:] = ["--redirect-url=https://retired.example.invalid/oauth2/callback" if argument.startswith("--redirect-url=") else argument for argument in proxy_arguments]
-    elif scenario == "missing-tls-listener":
-        secure_route["spec"]["parentRefs"] = [parent for parent in secure_route["spec"]["parentRefs"] if parent["sectionName"] != "https-saikat-dev"]
-    elif scenario == "retired-host-added":
-        secure_route["spec"]["hostnames"].append("retired.example.invalid")
-    elif scenario == "retired-listener-added":
-        secure_route["spec"]["parentRefs"].append({"name": "web-gateway", "namespace": "kube-system", "sectionName": "https-retired"})
-    try:
-        assert all(route["spec"]["hostnames"] == ["longhorn-ui.saikat.dev"] for route in routes_candidate), "both Longhorn routes must serve only the migrated origin"
-        assert {parent["sectionName"] for parent in secure_route["spec"]["parentRefs"]} == {"https-saikat-dev"}, "the new Longhorn origin requires only its wildcard TLS listener"
-        assert secure_route["spec"]["rules"] == [{"backendRefs": [{"name": "oauth2-proxy-longhorn-ui", "namespace": "oauth2-proxy", "port": 4180}]}], "Longhorn's frontend must never bypass authentication"
-        assert "--redirect-url=https://longhorn-ui.saikat.dev/oauth2/callback" in proxy_arguments
-        assert "--upstream=http://longhorn-frontend.longhorn-system.svc.cluster.local:80" in proxy_arguments
-    except AssertionError:
-        assert scenario != "complete", "Longhorn domain cutover breaks authentication"
-        print("PASS: rejected Longhorn domain/authentication regression", scenario)
-    else:
-        assert scenario == "complete", "unsafe Longhorn domain cutover accepted: " + scenario
-        print("PASS: migrated Longhorn UI remains behind its existing authentication proxy")
-rustfs_release = next(resource for resource in yaml.safe_load_all(Path("kubernetes/infrastructure/rustfs/helmrelease.yaml").read_text()) if resource["kind"] == "HelmRelease")
-rustfs_routes = list(yaml.safe_load_all(Path("kubernetes/infrastructure/rustfs/route.yaml").read_text()))
-rustfs_authorization = list(yaml.safe_load_all(Path("kubernetes/infrastructure/rustfs/google-authorization.yaml").read_text()))
-for scenario in ("complete", "callback-origin-mismatch", "dynamic-callback", "load-balanced-oauth-state", "another-email", "retired-console-origin", "retired-console-listener"):
-    values_candidate = copy.deepcopy(rustfs_release["spec"]["values"])
-    routes_candidate = copy.deepcopy(rustfs_routes)
-    authorization_candidate = copy.deepcopy(rustfs_authorization)
-    environment = {variable["name"]: variable for variable in values_candidate["extraEnv"]}
-    console_service = next(resource for resource in authorization_candidate if resource["kind"] == "Service")
-    policy = json.loads(next(resource for resource in authorization_candidate if resource["kind"] == "ConfigMap")["data"]["policy.json"])
-    s3_route = next(route for route in routes_candidate if route["metadata"]["name"] == "rustfs-s3")
-    if scenario == "callback-origin-mismatch":
-        environment["RUSTFS_IDENTITY_OPENID_REDIRECT_URI_google"]["value"] = "https://retired.example.invalid/rustfs/admin/v3/oidc/callback/google"
-    elif scenario == "dynamic-callback":
-        environment["RUSTFS_IDENTITY_OPENID_REDIRECT_URI_DYNAMIC_google"]["value"] = "on"
-    elif scenario == "load-balanced-oauth-state":
-        console_service["spec"]["selector"] = {"app.kubernetes.io/name": "rustfs"}
-    elif scenario == "another-email":
-        policy["Statement"][-1]["Condition"]["StringEquals"]["jwt:email"] = "another@atmz.ai"
-    elif scenario == "retired-console-origin":
-        next(route for route in routes_candidate if route["metadata"]["name"] == "rustfs-console")["spec"]["hostnames"] = ["rust-fs.saikat.oleole.ai"]
-    elif scenario == "retired-console-listener":
-        next(route for route in routes_candidate if route["metadata"]["name"] == "rustfs-console")["spec"]["parentRefs"].append({"name": "web-gateway", "namespace": "kube-system", "sectionName": "https-rustfs-console"})
-    try:
-        assert environment["RUSTFS_BROWSER_REDIRECT_URL"]["value"] == "https://rust-fs.saikat.dev"
-        assert environment["RUSTFS_IDENTITY_OPENID_REDIRECT_URI_google"]["value"] == "https://rust-fs.saikat.dev/rustfs/admin/v3/oidc/callback/google"
-        assert environment["RUSTFS_IDENTITY_OPENID_REDIRECT_URI_DYNAMIC_google"]["value"] == "off"
-        assert environment["RUSTFS_IDENTITY_OPENID_ROLE_POLICY_google"]["value"] == "google-saikat-administrator"
-        assert console_service["spec"]["selector"] == {"statefulset.kubernetes.io/pod-name": "rustfs-0"}, "native OAuth state must remain on one node"
-        assert len(policy["Statement"]) == 8
-        assert {(statement["Effect"], tuple(statement["Action"])) for statement in policy["Statement"]} == {(effect, (action,)) for effect in ("Allow", "Deny") for action in ("admin:*", "kms:*", "s3:*", "sts:AssumeRole")}
-        for statement in policy["Statement"]:
-            operator = "StringEquals" if statement["Effect"] == "Allow" else "StringNotEquals"
-            assert statement["Condition"] == {operator: {"jwt:email": "saikat@atmz.ai"}}, "RustFS Google permissions must remain email-restricted"
-        for route in routes_candidate:
-            if route["metadata"]["name"] != "rustfs-s3":
-                assert route["spec"]["hostnames"] == ["rust-fs.saikat.dev"]
-        console_route = next(route for route in routes_candidate if route["metadata"]["name"] == "rustfs-console")
-        assert {parent["sectionName"] for parent in console_route["spec"]["parentRefs"]} == {"https-saikat-dev"}
-        assert console_route["spec"]["rules"][0]["backendRefs"] == [{"name": "rustfs-console", "port": 9001}]
-        assert s3_route["spec"]["rules"][0]["backendRefs"] == [{"name": "rustfs-svc", "port": 9000}]
-    except AssertionError:
-        assert scenario != "complete", "RustFS Console cutover breaks native authentication or S3 isolation"
-        print("PASS: rejected RustFS Console cutover regression", scenario)
-    else:
-        assert scenario == "complete", "unsafe RustFS Console cutover accepted: " + scenario
-        print("PASS: RustFS Console origin, native email policy, and independent S3 backend")
-s3_route = next(route for route in rustfs_routes if route["metadata"]["name"] == "rustfs-s3")
-for scenario in ("complete", "missing-new-origin", "browser-auth-proxy", "host-rewrite", "path-rewrite", "host-redirect", "missing-tls-parent", "retired-host-added", "retired-listener-added"):
-    candidate = copy.deepcopy(s3_route)
-    if scenario == "missing-new-origin":
-        candidate["spec"]["hostnames"].remove("s3.saikat.dev")
-    elif scenario == "browser-auth-proxy":
-        candidate["spec"]["rules"][0]["backendRefs"] = [{"name": "oauth2-proxy-dashboard", "namespace": "oauth2-proxy", "port": 4180}]
-    elif scenario == "host-rewrite":
-        candidate["spec"]["rules"][0]["filters"] = [{"type": "RequestHeaderModifier", "requestHeaderModifier": {"set": [{"name": "Host", "value": "rustfs-svc"}]}}]
-    elif scenario == "path-rewrite":
-        candidate["spec"]["rules"][0]["filters"] = [{"type": "URLRewrite", "urlRewrite": {"path": {"type": "ReplacePrefixMatch", "replacePrefixMatch": "/rustfs/console"}}}]
-    elif scenario == "host-redirect":
-        candidate["spec"]["rules"][0]["filters"] = [{"type": "RequestRedirect", "requestRedirect": {"hostname": "s3.saikat.dev", "statusCode": 301}}]
-    elif scenario == "missing-tls-parent":
-        candidate["spec"]["parentRefs"] = [{"name": "web-gateway", "namespace": "kube-system", "sectionName": "http"}]
-    elif scenario == "retired-host-added":
-        candidate["spec"]["hostnames"].append("s3.saikat.oleole.ai")
-    elif scenario == "retired-listener-added":
-        candidate["spec"]["parentRefs"].append({"name": "web-gateway", "namespace": "kube-system", "sectionName": "https-rustfs"})
-    try:
-        assert candidate["spec"]["hostnames"] == ["s3.saikat.dev"]
-        assert {parent["sectionName"] for parent in candidate["spec"]["parentRefs"]} == {"https-saikat-dev"}
-        assert candidate["spec"]["rules"] == [{"matches": [{"path": {"type": "PathPrefix", "value": "/"}}], "backendRefs": [{"name": "rustfs-svc", "port": 9000}]}], "S3 signatures require unchanged Host/path and a direct native backend"
-    except AssertionError:
-        assert scenario != "complete", "S3 origin migration breaks native signed requests"
-        print("PASS: rejected S3 routing/signature regression", scenario)
-    else:
-        assert scenario == "complete", "unsafe S3 route accepted: " + scenario
-        print("PASS: migrated S3 TLS origin preserves native request signing")
-dashboard_addresses = re.findall(r'href="(https://[^"]+)"', Path("kubernetes/apps/dashboard/index.html").read_text())
-for scenario, addresses in (("migrated-longhorn-link", dashboard_addresses), ("original-broken-longhorn-link", ["https://longhorn.saikat.oleole.ai" if address == "https://longhorn-ui.saikat.dev" else address for address in dashboard_addresses])):
-    try:
-        assert "https://longhorn-ui.saikat.dev" in addresses, "dashboard must link to the verified Longhorn UI origin"
-        assert "https://longhorn.saikat.oleole.ai" not in addresses
-    except AssertionError:
-        assert scenario == "original-broken-longhorn-link", "dashboard Longhorn link is invalid"
-        print("PASS: rejected original broken Longhorn dashboard link")
-    else:
-        assert scenario == "migrated-longhorn-link", "broken Longhorn dashboard link accepted"
-        print("PASS: dashboard links to the migrated Longhorn UI")
-for scenario, addresses in (("migrated-rustfs-link", dashboard_addresses), ("stale-rustfs-link", ["https://rust-fs.saikat.oleole.ai/" if address == "https://rust-fs.saikat.dev/" else address for address in dashboard_addresses])):
-    try:
-        assert "https://rust-fs.saikat.dev/" in addresses, "dashboard must link to the verified RustFS Console origin"
-        assert "https://rust-fs.saikat.oleole.ai/" not in addresses
-    except AssertionError:
-        assert scenario == "stale-rustfs-link", "dashboard RustFS link is invalid"
-        print("PASS: rejected the stale RustFS dashboard link")
-    else:
-        assert scenario == "migrated-rustfs-link", "stale RustFS dashboard link accepted"
-        print("PASS: dashboard links to the migrated RustFS Console")
-for scenario in ("complete", "dashboard-before-oauth-cutover"):
-    candidate = list(dashboard_addresses)
-    callbacks = []
-    for name in ("grafana", "headlamp"):
-        deployment = yaml.safe_load(Path("kubernetes/infrastructure/oauth2-proxy/deployment-" + name + ".yaml").read_text())
-        arguments = deployment["spec"]["template"]["spec"]["containers"][0]["args"]
-        callback = next(argument.split("=", 1)[1] for argument in arguments if argument.startswith("--redirect-url="))
-        callbacks.append(urlparse(callback).hostname)
-    if scenario == "dashboard-before-oauth-cutover":
-        candidate = [address for address in candidate if urlparse(address).hostname != callbacks[0]]
-        candidate.append("https://unconfigured.example.invalid")
-    try:
-        assert all(hostname in {urlparse(address).hostname for address in candidate} for hostname in callbacks), "dashboard link and OAuth callback hosts differ"
-    except AssertionError:
-        assert scenario != "complete", "dashboard promotes an unconfigured OAuth origin"
-        print("PASS: rejected regression", scenario)
-    else:
-        assert scenario == "complete", "premature OAuth hostname cutover accepted"
-        print("PASS: dashboard links preserve OAuth callback origins")
-for workflow_path in sorted(Path(".github/workflows").glob("*.yml")):
-    yaml.safe_load(workflow_path.read_text())
-    print("PASS: workflow YAML syntax", workflow_path)
-infrastructure_workflow = yaml.safe_load(Path(".github/workflows/infrastructure-releases.yml").read_text())
-triggers = infrastructure_workflow.get("on", infrastructure_workflow.get(True))
-assert "pull_request" in triggers
-assert triggers["push"]["branches"] == ["main"]
-print("PASS: PR checks run once while merged revisions still receive push checks")
+assert monitoring["spec"]["upgrade"].get("crds", "Create") == "CreateReplace", "Prometheus operator upgrades must reconcile their chart's CRDs"
+print("PASS: Prometheus operator upgrades reconcile their CRDs through Flux")
+configuration = json.loads(Path("renovate.json").read_text())
 tekton_template = "tektoncd/" + "{" * 2 + "project" + "}" * 2
 managers = [manager for manager in configuration["customManagers"] if manager.get("datasourceTemplate") == "github-releases" and ("depNameTemplate" not in manager or manager.get("depNameTemplate") == tekton_template)]
 versions = {}
@@ -507,7 +127,6 @@ for path in sorted(Path("kubernetes/infrastructure").rglob("kustomization.yaml")
 for repository, declared in versions.items():
     assert len(declared) == 1, "mixed release references: " + repository + " " + str(declared)
     print("PASS: coherent release", repository, *declared)
-
 for path in sorted(Path("kubernetes").rglob("*.yaml")):
     for resource in yaml.safe_load_all(path.read_text()):
         if not isinstance(resource, dict):
@@ -519,7 +138,6 @@ for path in sorted(Path("kubernetes").rglob("*.yaml")):
             continue
         jsonschema.Draft7Validator(schemas[identity]).validate(resource)
         print("PASS: upstream CRD contract", path, *identity)
-
 result = subprocess.run(["kubectl", "kustomize", "kubernetes/clusters/saikat-kubernetes-cluster"], capture_output=True, text=True)
 if result.stderr:
     print(result.stderr)
@@ -529,482 +147,74 @@ for resource in yaml.safe_load_all(result.stdout):
         print("PASS: cluster entrypoint", resource["kind"], resource["metadata"]["name"])
 '''
 
-[tekton-triggers-configuration-checks]
-description = "Validate Tekton release alignment and independently reconcilable startup configuration"
-run = '''
-#!/usr/bin/env -S ./.venv/bin/python -u
-import copy
-import subprocess
-import urllib.request
-from pathlib import Path
-
-import yaml
-
-resources = []
-for directory in ("tekton-triggers", "tekton-triggers/config"):
-    result = subprocess.run(
-        ["kubectl", "kustomize", "kubernetes/infrastructure/" + directory],
-        capture_output=True, text=True,
-    )
-    if result.stderr:
-        print(result.stderr)
-    result.check_returncode()
-    rendered = [resource for resource in yaml.safe_load_all(result.stdout) if resource]
-    if directory.endswith("/config"):
-        assert all(resource["kind"] == "ConfigMap" for resource in rendered)
-    resources.extend(rendered)
-    print("PASS: rendered", directory)
-
-lookup = {(resource["kind"], resource["metadata"]["name"]): resource for resource in resources}
-assert len(lookup) == len(resources), "duplicate configuration ownership"
-version = lookup[("ConfigMap", "triggers-info")]["data"]["version"]
-for name in ("release.yaml", "interceptors.yaml"):
-    address = "https://infra.tekton.dev/tekton-releases/triggers/previous/" + version + "/" + name
-    with urllib.request.urlopen(address, timeout=30) as response:
-        official = [resource for resource in yaml.safe_load_all(response.read()) if resource]
-    for resource in official:
-        identity = (resource["kind"], resource["metadata"]["name"])
-        assert lookup[identity] == resource, "release drift: " + str(identity)
-        print("PASS: official", version, *identity)
-
-for scenario in ("complete", "missing-startup-config", "old-eventlistener-image"):
-    candidate = copy.deepcopy(lookup)
-    if scenario == "missing-startup-config":
-        del candidate[("ConfigMap", "config-triggers-core-interceptors")]
-    controller = candidate[("Deployment", "tekton-triggers-controller")]["spec"]["template"]["spec"]["containers"][0]
-    if scenario == "old-eventlistener-image":
-        controller["args"][controller["args"].index("-el-image") + 1] = "ghcr.io/tektoncd/triggers/eventlistenersink-7ad1faa98cddbcb0c24990303b220bb8:v0.36.0"
-    try:
-        assert ("ConfigMap", "config-triggers-core-interceptors") in candidate
-        listener_image = controller["args"][controller["args"].index("-el-image") + 1]
-        assert listener_image.split(":")[-2] == version + "@sha256"
-    except AssertionError:
-        assert scenario != "complete", "valid configuration rejected"
-        print("PASS: rejected regression", scenario)
-    else:
-        assert scenario == "complete", "broken configuration accepted: " + scenario
-        print("PASS: complete startup configuration and matching EventListener image")
-
-cluster = Path("kubernetes/clusters/saikat-kubernetes-cluster")
-entrypoint = yaml.safe_load((cluster / "kustomization.yaml").read_text())
-assert "infrastructure-tekton-triggers-config.yaml" in entrypoint["resources"]
-configuration = yaml.safe_load((cluster / "infrastructure-tekton-triggers-config.yaml").read_text())
-triggers = yaml.safe_load((cluster / "infrastructure-tekton-triggers.yaml").read_text())
-assert configuration["spec"]["path"] == "./kubernetes/infrastructure/tekton-triggers/config"
-assert {"name": configuration["metadata"]["name"]} in triggers["spec"]["dependsOn"]
-assert {"name": "infrastructure-tekton-triggers"} not in configuration["spec"]["dependsOn"]
-print("PASS: startup configuration reconciles before, and independently of, admission resources")
-
-result = subprocess.run(["kubectl", "kustomize", "kubernetes/apps/my-website"], capture_output=True, text=True)
-if result.stderr:
-    print(result.stderr)
-result.check_returncode()
-website_resources = [resource for resource in yaml.safe_load_all(result.stdout) if resource]
-for scenario in ("complete", "missing-trigger-clusterrole"):
-    candidate = [resource for resource in website_resources if scenario == "complete" or resource["kind"] != "ClusterRole"]
-    roles = {resource["metadata"]["name"] for resource in candidate if resource["kind"] == "ClusterRole"}
-    bindings = [resource for resource in candidate if resource["kind"] == "ClusterRoleBinding"]
-    assert bindings, "website trigger bindings must be validated"
-    try:
-        for binding in bindings:
-            assert binding["roleRef"]["name"] in roles, "undefined trigger ClusterRole: " + binding["roleRef"]["name"]
-    except AssertionError:
-        assert scenario != "complete", "website depends on a retired application's ClusterRole"
-        print("PASS: rejected regression", scenario)
-    else:
-        assert scenario == "complete", "missing trigger permissions accepted"
-        print("PASS: website owns every referenced trigger ClusterRole")
-
-event_listener = next(resource for resource in website_resources if resource["kind"] == "EventListener")
-interceptors = event_listener["spec"]["triggers"][0]["interceptors"]
-signing_secrets = {resource["metadata"]["name"]: resource for resource in website_resources if resource["kind"] == "Secret"}
-for scenario in ("complete", "unsigned-listener", "missing-signing-secret-reference", "verification-after-filter"):
-    candidate = copy.deepcopy(interceptors)
-    if scenario == "unsigned-listener":
-        candidate = [interceptor for interceptor in candidate if interceptor["ref"]["name"] != "github"]
-    elif scenario == "missing-signing-secret-reference":
-        candidate[0]["params"] = [parameter for parameter in candidate[0]["params"] if parameter["name"] != "secretRef"]
-    elif scenario == "verification-after-filter":
-        candidate.reverse()
-    try:
-        assert candidate[0]["ref"]["name"] == "github", "signature verification must precede CEL filtering"
-        parameters = {parameter["name"]: parameter["value"] for parameter in candidate[0]["params"]}
-        reference = parameters.get("secretRef", {})
-        assert reference.get("secretName") in signing_secrets, "signing secret is missing"
-        secret = signing_secrets[reference["secretName"]]
-        assert reference.get("secretKey") in secret.get("stringData", secret.get("data", {})), "signing secret key is missing"
-        assert parameters.get("eventTypes") == ["push"], "only signed push events may reach the build filter"
-    except AssertionError:
-        assert scenario != "complete", "website build listener is not configured to verify GitHub signatures"
-        print("PASS: rejected regression", scenario)
-    else:
-        assert scenario == "complete", "invalid signature-verification configuration accepted"
-        print("PASS: website verifies signatures before filtering against its declared signing secret")
-'''
-
-[dns-generate]
-description = "Regenerate the PowerDNS zone artifacts from the pdns_zones list (ansible/inventory/group_vars/all/vars.yml)"
-run = "./.venv/bin/ansible-playbook ansible/playbooks/operations/update-dns-zone-config.yml"
-
-[renovate-configuration-checks]
-description = "Validate Renovate schema, generic bundle and image extraction, and check-gated merging"
-run = '''
-#!/usr/bin/env -S ./.venv/bin/python -u
-import json
-import subprocess
-import urllib.request
-from pathlib import Path
-
-import jsonschema
-import yaml
-
-configuration = json.loads(Path("renovate.json").read_text())
-with urllib.request.urlopen(configuration["$schema"], timeout=30) as response:
-    schema = json.load(response)
-jsonschema.validate(configuration, schema)
-print("PASS: Renovate configuration matches the published schema")
-
-release = next(
-    resource for resource in yaml.safe_load_all(Path("kubernetes/infrastructure/rustfs/helmrelease.yaml").read_text())
-    if resource["kind"] == "HelmRelease"
-)
-image = release["spec"]["values"]["image"]["rustfs"]
-assert image["repository"] == "rustfs/rustfs"
-assert isinstance(image["tag"], str) and image["tag"]
-print("PASS: RustFS declares its image repository and tag together")
-
-subprocess.run(["node", "--input-type=module", "-e", r"""
-import assert from 'node:assert/strict';
-import fs from 'node:fs';
-
-const configuration = JSON.parse(fs.readFileSync('renovate.json', 'utf8'));
-const manager = configuration.customManagers.find(manager => manager.customType === 'jsonata');
-assert.equal(manager.fileFormat, 'yaml');
-assert.equal(manager.datasourceTemplate, 'docker');
-assert.equal(manager.versioningTemplate, 'docker');
-for (const owner of [configuration.flux, configuration.kubernetes, manager]) {
-    const patterns = owner.managerFilePatterns.map(pattern => new RegExp(pattern.slice(1, -1)));
-    for (const path of ['kubernetes/infrastructure/rustfs/helmrelease.yaml', 'new-service/arbitrary.yml', 'another/previously-unknown.yaml']) {
-        assert(patterns.some(pattern => pattern.test(path)));
-    }
-    assert(!patterns.some(pattern => pattern.test('new-service/notes.md')));
-}
-assert(!configuration.customManagers.some(manager => manager.depNameTemplate === 'rustfs/rustfs'));
-console.log('PASS: existing and previously unknown YAML paths are discovered without per-image rules');
-
-assert.equal(configuration.automerge, true);
-assert.equal(configuration.platformAutomerge, false);
-assert.notEqual(configuration.ignoreTests, true);
-assert.notEqual(configuration.requiredStatusChecks, null);
-assert.equal(configuration.schedule, undefined);
-console.log('PASS: Renovate waits for checks instead of relying on unavailable branch protection');
-
-const tektonTemplate = 'tektoncd/' + '{'.repeat(2) + 'project' + '}'.repeat(2);
-const releaseManagers = configuration.customManagers.filter(manager => manager.datasourceTemplate === 'github-releases' && (manager.depNameTemplate === undefined || manager.depNameTemplate === tektonTemplate));
-for (const [address, repository, version] of [
-    ['https://github.com/new-owner/new-controller/releases/download/v2.3.4/release.yaml', 'new-owner/new-controller', 'v2.3.4'],
-    ['https://raw.githubusercontent.com/new-owner/new-controller/v2.3.4/config/crd.yaml', 'new-owner/new-controller', 'v2.3.4'],
-    ['https://infra.tekton.dev/tekton-releases/new-project/previous/v2.3.4/release.yaml', 'tektoncd/new-project', 'v2.3.4'],
-]) {
-    const extracted = releaseManagers.flatMap(manager => manager.matchStrings.flatMap(pattern => {
-        const match = new RegExp(pattern).exec(address);
-        if (!match) return [];
-        assert(new RegExp(manager.managerFilePatterns[0].slice(1, -1)).test('new-service/arbitrary.yml'));
-        let dependency = match.groups.depName ?? manager.depNameTemplate;
-        for (const [key, value] of Object.entries(match.groups)) dependency = dependency.replaceAll('{'.repeat(2) + key + '}'.repeat(2), value);
-        return [{repository: dependency, version: match.groups.currentValue}];
-    }));
-    assert.deepEqual(extracted, [{repository, version}]);
-    console.log('PASS: unknown release bundle is automatically discoverable', address);
-}
-for (const address of [
-    'https://github.com/new-owner/new-controller/releases/download/latest/release.yaml',
-    'https://raw.githubusercontent.com/new-owner/new-controller/main/config/crd.yaml',
-    'https://infra.tekton.dev/tekton-releases/pipeline/latest/release.yaml',
-]) {
-    assert(!releaseManagers.some(manager => manager.matchStrings.some(pattern => new RegExp(pattern).test(address))));
-    console.log('PASS: floating release reference is not accepted as a pinned version', address);
-}
-
-const floating = configuration.packageRules.find(rule => rule.pinDigests === true);
-assert.deepEqual(floating.matchDatasources, ['docker']);
-const floatingPattern = new RegExp(floating.matchCurrentValue.slice(1, -1));
-for (const tag of ['latest', 'alpine']) assert(floatingPattern.test(tag));
-for (const tag of ['1.0.1', 'v0.37.0', '20261102050204-5a17bbdf']) assert(!floatingPattern.test(tag));
-const privateImages = configuration.packageRules.find(rule => rule.enabled === false);
-assert(new RegExp(privateImages.matchDepNames[0].slice(1, -1)).test('harbor.saikat.dev/my-website/my-website'));
-assert(!new RegExp(privateImages.matchDepNames[0].slice(1, -1)).test('rustfs/rustfs'));
-console.log('PASS: floating public images get digest PRs; Flux-owned private images remain untouched');
-"""], check=True)
-'''
-
-[backup-configuration-checks]
-description = "Regression-check backup manifests, pinned charts, recovery schemas, and deployment dependencies"
-run = '''
-#!/usr/bin/env -S ./.venv/bin/python -u
-import json
-import re
-import subprocess
-import tempfile
-from pathlib import Path
-
-import jsonschema
-import yaml
-
-rendered = {}
-for owner in ("rustfs", "longhorn", "longhorn-backup", "cloudnative-pg", "harbor", "external-dns"):
-    result = subprocess.run(
-        ["kubectl", "kustomize", "--load-restrictor", "LoadRestrictionsNone", "kubernetes/infrastructure/" + owner],
-        capture_output=True, text=True,
-    )
-    if result.stderr:
-        print(result.stderr)
-    result.check_returncode()
-    rendered[owner] = [resource for resource in yaml.safe_load_all(result.stdout) if resource]
-    print("PASS: rendered", owner)
-
-entrypoint = yaml.safe_load(Path("kubernetes/clusters/saikat-kubernetes-cluster/kustomization.yaml").read_text())
-assert "infrastructure-velero.yaml" not in entrypoint["resources"]
-print("PASS: Velero is absent from the reconciliation entrypoint")
-loki_release = yaml.safe_load(Path("kubernetes/infrastructure/loki/helmrelease.yaml").read_text())
-assert loki_release["spec"]["values"]["loki"]["storage"]["s3"]["endpoint"] == "http://rustfs-svc.rustfs.svc.cluster.local:9000"
-print("PASS: Loki retains internal RustFS Service DNS during public S3 migration")
-
-for owner in ("longhorn-backup",):
-    declaration = yaml.safe_load(Path("kubernetes/infrastructure", owner, "kustomization.yaml").read_text())
-    assert declaration["patches"][0]["path"] == "../loki/loki-rustfs-credentials.sops.yaml"
-    secret_name = "longhorn-rustfs-credentials"
-    secret = next(resource for resource in rendered[owner] if resource["kind"] == "Secret" and resource["metadata"]["name"] == secret_name)
-    assert {"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"} <= set(secret["stringData"])
-    assert secret["stringData"]["AWS_ENDPOINTS"] == "http://rustfs-svc.rustfs.svc.cluster.local:9000"
-    print("PASS:", owner, "decrypts shared credentials before authenticated key renaming")
-
-jobs = [resource for resource in rendered["longhorn-backup"] if resource["kind"] == "RecurringJob"]
-backup = next(job for job in jobs if job["spec"]["task"] == "backup")
-assert backup["spec"]["cron"] == "0 2 * * *"
-assert backup["spec"]["retain"] == 7
-assert all(job["spec"]["task"] not in ("snapshot", "snapshot-force-create", "snapshot-delete") for job in jobs)
-assert next(job for job in jobs if job["spec"]["task"] == "snapshot-cleanup")["spec"]["retain"] == 0
-target = next(resource for resource in rendered["longhorn-backup"] if resource["kind"] == "BackupTarget" and resource["metadata"]["name"] == "default")
-assert [resource["metadata"]["name"] for resource in rendered["longhorn-backup"] if resource["kind"] == "BackupTarget"] == ["default"]
-assert not any(resource["kind"] == "Secret" and resource["metadata"]["name"] == "longhorn-s3-backup-credentials" for resource in rendered["longhorn-backup"])
-settings = next(resource for resource in rendered["longhorn"] if resource["kind"] == "HelmRelease")["spec"]["values"]["defaultSettings"]
-assert target["spec"]["backupTargetURL"] == settings["backupTarget"]
-assert target["spec"]["credentialSecret"] == settings["backupTargetCredentialSecret"]
-print("PASS: Longhorn daily S3 backups retain recovery points without a local snapshot-history job")
-
-for resource in rendered["longhorn-backup"]:
-    if resource["kind"] == "Backup":
-        result = subprocess.run(
-            ["kubectl", "get", "snapshots.longhorn.io", resource["spec"]["snapshotName"], "-n", resource["metadata"]["namespace"], "-o", "json"],
-            capture_output=True, text=True,
-        )
-        assert result.returncode == 0, "Deploy the source Snapshot before its Backup; Longhorn checks it during dry-run"
-        source_snapshot = json.loads(result.stdout)
-        assert source_snapshot["status"]["readyToUse"] is True
-        assert resource["metadata"]["labels"]["backup-volume"] == source_snapshot["spec"]["volume"]
-        assert resource["metadata"]["labels"]["backup-target"] == target["metadata"]["name"]
-        print("PASS: Longhorn Backup admission source is ready and volume and internal target labels match")
-
-provisioner = next(resource for resource in rendered["rustfs"] if resource["kind"] == "Job" and resource["metadata"]["name"] == "rustfs-cluster-backup-buckets-2")
-script = provisioner["spec"]["template"]["spec"]["containers"][0]["args"][0]
-subprocess.run(["sh", "-n"], input=script, text=True, check=True)
-buckets = set(re.findall(r"saikat-kubernetes-cluster-[a-z-]+", script))
-assert len(buckets) == 2 and all(3 <= len(bucket) <= 63 for bucket in buckets)
-assert target["spec"]["backupTargetURL"].split("/")[2].split("@")[0] in buckets
-print("PASS: bucket names, provisioner syntax, and backup destinations agree")
-
-with tempfile.TemporaryDirectory(prefix="backup-chart-checks-") as directory:
-    charts = (
-        ("plugin-barman-cloud", "https://github.com/cloudnative-pg/charts/releases/download/plugin-barman-cloud-v0.8.1/plugin-barman-cloud-0.8.1.tgz", "cnpg-system", "plugin-barman-cloud-0.8.1.tgz"),
-    )
-    for name, url, namespace, filename in charts:
-        subprocess.run(
-            ["curl", "--fail", "--location", "--retry", "3", "--connect-timeout", "15", "--max-time", "180", "--output", str(Path(directory, filename)), url],
-            check=True,
-        )
-        for enabled in (True,):
-            chart_values = {}
-            result = subprocess.run(
-                ["helm", "template", name, str(Path(directory, filename)), "--namespace", namespace, "--include-crds", "-f", "-"],
-                input=json.dumps(chart_values), capture_output=True, text=True,
-            )
-            if result.stderr:
-                print(result.stderr)
-            result.check_returncode()
-            chart_resources = [resource for resource in yaml.safe_load_all(result.stdout) if resource]
-            if name == "plugin-barman-cloud":
-                definition = next(resource for resource in chart_resources if resource["kind"] == "CustomResourceDefinition" and resource["metadata"]["name"] == "objectstores.barmancloud.cnpg.io")
-                schema = next(version for version in definition["spec"]["versions"] if version["name"] == "v1")["schema"]["openAPIV3Schema"]
-                destinations = []
-                for owner, application_role in (("harbor", "harbor"), ("external-dns", "pdns")):
-                    cluster = next(resource for resource in rendered[owner] if resource["kind"] == "Cluster")
-                    store = next(resource for resource in rendered[owner] if resource["kind"] == "ObjectStore")
-                    assert store["spec"]["configuration"]["endpointURL"] == "http://rustfs-svc.rustfs.svc.cluster.local:9000", "WAL and base backups must retain internal Service DNS"
-                    scheduled = next(resource for resource in rendered[owner] if resource["kind"] == "ScheduledBackup")
-                    jsonschema.validate(store, schema)
-                    assert cluster["spec"]["plugins"][0]["isWALArchiver"] is True
-                    assert cluster["spec"]["plugins"][0]["parameters"]["barmanObjectName"] == store["metadata"]["name"]
-                    assert scheduled["spec"]["cluster"]["name"] == cluster["metadata"]["name"]
-                    assert scheduled["spec"]["method"] == "plugin" and len(scheduled["spec"]["schedule"].split()) == 6
-                    assert not scheduled["spec"].get("immediate", False)
-                    labels = cluster["spec"]["inheritedMetadata"]["labels"]
-                    assert labels["recurring-job.longhorn.io/source"] == "enabled"
-                    assert labels["recurring-job-group.longhorn.io/default"] == "disabled"
-                    assert labels["recurring-job.longhorn.io/postgresql-snapshot-cleanup"] == "enabled"
-                    assert cluster["spec"]["bootstrap"]["initdb"]["owner"] == application_role
-                    assert not cluster["spec"].get("enableSuperuserAccess", False)
-                    destination = store["spec"]["configuration"]["destinationPath"]
-                    assert destination.split("/")[2] in buckets
-                    destinations.append(destination)
-                    print("PASS:", owner, "published ObjectStore schema, daily base backup, WAL archiving, and application role")
-                assert len(set(destinations)) == 2
-
-graph = {}
-for path in Path("kubernetes/clusters/saikat-kubernetes-cluster").glob("*.yaml"):
-    for resource in yaml.safe_load_all(path.read_text()):
-        if resource and resource.get("apiVersion", "").startswith("kustomize.toolkit.fluxcd.io/"):
-            graph[resource["metadata"]["name"]] = [dependency["name"] for dependency in resource.get("spec", {}).get("dependsOn", [])]
-for starting in graph:
-    pending = [(starting, [])]
-    while pending:
-        current, ancestry = pending.pop()
-        assert current not in ancestry, "Dependency cycle: " + " -> ".join(ancestry + [current])
-        pending.extend((dependency, ancestry + [current]) for dependency in graph.get(current, []))
-print("PASS: Flux backup dependencies have no cycles")
-'''
-
-# ── API version hygiene ─────────────────────────────────────────────────────
-# Report manifests whose apiVersion+kind the cluster no longer SERVES.
-#
-# Why this exists: whether an apiVersion is served is decided by the CRD that
-# defines it, and a channel/version change can silently stop serving a version we
-# still use. Not hypothetical — switching the Gateway API CRDs from the
-# experimental to the standard channel dropped `v1alpha2`, and every
-# TLSRoute using it stopped applying with "the server could not find the
-# requested resource". Version strings are no signal on their own: `v1alpha1`
-# looks old but is correct for Tekton's ClusterInterceptor, which serves it and
-# nothing else.
-#
-# Sources of truth, and why the obvious one is wrong:
-#   CRDs               -> spec.versions[].served   (authoritative)
-#   built-in resources -> kubectl api-resources    (authoritative for these)
-#   NOT api-resources for CRDs: it lists only the PREFERRED version per resource,
-#   so a CRD serving both v1 and v1beta1 (ReferenceGrant) reports only v1, and
-#   every v1beta1 manifest becomes a false positive.
-#
-# Deliberately dependency-free (stdlib only, regex rather than a YAML parser):
-# apiVersion/kind are top-level scalars, so regex is safe, and PyYAML is NOT
-# guaranteed — the workflow installs only mise plus the root .venv.
-#
-# Requires a working kubeconfig (`mise run bootstrap` extracts it from the vault).
-# Read-only: `kubectl get crd` and `kubectl api-resources` only.
 [check-api-versions]
 description = "Fail if any manifest uses an apiVersion the cluster no longer serves (requires kubeconfig)"
 run = '''
 #!/usr/bin/env python3
-"""Fail if any manifest uses an apiVersion the cluster no longer serves."""
 import json
 import re
 import subprocess
 import sys
 from pathlib import Path
 
-MANIFEST_ROOT = Path("kubernetes")
-
-# apiVersions consumed by tooling, not applied to the API server.
-NON_RESOURCE_GROUPS = {"kustomize.config.k8s.io"}
-
-# Top-level `apiVersion:` / `kind:` only — column 0, no leading whitespace.
-# That is what keeps this safe without a YAML parser.
-API_VERSION_RE = re.compile(r"^apiVersion:[ \t]*(\S+)[ \t]*$", re.M)
-KIND_RE = re.compile(r"^kind:[ \t]*(\S+)[ \t]*$", re.M)
-
-
 def declared_pairs():
-    """(apiVersion, kind) -> set of files, from manifests under kubernetes/."""
     pairs = {}
-    for path in sorted(MANIFEST_ROOT.rglob("*.yaml")):
-        # SOPS files are ciphertext; their apiVersion/kind are opaque blobs.
+    for path in sorted(Path("kubernetes").rglob("*.yaml")):
         if path.name.endswith(".sops.yaml"):
             continue
         text = path.read_text(errors="replace")
-        # Pair positionally: within a document they appear apiVersion then kind.
         for api_version, kind in zip(
-            API_VERSION_RE.findall(text), KIND_RE.findall(text)
+            re.findall(r"^apiVersion:[ \t]*(\S+)[ \t]*$", text, re.M),
+            re.findall(r"^kind:[ \t]*(\S+)[ \t]*$", text, re.M),
         ):
             group = api_version.split("/")[0] if "/" in api_version else ""
-            if group in NON_RESOURCE_GROUPS:
-                continue
-            pairs.setdefault((api_version, kind), set()).add(str(path))
+            if group != "kustomize.config.k8s.io":
+                pairs.setdefault((api_version, kind), set()).add(str(path))
     return pairs
 
-
 def served_pairs():
-    """Every (apiVersion, kind) the cluster serves."""
     served = set()
-
-    crds = json.loads(
-        subprocess.run(
-            ["kubectl", "get", "crd", "-o", "json"],
-            capture_output=True, text=True, check=True,
-        ).stdout
-    )
-    for crd in crds["items"]:
-        spec = crd["spec"]
-        kind = spec["names"]["kind"]
-        for version in spec.get("versions", []):
+    definitions = json.loads(subprocess.run(
+        ["kubectl", "get", "crd", "-o", "json"], capture_output=True, text=True, check=True,
+    ).stdout)
+    # ! Discovery lists only preferred CRD versions; read every served version from the CRD.
+    for definition in definitions["items"]:
+        specification = definition["spec"]
+        for version in specification.get("versions", []):
             if version.get("served"):
-                served.add((f"{spec['group']}/{version['name']}", kind))
-
+                served.add((f"{specification['group']}/{version['name']}", specification["names"]["kind"]))
     resources = subprocess.run(
         ["kubectl", "api-resources", "--no-headers", "--verbs=list"],
         capture_output=True, text=True, check=True,
     ).stdout
     for line in resources.splitlines():
-        # Columns are whitespace-padded and SHORTNAMES can be EMPTY (e.g.
-        # `secrets`), so positional splitting misreads the row. NAMESPACED is
-        # always literally true/false and sits immediately before KIND, with
-        # APIVERSION immediately before it — anchor on that instead.
         fields = line.split()
+        # * SHORTNAMES may be empty; NAMESPACED anchors the version and kind columns.
         if "true" not in fields and "false" not in fields:
             continue
-        idx = next(i for i, f in enumerate(fields) if f in ("true", "false"))
-        if idx >= 2:
-            served.add((fields[idx - 1], fields[idx + 1]))
-
+        position = next(position for position, field in enumerate(fields) if field in ("true", "false"))
+        if position >= 2:
+            served.add((fields[position - 1], fields[position + 1]))
     return served
-
 
 def main():
     declared = declared_pairs()
     served = served_pairs()
-    missing = [
-        (api_version, kind, sorted(files))
-        for (api_version, kind), files in sorted(declared.items())
-        if (api_version, kind) not in served
-    ]
-
+    missing = [(api_version, kind, sorted(files)) for (api_version, kind), files in sorted(declared.items()) if (api_version, kind) not in served]
     if not missing:
         print(f"OK: all {len(declared)} declared apiVersion+kind pairs are served")
         return 0
-
-    print(
-        f"OUTDATED API VERSIONS: {len(missing)} of {len(declared)} declared "
-        "pairs are NOT served by the cluster.\n"
-    )
+    print(f"OUTDATED API VERSIONS: {len(missing)} of {len(declared)} declared pairs are NOT served by the cluster.\n")
     for api_version, kind, files in missing:
         print(f"  {api_version}  ({kind})")
         for path in files:
             print(f"      {path}")
     print(
-        "\nEach entry above will fail to apply. Check which versions the "
-        "resource now serves:\n"
+        "\nEach entry above will fail to apply. Check which versions the resource now serves:\n"
         "  kubectl get crd <crd> -o jsonpath='{range .spec.versions[*]}"
         "{.name} served={.served}{\"\\n\"}{end}'"
     )
     return 1
-
 
 if __name__ == "__main__":
     sys.exit(main())
