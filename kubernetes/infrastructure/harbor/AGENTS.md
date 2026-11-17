@@ -25,9 +25,11 @@ users onboard with their email as username and have no automatic system-admin
 privileges. Preserve local administrator and robot credentials for registry access.
 The native callback is `https://harbor.saikat.dev/c/oidc/callback`.
 
-The [Harbor HTTPRoute](../../networking/routes/harbor.yaml) sends browser UI requests through `oauth2-proxy-harbor`. Registry `/v2/` and `/service/token` requests go directly to Harbor so container clients can use native registry authentication; do not put browser OAuth redirects in that path.
-
-The shared OAuth credentials are owned by the oauth2-proxy declarations. Its Google OAuth registration must include `https://harbor.saikat.dev/oauth2/callback`. The gateway's exact-email allowlist admits only `saikat@atmz.ai`; Harbor's native registry and browser credentials remain separate.
+The [Harbor HTTPRoute](../../networking/routes/harbor.yaml) sends every request
+directly to Harbor. Do not reintroduce an oauth2-proxy gateway for this service.
+Native browser OIDC and native registry credentials are separate; CLI clients
+cannot follow Google login redirects. OIDC users use Harbor's CLI secret, while
+the existing local administrator and robot accounts retain their credentials.
 
 Use the established application image tasks for local build validation and the shared CI/CD pipeline for production image pushes. Credential input must remain out of chat, command history, and logs. Registry login alone does not prove image push or Kubernetes pull access works.
 
@@ -40,7 +42,6 @@ Useful read-only diagnostics include:
 ```sh
 mise exec -- kubectl get statefulset,deployment,pvc -n harbor
 mise exec -- kubectl logs -n harbor deployment/harbor-core
-mise exec -- kubectl logs -n oauth2-proxy deployment/oauth2-proxy-harbor
 ```
 
 For authentication failures, distinguish browser OAuth, registry credentials, and database role/password ownership before changing configuration. Removing an application's deployment does not automatically retire its stored registry images or external data; retention and deletion require a separate authorized decision.

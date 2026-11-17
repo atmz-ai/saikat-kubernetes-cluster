@@ -1,8 +1,0 @@
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: harbor-allowed-emails
-  namespace: oauth2-proxy
-data:
-  allowed-emails: |
-    saikat@atmz.ai

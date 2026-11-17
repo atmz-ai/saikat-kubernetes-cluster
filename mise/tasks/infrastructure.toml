@@ -18,6 +18,23 @@ from jinja2 import Environment
 
 configuration = json.loads(Path("renovate.json").read_text())
 registry_declaration = yaml.safe_load(Path("kubernetes/infrastructure/harbor/helmrelease.yaml").read_text())
+oidc_secret = yaml.safe_load(Path("kubernetes/infrastructure/harbor/oidc-values.sops.yaml").read_text())
+for scenario in ("complete", "missing-native-oidc-values", "plaintext-oidc-values"):
+    candidate = copy.deepcopy(registry_declaration)
+    secret_candidate = copy.deepcopy(oidc_secret)
+    if scenario == "missing-native-oidc-values":
+        candidate["spec"]["valuesFrom"] = [reference for reference in candidate["spec"]["valuesFrom"] if reference["name"] != oidc_secret["metadata"]["name"]]
+    elif scenario == "plaintext-oidc-values":
+        secret_candidate["stringData"]["values.yaml"] = "unencrypted-configuration"
+    try:
+        assert {"kind": "Secret", "name": secret_candidate["metadata"]["name"], "valuesKey": "values.yaml"} in candidate["spec"]["valuesFrom"], "Harbor must load its native OIDC settings from Git"
+        assert secret_candidate["stringData"]["values.yaml"].startswith("ENC["), "OIDC credentials must remain encrypted"
+    except AssertionError:
+        assert scenario != "complete", "native Harbor OIDC declaration is invalid"
+        print("PASS: rejected native OIDC regression", scenario)
+    else:
+        assert scenario == "complete", "missing or plaintext OIDC configuration accepted"
+        print("PASS: Harbor loads encrypted native OIDC values through the chart")
 registry_hostname = urlparse(registry_declaration["spec"]["values"]["externalURL"]).hostname
 website_declaration = yaml.safe_load(Path("kubernetes/apps/my-website/deployment.yaml").read_text())
 website_image = website_declaration["spec"]["template"]["spec"]["containers"][0]["image"]
@@ -33,15 +50,13 @@ for scenario in ("complete", "registry-behind-browser-oauth"):
     if scenario == "registry-behind-browser-oauth":
         candidate["spec"]["rules"][0]["backendRefs"][0]["name"] = "oauth2-proxy-harbor"
     try:
-        for rule in candidate["spec"]["rules"]:
-            if any(match.get("path", {}).get("value") in ("/v2/", "/service/token") for match in rule.get("matches", [])):
-                assert rule["backendRefs"] == [{"name": "harbor", "namespace": "harbor", "port": 80}], "native registry authentication must not enter browser OAuth"
+        assert candidate["spec"]["rules"] == [{"backendRefs": [{"name": "harbor", "namespace": "harbor", "port": 80}]}], "native Harbor must handle browser and registry authentication directly"
     except AssertionError:
         assert scenario != "complete", "registry route breaks native clients"
         print("PASS: rejected registry authentication regression", scenario)
     else:
         assert scenario == "complete", "OAuth-blocked registry route accepted"
-        print("PASS: native registry and token paths bypass browser OAuth")
+        print("PASS: all Harbor routes use native browser and registry authentication")
 beszel_configuration = yaml.safe_load(Path("kubernetes/infrastructure/beszel/configmap.yaml").read_text())
 node_configuration = yaml.safe_load(Path("ansible/inventory/group_vars/all/vars.yml").read_text())
 beszel_routes = [resource for resource in yaml.safe_load_all(Path("kubernetes/networking/routes/beszel.yaml").read_text()) if resource]
@@ -111,7 +126,7 @@ for filename in ("kubernetes/infrastructure/cilium/helmrelease.yaml", "ansible/m
         else:
             assert scenario == "complete", "invalid Hubble configuration accepted"
             print("PASS: Hubble UI retired while relay and metrics remain enabled", filename)
-for application in ("grafana", "headlamp", "dashboard", "harbor"):
+for application in ("grafana", "headlamp", "dashboard"):
     deployment = yaml.safe_load(Path("kubernetes/infrastructure/oauth2-proxy/deployment-" + application + ".yaml").read_text())
     allowlist = yaml.safe_load(Path("kubernetes/infrastructure/oauth2-proxy/" + application + "-allowed-emails.yaml").read_text())
     for scenario in ("complete", "legacy-google-group", "domain-bypasses-allowlist", "missing-email-file", "additional-user"):
