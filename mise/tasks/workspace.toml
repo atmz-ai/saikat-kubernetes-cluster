@@ -228,10 +228,19 @@ for scenario in ("complete", "task-as-daemon-dependency"):
     assert scenario == "complete", "Invalid daemon dependency accepted"
     print("Verified daemon dependency references.")
 website_daemon = daemons["my-website"]
-assert "../../target/release/my-website" in website_daemon["run"]
-assert "../../target/x86_64-unknown-linux-musl/release/my-website" in website_daemon["run"]
-assert urllib.parse.urlparse(website_daemon["ready_http"]).port == int(website_daemon["env"]["LEPTOS_SITE_ADDR"].rsplit(":", 1)[1])
-print("Verified website workspace-root binary paths and readiness port.")
+assert website_daemon["run"] == "node build"
+assert website_daemon["dir"] == "apps/my-website"
+assert urllib.parse.urlparse(website_daemon["ready_http"]).port == int(website_daemon["env"]["PORT"])
+assert website_daemon["env"]["ORIGIN"] == website_daemon["ready_http"].rstrip("/")
+print("Verified website Node server path, origin, and readiness port.")
+for daemon_name, build_task_name in (("my-website", "my-website-build"), ("my-website-container", "my-website-image")):
+  task = tasks[daemon_name.replace("-container", "-image") + "-run"]
+  assert task["depends"] == [build_task_name]
+  assert not task.get("daemons"), "Task-level daemons start before builds"
+  assert task["run"] == f"mise daemons stop {daemon_name} && mise daemons start {daemon_name}"
+  print("Verified build-before-daemon startup: " + daemon_name)
+assert "--platform linux/amd64" in daemons["my-website-container"]["run"]
+print("Verified container startup uses the same platform as its build.")
 for task_name, task in tasks.items():
   for dependency in task.get("depends", []):
     assert dependency in tasks, "Undefined task dependency: " + task_name + " -> " + dependency

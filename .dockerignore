@@ -3,4 +3,7 @@
 .venv/
 ansible/collections/
 target/
+apps/my-website/node_modules/
+apps/my-website/.svelte-kit/
+apps/my-website/build/
 video-generation/

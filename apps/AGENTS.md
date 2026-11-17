@@ -8,7 +8,7 @@ Application code lives in `apps/<application>/`. Its cluster deployment declarat
 | --- | --- |
 | `my-website` | `saikat.dev` |
 
-Rust applications maintained in this repository belong in the root Cargo workspace. Do not add them to its exclusion list. Tools, tasks, local configuration, secrets, and daemons remain centralized at the repository root; follow the root onboarding conventions rather than adding per-application tooling configuration.
+The website uses SvelteKit, TypeScript, and XState. Its dependency manifest and lockfile live with the application. Tools, tasks, local configuration, secrets, and daemons remain centralized at the repository root; follow the root onboarding conventions rather than adding per-application tooling configuration.
 
 ## External Ownership
 

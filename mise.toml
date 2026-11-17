@@ -6,18 +6,15 @@ age.strict = false
 
 [tools]
 age = "latest"
-"aqua:WebAssembly/binaryen" = "131"
 aws-cli = "latest"
 # ! Azure CLI's macOS broker dependency has no CPython 3.15 wheels.
 azure-cli = { version = "latest", python = "3.14" }
 cargo-binstall = "latest"
-"cargo:cargo-leptos" = "latest"
 flux2 = "2.9.5"
 gh = "latest"
 # ! The vfox gcloud backend imports an unavailable Lua python module before installation.
 "asdf:mise-plugins/mise-gcloud" = { version = "latest", depends = ["python"] }
 helm = "latest"
-"github:wasm-bindgen/wasm-bindgen" = "0.2.130"
 kubectl = "latest"
 node = "latest"
 pitchfork = "latest"
@@ -62,7 +59,6 @@ RUSTUP_HOME = "{{env.HOME}}/.rustup"
 CARGO_BINSTALL_DIR = "{{env.HOME}}/.local/share/cargo-binstall"
 KUBECONFIG = "{{env.HOME}}/.kube/config"
 RUST_LOG = "info"
-LEPTOS_HASH_FILES = "true"
 CLUSTER_GITHUB_TOKEN = { age = "YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IHNzaC1lZDI1NTE5IG5QMTlMdyB2SElId3NsRUk5ZkFsSW1ua3JpVzBmZWZ4cFU5KzFrRmZFRTJSOGlBc2wwCnJUUHJtUWRCcVVHZnI3cXM2d2NoaXhpL1pja254Tk5ydDV4OGswVG90cTgKLT4gMyk3LWdyZWFzZSAzIGdlK25mZ0QKN2wvUC9LYVRURk9VUzk3KzdRZk9weWVTaE4ra1lBaGZzUlEvNVFSU1ZBCi0tLSAveVJrNFFmdFl0TnZKanpFeFNIenFzcXdzRWtOeDFXYllYd2JVZ2czZFhrCrlke0xMBDlp3063E6GnKUYV0gAT0iTTwHsGtpcg0UC3MOsaJRZdxzRJxvYKNDOMjToXPT7Jg873l2+d6I/O38PBT4jLLATjNeKyHGnhAm4bG9qNDbRp+mP4vpCJqDYIGnOnkBI48bfUCLAzWo3xETbF3L+SSG4O9YYbVpH5" }
 
 [env.CLUSTER_CLOUDFLARE_API_TOKEN]
@@ -81,24 +77,18 @@ includes = [
 ]
 
 [daemons.my-website]
-run = '''
-if [[ "$(uname)" == "Darwin" ]]; then
-  exec ./../../target/release/my-website
-else
-  exec ./../../target/x86_64-unknown-linux-musl/release/my-website
-fi
-'''
+run = "node build"
 dir = "apps/my-website"
 ready_http = "http://localhost:8081/"
 stop_signal = "SIGINT"
-env = { LEPTOS_SITE_ADDR = "0.0.0.0:8081" }
+env = { HOST = "127.0.0.1", PORT = "8081", ORIGIN = "http://localhost:8081" }
 
 [daemons.my-website-container]
 run = '''
 if [[ "$(uname)" == "Darwin" ]]; then
-  exec container run --rm -p 8083:8080 test/my-website
+  exec container run --rm --platform linux/amd64 -p 8083:8080 test/my-website
 else
-  exec podman run --rm -p 8083:8080 test/my-website
+  exec podman run --rm --platform linux/amd64 -p 8083:8080 test/my-website
 fi
 '''
 ready_http = "http://localhost:8083/"
