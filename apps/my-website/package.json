@@ -1,0 +1,54 @@
+{
+	"name": "my-website",
+	"version": "0.0.1",
+	"private": true,
+	"type": "module",
+	"imports": {
+		"#lib/*": "./src/lib/*"
+	},
+	"scripts": {
+		"dev": "vite dev",
+		"build": "vite build",
+		"preview": "vite preview",
+		"prepare": "svelte-kit sync",
+		"test": "vitest run",
+		"test:browser": "playwright test",
+		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch"
+	},
+	"devDependencies": {
+		"@playwright/test": "latest",
+		"@sveltejs/adapter-node": "latest",
+		"@sveltejs/kit": "^3.0.0",
+		"@sveltejs/vite-plugin-svelte": "^7.2.0",
+		"@tailwindcss/typography": "latest",
+		"@tailwindcss/vite": "latest",
+		"@types/markdown-it": "latest",
+		"@types/markdown-it-footnote": "latest",
+		"@types/node": "latest",
+		"@types/prismjs": "latest",
+		"markdown-it": "latest",
+		"markdown-it-footnote": "latest",
+		"markdown-it-task-lists": "latest",
+		"prismjs": "latest",
+		"svelte": "^5.57.2",
+		"svelte-check": "^4.6.0",
+		"tailwindcss": "latest",
+		"typescript": "^6.0.3",
+		"vite": "^8.3.0",
+		"vitest": "latest",
+		"yaml": "latest"
+	},
+	"dependencies": {
+		"@xstate/svelte": "latest",
+		"xstate": "latest"
+	},
+	"overrides": {
+		"@tailwindcss/typography": {
+			"postcss-selector-parser": "^7.2.1"
+		}
+	},
+	"allowScripts": {
+		"fsevents": false
+	}
+}

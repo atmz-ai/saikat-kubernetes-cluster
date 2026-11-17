@@ -37,6 +37,11 @@ than delegating to platform automerge. Do not rely on native automerge to wait
 for CI unless branch protection actually requires those checks. Validate components
 merged by Renovate as well as manually merged updates before continuing.
 
+When an operator chart upgrade requires updated CRDs, declare
+`spec.upgrade.crds: CreateReplace` on its HelmRelease rather than applying CRDs
+imperatively. Flux's default `Create` policy does not update existing CRDs; see
+the [CRD lifecycle documentation](https://fluxcd.io/flux/components/helm/helmreleases/#controlling-the-lifecycle-of-custom-resource-definitions).
+
 ## Networking and TLS
 
 Cilium cluster names must satisfy the [official Helm reference](https://docs.cilium.io/en/stable/helm-reference/):

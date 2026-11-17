@@ -56,6 +56,23 @@ import yaml
 from jinja2 import Environment
 
 configuration = json.loads(Path("renovate.json").read_text())
+monitoring = yaml.safe_load(Path("kubernetes/infrastructure/monitoring/helmrelease.yaml").read_text())
+for scenario in ("upgrade-crds", "original-default", "create-only", "skip-crds"):
+    candidate = copy.deepcopy(monitoring)
+    if scenario == "original-default":
+        candidate["spec"]["upgrade"].pop("crds", None)
+    elif scenario == "create-only":
+        candidate["spec"]["upgrade"]["crds"] = "Create"
+    elif scenario == "skip-crds":
+        candidate["spec"]["upgrade"]["crds"] = "Skip"
+    try:
+        assert candidate["spec"]["upgrade"].get("crds", "Create") == "CreateReplace", "Prometheus operator upgrades must reconcile their chart's CRDs"
+    except AssertionError:
+        assert scenario != "upgrade-crds", "Prometheus operator CRDs are not upgraded declaratively"
+        print("PASS: rejected stale Prometheus operator CRDs", scenario)
+    else:
+        assert scenario == "upgrade-crds", "stale Prometheus operator CRDs accepted: " + scenario
+        print("PASS: Prometheus operator upgrades reconcile their CRDs through Flux")
 gateway = yaml.safe_load(Path("kubernetes/networking/gateway.yaml").read_text())
 route_index = yaml.safe_load(Path("kubernetes/networking/routes/kustomization.yaml").read_text())
 network_routes = [resource for filename in route_index["resources"] for resource in yaml.safe_load_all(Path("kubernetes/networking/routes", filename).read_text()) if resource]

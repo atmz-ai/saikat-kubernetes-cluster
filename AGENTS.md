@@ -219,7 +219,7 @@ When the operator makes manual changes in parallel with agent work (dependency b
 **Colocate logic beside its caller (Hard Rule).** Business/data logic lives in the same folder as the UI (or other code) that calls it — feature-local by default, not in a parallel "core/common/utils" tree. Only when MULTIPLE features consume the same logic should it graduate to a shared location (and ask before creating that shared module). Do not pre-create shared/core modules "for later" — dead code ahead of its first consumer is speculative structure.
 
 ### UI File Organisation: Suffixes, Previews, Atomic Components (Hard Rule)
-**Applies to every UI we write, in every stack**, including Leptos (`apps/my-website`) and any future UI. Platform-specific spelling belongs in the app's own AGENTS.md; the shape is the same everywhere:
+**Applies to every UI we write, in every stack**, including Svelte (`apps/my-website`) and any future UI. Platform-specific spelling belongs in the app's own AGENTS.md; the shape is the same everywhere:
 
 1. **Organise by top-level feature, one folder per feature.** Logic is colocated inside the feature folder beside the UI that calls it — no per-layer folders, no core/utils tree (this is the Colocated Code rule above, applied to UI).
 
@@ -599,7 +599,7 @@ For multiline or Base64 input, use `--stdin` instead of `--prompt`, keeping plai
 
 **Prefer existing mise tasks for recurring workflows.** Use the corresponding `mise run` task when its environment, secrets, dependency chain, or safety checks are needed. One-off tooling commands may run directly with the necessary prerequisites; do not create a task just to run them once.
 
-Use `my-website-build`, `my-website-run`, and `my-website-stop` for the maintained application; inspect daemon status with `mise daemons ls`. Do not duplicate these with generic `dev-*` tasks. Retain indirect tool dependencies: Binaryen supplies cargo-leptos's `wasm-opt`, and `uv` installs mise's PyPI tools, including Azure CLI. See [cargo-leptos dependencies](https://github.com/leptos-rs/cargo-leptos#dependencies) and [mise PyPI requirements](https://mise.jdx.dev/dev-tools/backends/pypi.html#requirements).
+Use `my-website-build`, `my-website-run`, and `my-website-stop` for the maintained application; inspect daemon status with `mise daemons ls`. Do not duplicate these with generic `dev-*` tasks. Retain indirect tool dependencies: `uv` installs mise's PyPI tools, including Azure CLI. See [mise PyPI requirements](https://mise.jdx.dev/dev-tools/backends/pypi.html#requirements).
 
 **Long-running processes (dev servers, containers) are declared in `[daemons]` in the root `mise.toml` and managed by mise.** There is no `pitchfork.toml` — `mise daemons start|stop|restart|ls|status|logs|urls|tui` drives them (see the `[daemons]` section and the top-of-file note in `mise.toml`).
 
@@ -608,8 +608,6 @@ Use `my-website-build`, `my-website-run`, and `my-website-stop` for the maintain
 **Start daemons per task, not all at once.** A task declares what it needs with `daemons = ["<name>"]` (or `daemons = true` for every project daemon); mise starts them, waits for readiness, then runs the task body, and reuses anything already running. `auto = ["start", "stop"]` and `pitchfork activate` are gone — **nothing starts merely by entering the repo.** Prefer `mise run <app>-run` (which adds the `depends = ["<app>-build"]` it needs) over calling `mise daemons start` directly. Stop with `mise run <app>-stop` or `mise daemons stop`.
 
 **Version locking (Preference):** Prefer `"latest"` requests for local mise tools such as `uv`; keep exact resolved versions, checksums, and provenance in the committed `mise.lock`. Update a tool with `mise lock --bump <tool>` without replacing its floating request with an exact version. Use an explicit local tool pin only when the operator requests one or a verified compatibility constraint requires it, not merely to select a release or prevent bot branch rewrites. Deployed cluster components retain their explicit version declarations.
-
-The root `github:wasm-bindgen/wasm-bindgen` tool must match the resolved Rust `wasm-bindgen` crate version. Its official prebuilt release supplies the CLI for cargo-leptos without a crates.io installation. See [mise's GitHub backend](https://mise.jdx.dev/dev-tools/backends/github.html) and [the wasm-bindgen CLI](https://wasm-bindgen.github.io/wasm-bindgen/reference/cli.html).
 
 **Declarative-only tooling (no imperative system installs):** The local environment must be fully reproducible from `mise.toml` alone — a Nix-like experience. Never run `sudo apt-get install`, `brew install`, or any imperative system package manager command to satisfy a build dependency. If a tool or library is needed:
 1. Check if mise provides it (add to `[tools]` in `mise.toml`).
