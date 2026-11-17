@@ -17,6 +17,31 @@ import yaml
 from jinja2 import Environment
 
 configuration = json.loads(Path("renovate.json").read_text())
+registry_declaration = yaml.safe_load(Path("kubernetes/infrastructure/harbor/helmrelease.yaml").read_text())
+registry_hostname = urlparse(registry_declaration["spec"]["values"]["externalURL"]).hostname
+website_declaration = yaml.safe_load(Path("kubernetes/apps/my-website/deployment.yaml").read_text())
+website_image = website_declaration["spec"]["template"]["spec"]["containers"][0]["image"]
+image_repository = yaml.safe_load(Path("kubernetes/apps/my-website/image-repository.yaml").read_text())
+build = yaml.safe_load(Path("kubernetes/apps/my-website/build.yaml").read_text())
+build_template = next(resource for resource in yaml.safe_load_all(Path("kubernetes/apps/my-website/tekton-trigger.yaml").read_text()) if resource and resource["kind"] == "TriggerTemplate")
+for image in (website_image, image_repository["spec"]["image"], build["spec"]["output"]["image"], build_template["spec"]["resourcetemplates"][0]["spec"]["output"]["image"]):
+    assert image.split("/", 1)[0] == registry_hostname, "registry consumer uses a different origin: " + image
+    print("PASS: registry consumer matches Harbor's declared origin", image)
+registry_route = next(resource for resource in yaml.safe_load_all(Path("kubernetes/networking/routes/harbor.yaml").read_text()) if resource and resource["metadata"]["name"] == "harbor")
+for scenario in ("complete", "registry-behind-browser-oauth"):
+    candidate = copy.deepcopy(registry_route)
+    if scenario == "registry-behind-browser-oauth":
+        candidate["spec"]["rules"][0]["backendRefs"][0]["name"] = "oauth2-proxy-harbor"
+    try:
+        for rule in candidate["spec"]["rules"]:
+            if any(match.get("path", {}).get("value") in ("/v2/", "/service/token") for match in rule.get("matches", [])):
+                assert rule["backendRefs"] == [{"name": "harbor", "namespace": "harbor", "port": 80}], "native registry authentication must not enter browser OAuth"
+    except AssertionError:
+        assert scenario != "complete", "registry route breaks native clients"
+        print("PASS: rejected registry authentication regression", scenario)
+    else:
+        assert scenario == "complete", "OAuth-blocked registry route accepted"
+        print("PASS: native registry and token paths bypass browser OAuth")
 beszel_configuration = yaml.safe_load(Path("kubernetes/infrastructure/beszel/configmap.yaml").read_text())
 node_configuration = yaml.safe_load(Path("ansible/inventory/group_vars/all/vars.yml").read_text())
 beszel_routes = [resource for resource in yaml.safe_load_all(Path("kubernetes/networking/routes/beszel.yaml").read_text()) if resource]
