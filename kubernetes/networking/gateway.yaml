@@ -9,18 +9,6 @@ metadata:
 spec:
   gatewayClassName: cilium
   listeners:
-    - name: https-rustfs-console
-      port: 443
-      protocol: HTTPS
-      hostname: rust-fs.saikat.oleole.ai
-      tls:
-        mode: Terminate
-        certificateRefs:
-          - name: rustfs-console-tls
-            kind: Secret
-      allowedRoutes:
-        namespaces:
-          from: All
     - name: https-rustfs
       port: 443
       protocol: HTTPS
