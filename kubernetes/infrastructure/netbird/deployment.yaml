@@ -26,11 +26,11 @@ spec:
           env:
             - name: NB_SETUP_PAT_ENABLED
               value: "true"
-            # ! v0.83.1 warns on unset intervals; retain its 1 ms default without warmup.
+            # ! v0.83.1 warns on unset interval inputs; retain its documented defaults.
             - name: NB_PEER_UPDATE_INTERVAL_MS
               value: "1"
             - name: NB_PEER_UPDATE_STARTUP_PERIOD_S
-              value: "0"
+              value: "1"
           ports:
             - name: http
               containerPort: 80

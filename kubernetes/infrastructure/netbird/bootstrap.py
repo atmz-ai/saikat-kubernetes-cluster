@@ -124,6 +124,8 @@ def operator_update(users: list, operator_email: str) -> Request | Completion:
             "Expected exactly one Google identity for the declared operator"
         )
     operator = candidates[0]
+    if not isinstance(operator.get("role"), str) or not operator["role"]:
+        raise ValueError("Operator Google identity is missing its account role")
     if (
         not isinstance(operator.get("id"), str)
         or not operator["id"]

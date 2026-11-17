@@ -380,6 +380,7 @@ class BootstrapTests(unittest.TestCase):
             [dict(google, is_service_user=True)],
             [],
             [dict(google, pending_approval="true")],
+            [dict(google, role=None)],
         ):
             with self.subTest(users=users), self.assertRaises(ValueError):
                 operator_update(users, self.setup["email"])
