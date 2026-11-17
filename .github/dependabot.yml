@@ -1,5 +1,12 @@
 version: 2
 updates:
+  # * Both Dependabot and Renovate intentionally monitor npm dependencies.
+  - package-ecosystem: "npm"
+    directories:
+      - "/apps/my-website"
+    schedule:
+      interval: "weekly"
+
   - package-ecosystem: "pip"
     directories:
       - "/"
