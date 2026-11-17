@@ -7,11 +7,8 @@ spec:
   parentRefs:
     - name: web-gateway
       namespace: kube-system
-      sectionName: https-rustfs
-    - name: web-gateway
-      namespace: kube-system
       sectionName: https-saikat-dev
-  hostnames: [s3.saikat.dev, s3.saikat.oleole.ai]
+  hostnames: [s3.saikat.dev]
   rules:
     - matches:
         - path:

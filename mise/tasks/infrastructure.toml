@@ -276,7 +276,7 @@ for scenario in ("complete", "callback-origin-mismatch", "dynamic-callback", "lo
         assert scenario == "complete", "unsafe RustFS Console cutover accepted: " + scenario
         print("PASS: RustFS Console origin, native email policy, and independent S3 backend")
 s3_route = next(route for route in rustfs_routes if route["metadata"]["name"] == "rustfs-s3")
-for scenario in ("complete", "missing-new-origin", "browser-auth-proxy", "host-rewrite", "path-rewrite", "host-redirect", "missing-tls-parent"):
+for scenario in ("complete", "missing-new-origin", "browser-auth-proxy", "host-rewrite", "path-rewrite", "host-redirect", "missing-tls-parent", "retired-host-added", "retired-listener-added"):
     candidate = copy.deepcopy(s3_route)
     if scenario == "missing-new-origin":
         candidate["spec"]["hostnames"].remove("s3.saikat.dev")
@@ -290,9 +290,13 @@ for scenario in ("complete", "missing-new-origin", "browser-auth-proxy", "host-r
         candidate["spec"]["rules"][0]["filters"] = [{"type": "RequestRedirect", "requestRedirect": {"hostname": "s3.saikat.dev", "statusCode": 301}}]
     elif scenario == "missing-tls-parent":
         candidate["spec"]["parentRefs"] = [{"name": "web-gateway", "namespace": "kube-system", "sectionName": "http"}]
+    elif scenario == "retired-host-added":
+        candidate["spec"]["hostnames"].append("s3.saikat.oleole.ai")
+    elif scenario == "retired-listener-added":
+        candidate["spec"]["parentRefs"].append({"name": "web-gateway", "namespace": "kube-system", "sectionName": "https-rustfs"})
     try:
-        assert "s3.saikat.dev" in candidate["spec"]["hostnames"]
-        assert "https-saikat-dev" in {parent["sectionName"] for parent in candidate["spec"]["parentRefs"]}
+        assert candidate["spec"]["hostnames"] == ["s3.saikat.dev"]
+        assert {parent["sectionName"] for parent in candidate["spec"]["parentRefs"]} == {"https-saikat-dev"}
         assert candidate["spec"]["rules"] == [{"matches": [{"path": {"type": "PathPrefix", "value": "/"}}], "backendRefs": [{"name": "rustfs-svc", "port": 9000}]}], "S3 signatures require unchanged Host/path and a direct native backend"
     except AssertionError:
         assert scenario != "complete", "S3 origin migration breaks native signed requests"
