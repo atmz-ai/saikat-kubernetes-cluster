@@ -92,6 +92,22 @@ for scenario in ("reviewed", "protected-tag", "protected-digest", "legacy-rollba
         assert not any(deletion["name"] == "library" for deletion in deletions)
         print("PASS: registry cleanup selects only reviewed content and keeps newest versions", scenario)
 registry_declaration = yaml.safe_load(Path("kubernetes/infrastructure/harbor/helmrelease.yaml").read_text())
+for scenario in ("bounded-pool", "original-default-pool", "idle-exhausts-capacity", "open-exhausts-capacity"):
+    database_candidate = copy.deepcopy(registry_declaration["spec"]["values"]["database"])
+    if scenario == "original-default-pool":
+        database_candidate.update(maxIdleConns=100, maxOpenConns=900)
+    elif scenario == "idle-exhausts-capacity":
+        database_candidate["maxIdleConns"] = 97
+    elif scenario == "open-exhausts-capacity":
+        database_candidate["maxOpenConns"] = 100
+    try:
+        assert 0 < database_candidate["maxIdleConns"] <= database_candidate["maxOpenConns"] < 97, "Harbor's pool must leave CNPG connection capacity for native garbage collection"
+    except AssertionError:
+        assert scenario != "bounded-pool", "Harbor database pool exhausts its server"
+        print("PASS: rejected Harbor garbage-collection connection starvation", scenario)
+    else:
+        assert scenario == "bounded-pool", "database connection starvation accepted: " + scenario
+        print("PASS: Harbor's database pool leaves capacity for native garbage collection")
 oidc_secret = yaml.safe_load(Path("kubernetes/infrastructure/harbor/oidc-values.sops.yaml").read_text())
 for scenario in ("complete", "missing-native-oidc-values", "plaintext-oidc-values"):
     candidate = copy.deepcopy(registry_declaration)

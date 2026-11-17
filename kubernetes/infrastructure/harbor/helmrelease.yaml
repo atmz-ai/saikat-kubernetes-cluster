@@ -32,7 +32,6 @@ spec:
       core:
         servicePort: 80
     
-    # Storage backend for images
     persistence:
       enabled: true
       resourceName: registry
@@ -45,7 +44,6 @@ spec:
         redis:
           size: 5Gi
     
-    # Disable components not needed for temporary app registry
     chartmuseum:
       enabled: false
     notary:
@@ -53,14 +51,10 @@ spec:
     trivy:
       enabled: false
 
-    # Harbor only templates updateStrategy.type for these PVC-backed Deployments.
-    # Use Recreate so the old pod releases the RWO volume before the new pod starts.
+    # ! Recreate releases each RWO volume before its replacement pod starts.
     updateStrategy:
       type: Recreate
 
-    # Core Harbor settings
-    # podAnnotations trigger a restart when changed — Harbor core needs to
-    # re-run schema migrations on the fresh DB (recreated after purge).
     core:
       replicas: 1
       podAnnotations:
@@ -97,21 +91,17 @@ spec:
     
     database:
       type: external
+      # ! The default pool retained 97 idle connections, exhausting CNPG's 100
+      # ! slots and preventing garbage collection from connecting.
+      maxIdleConns: 10
+      maxOpenConns: 80
       external:
         host: harbor-db-rw.harbor.svc
         port: "5432"
-        # ! Must match the `harbor` role. The role and the database ownership are
-        # ! managed declaratively by databaserole.yaml + harbor-db-grants.yaml; see
-        # ! databaserole.yaml for why the application role is kept distinct from
-        # ! CNPG's `postgres` superuser.
+        # ! Keep the application role distinct from CNPG's postgres superuser.
         username: harbor
         coreDatabase: registry
-        # The `harbor` role's password, from harbor-role-secret.sops.yaml. Only needs
-        # `username` + `password` keys, which is what that Secret carries.
-        # ! Do NOT point this back at harbor-db-superuser or harbor-db-app. Both
-        # ! describe the `postgres` superuser, whose password drifts independently of
-        # ! this Secret — that drift is what broke the registry on 2026-10-02. Only
-        # ! harbor-role-secret is owned by the DatabaseRole, so only it cannot drift.
+        # ! DatabaseRole owns this credential; never substitute a postgres Secret.
         existingSecret: harbor-role-secret
         sslmode: disable
     
@@ -122,12 +112,7 @@ spec:
     - kind: Secret
       name: harbor-oidc-values
       valuesKey: values.yaml
-    # Admin password lives in harbor-admin-secret.sops.yaml (SOPS-encrypted).
-    # When the Harbor admin password or robot account credentials change, update ALL:
-    #   1. kubernetes/infrastructure/harbor/harbor-admin-secret.sops.yaml  (admin password)
-    #   2. kubernetes/apps/<app>/harbor-pull-secret.sops.yaml             (robot creds, per-app)
-    # * Website image scans use kubernetes/apps/my-website/harbor-scan-secret.sops.yaml.
-    # Use: mise run sops-decrypt <file> / mise run sops-encrypt <file>
+    # ! Rotate application pull/push and Flux scanning credentials together.
     - kind: Secret
       name: harbor-secrets
       valuesKey: admin-password

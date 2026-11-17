@@ -35,7 +35,7 @@ subjects:
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: harbor-registry-cleanup-v1
+  name: harbor-registry-cleanup-v2
   namespace: harbor
 spec:
   backoffLimit: 0
@@ -215,11 +215,13 @@ spec:
                           execution = json.load(response)
                       status = execution["job_status"]
                       print("Harbor garbage collection:", execution["id"], status)
-                      if status == "Success":
+                      if status in ("Success", "Error", "Stopped"):
                           request = urllib.request.Request(endpoint.removesuffix("/api/v2.0") + garbage_collection_path + "/log", headers=headers)
                           with urllib.request.urlopen(request, timeout=30) as response:
                               print(response.read().decode())
-                          break
+                          if status == "Success":
+                              break
+                          raise RuntimeError("Harbor garbage collection did not succeed: " + str(execution["id"]) + " " + status)
                       if status not in ("Pending", "Scheduled", "Running"):
                           raise RuntimeError("Harbor garbage collection did not succeed: " + str(execution["id"]) + " " + status)
                       time.sleep(5)
