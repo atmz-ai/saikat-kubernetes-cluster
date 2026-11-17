@@ -19,3 +19,7 @@ recovery, and aborts the serial play. Candidate CA copies are always removed.
 Verify the real serving certificate fingerprint, all SANs, readiness and etcd
 health before proceeding. Do not publish API DNS or change clients until all
 serving nodes pass. Keep the original-pair backups until cutover is confirmed.
+
+After explicit client-retirement confirmation, the bounded retirement parameter
+may remove only the two legacy API DNS SANs. Every IP, service and current DNS SAN
+remains protected. The default retirement list is empty; normal reissuance stays additive.

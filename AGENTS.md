@@ -403,18 +403,18 @@ Maintain a top-level `constants.rs` beside `lib.rs` for constants shared between
 ### Hetzner + Provisioning
 - `provision` role uses Hetzner Robot API + installimage (Ubuntu).
 - OS partition full disk on all nodes (via `provision_os_partition_size: "all"`). Longhorn uses the btrfs filesystem (expanded to both NVMe drives via RAID0).
-- `cloudflare-dns` role (at end of add-* playbooks) and `node-remove` handle DNS automatically from `cloudflare_dns_records` in `hosts.yml`.
+- Node add/remove operations regenerate inventory-owned DNS through `pdns-zones`; commit and push the generated declarations for Flux and external-dns to converge.
 - `namecheap-dns` role + `update-namecheap-dns.yml` playbook manages custom nameserver glue records at Namecheap from `namecheap_nameserver` per-host annotations in `hosts.yml`.
 
 **Nameservers live on the control planes** (node-1..node-6 — `ns1`/`ns4`/`ns5`/`ns8`/`ns9`/`ns10`), not on workers. The annotation drives all three copies of the address list — the registrar glue records, the zone's NS records, and the PowerDNS Service `externalIPs` — so they cannot drift. A nameserver needs only its address bound to `:53`; Cilium routes that to whichever node hosts a PowerDNS pod over the VXLAN tunnel, so **no PowerDNS pod need run on the annotated node** (verified: the previous worker-based nameservers answered queries while running no pod at all). The prefixes are reused across the move rather than renumbered, which keeps each zone's NS set byte-identical and makes the change a glue-IP update; re-point a prefix, never just delete one, because the role has no glue-record delete path.
 
-**Full init flow (never partial):** provision → storage-longhorn → ssh-hardening → base-system (reboot if needed) → containerd → kubernetes → (init or join) → node-labels → cloudflare-dns.
+**Full init flow (never partial):** follow the complete node lifecycle playbook, then regenerate inventory-owned DNS and push its declarations. Do not manually update cluster DNS at Cloudflare.
 
 ### Kubernetes Cluster
 - kubeadm, stacked etcd, 10 stacked CP nodes: node-1..node-7 (Hetzner — 5 Helsinki, 2 Falkenstein) + 3 Azure Central India.
 - All CP nodes run both control plane and workloads (`stacked_control_plane: true` per host in inventory).
 - etcd quorum=6, tolerates 4 node failures. The three Azure members are full voters, not learners — their commit latency is ~900ms against 57–287ms for the Hetzner members, because the India↔Europe RTT is ~146ms. That is the cost of the cross-region placement, and it is why the timeouts are 250/2500 (see `ansible/inventory/group_vars/all/vars.yml`): etcd's 100/1000 defaults cannot be kept once a WAN member is in the quorum.
-- Control plane HA via DNS round-robin: `kubernetes-api.oleole.ai` (PowerDNS, all 10 CPs) is the current `control_plane_endpoint`; `kubernetes-api.yral.com` (Cloudflare, the 7 Hetzner CPs) is the previous endpoint, still in `api_server_cert_sans` so both names stay valid during the move.
+- Control plane HA uses the inventory-derived `kubernetes-api.saikat.dev` DNS record. Node lifecycle DNS converges through `pdns-zones` and Flux, not Cloudflare writes.
 - Cilium + WireGuard encryption. Gateway API for exposure.
 - Serial node operations.
 - CoreDNS topology: see `kubernetes/infrastructure/coredns/coredns-*-topology.yaml` (non-Flux, kubeadm-owned). Run `kubectl apply -f` after adding workers in new zones.

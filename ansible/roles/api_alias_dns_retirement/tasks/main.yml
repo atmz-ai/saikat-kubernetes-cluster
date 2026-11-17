@@ -1,0 +1,23 @@
+---
+- name: Require the new API endpoint before deleting its legacy alias
+  ansible.builtin.assert:
+    that:
+      - control_plane_endpoint == 'kubernetes-api.saikat.dev'
+      - api_server_cert_sans == ['kubernetes-api.saikat.dev']
+
+- name: Verify the active new API endpoint before legacy DNS retirement
+  kubernetes.core.k8s_cluster_info:
+  register: api_alias_dns_retirement_cluster
+
+- name: Remove only the retired Cloudflare API A records
+  community.general.cloudflare_dns:
+    api_token: "{{ vault_cloudflare_api_token }}"
+    zone: yral.com
+    record: kubernetes-api
+    type: A
+    state: absent
+  register: api_alias_dns_retirement_result
+
+- name: Report scoped legacy API DNS retirement
+  ansible.builtin.debug:
+    msg: "{{ 'Planned' if ansible_check_mode else 'Completed' }} Cloudflare API A-record retirement only; zones and unrelated wildcard records unchanged"
