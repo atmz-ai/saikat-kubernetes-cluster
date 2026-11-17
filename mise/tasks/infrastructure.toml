@@ -147,3 +147,75 @@ for resource in yaml.safe_load_all(result.stdout):
         print("PASS: cluster entrypoint", resource["kind"], resource["metadata"]["name"])
 '''
 
+[check-api-versions]
+description = "Fail if any manifest uses an apiVersion the cluster no longer serves (requires kubeconfig)"
+run = '''
+#!/usr/bin/env python3
+import json
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+def declared_pairs():
+    pairs = {}
+    for path in sorted(Path("kubernetes").rglob("*.yaml")):
+        if path.name.endswith(".sops.yaml"):
+            continue
+        text = path.read_text(errors="replace")
+        for api_version, kind in zip(
+            re.findall(r"^apiVersion:[ \t]*(\S+)[ \t]*$", text, re.M),
+            re.findall(r"^kind:[ \t]*(\S+)[ \t]*$", text, re.M),
+        ):
+            group = api_version.split("/")[0] if "/" in api_version else ""
+            if group != "kustomize.config.k8s.io":
+                pairs.setdefault((api_version, kind), set()).add(str(path))
+    return pairs
+
+def served_pairs():
+    served = set()
+    definitions = json.loads(subprocess.run(
+        ["kubectl", "get", "crd", "-o", "json"], capture_output=True, text=True, check=True,
+    ).stdout)
+    # ! Discovery lists only preferred CRD versions; read every served version from the CRD.
+    for definition in definitions["items"]:
+        specification = definition["spec"]
+        for version in specification.get("versions", []):
+            if version.get("served"):
+                served.add((f"{specification['group']}/{version['name']}", specification["names"]["kind"]))
+    resources = subprocess.run(
+        ["kubectl", "api-resources", "--no-headers", "--verbs=list"],
+        capture_output=True, text=True, check=True,
+    ).stdout
+    for line in resources.splitlines():
+        fields = line.split()
+        # * SHORTNAMES may be empty; NAMESPACED anchors the version and kind columns.
+        if "true" not in fields and "false" not in fields:
+            continue
+        position = next(position for position, field in enumerate(fields) if field in ("true", "false"))
+        if position >= 2:
+            served.add((fields[position - 1], fields[position + 1]))
+    return served
+
+def main():
+    declared = declared_pairs()
+    served = served_pairs()
+    missing = [(api_version, kind, sorted(files)) for (api_version, kind), files in sorted(declared.items()) if (api_version, kind) not in served]
+    if not missing:
+        print(f"OK: all {len(declared)} declared apiVersion+kind pairs are served")
+        return 0
+    print(f"OUTDATED API VERSIONS: {len(missing)} of {len(declared)} declared pairs are NOT served by the cluster.\n")
+    for api_version, kind, files in missing:
+        print(f"  {api_version}  ({kind})")
+        for path in files:
+            print(f"      {path}")
+    print(
+        "\nEach entry above will fail to apply. Check which versions the resource now serves:\n"
+        "  kubectl get crd <crd> -o jsonpath='{range .spec.versions[*]}"
+        "{.name} served={.served}{\"\\n\"}{end}'"
+    )
+    return 1
+
+if __name__ == "__main__":
+    sys.exit(main())
+'''
