@@ -1,25 +1,25 @@
 version: 2
 updates:
+  - package-ecosystem: "npm"
+    directories:
+      - "/apps/my-website"
+    schedule:
+      interval: "daily"
+
   - package-ecosystem: "pip"
     directories:
       - "/"
     schedule:
-      interval: "weekly"
+      interval: "daily"
 
   - package-ecosystem: "github-actions"
     directories:
       - "/"
     schedule:
-      interval: "weekly"
+      interval: "daily"
 
   - package-ecosystem: "docker"
     directories:
-      - "/docker/**"
+      - "/apps/my-website"
     schedule:
-      interval: "weekly"
-
-  - package-ecosystem: "cargo"
-    directories:
-      - "/"
-    schedule:
-      interval: "weekly"
+      interval: "daily"
