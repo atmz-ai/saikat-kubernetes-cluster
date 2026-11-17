@@ -11,13 +11,15 @@ from unittest.mock import patch
 
 import yaml
 
-from api_models import IdentityProviderRequest, SetupRequest
+from api_models import IdentityProviderRequest, SetupRequest, UserRequest
 from bootstrap import (
+    Completion,
     Phase,
     Request,
     SaveToken,
     account_update,
     main,
+    operator_update,
     provider_update,
     transition,
 )
@@ -29,6 +31,7 @@ class BootstrapTests(unittest.TestCase):
         subprocess.run(
             [
                 sys.executable,
+                "-B",
                 "-I",
                 "-S",
                 "-c",
@@ -149,10 +152,11 @@ class BootstrapTests(unittest.TestCase):
             created.phase, self.provider_response, self.setup, self.provider, True
         )
         self.assertIs(verify.phase, Phase.PROVIDER_VERIFIED)
-        self.assertIsNone(
+        self.assertEqual(
             transition(
                 verify.phase, self.provider_response, self.setup, self.provider, True
-            )
+            ),
+            Request(Phase.USERS, "GET", "/api/users"),
         )
         self.assertIsNone(transition(Phase.DONE, {}, self.setup, self.provider, True))
 
@@ -196,7 +200,7 @@ class BootstrapTests(unittest.TestCase):
             with self.assertRaisesRegex(
                 RuntimeError, "NetBird HTTP 403:.*provider rejected"
             ):
-                main()
+                main([])
         self.assertNotIn(self.provider["client_secret"], output.getvalue())
 
     def test_request_shapes_match_the_unmodified_contract(self):
@@ -207,6 +211,10 @@ class BootstrapTests(unittest.TestCase):
         for name, body in (
             ("SetupRequest", self.setup),
             ("IdentityProviderRequest", self.provider),
+            (
+                "UserRequest",
+                UserRequest(role="admin", auto_groups=["peer-group"], is_blocked=False),
+            ),
         ):
             schema = dict(schemas[name], components=contract["components"])
             jsonschema.Draft4Validator(schema).validate(body)
@@ -253,7 +261,9 @@ class BootstrapTests(unittest.TestCase):
             )
 
     def test_bootstrap_waits_for_management_without_false_readiness(self):
-        job = yaml.safe_load(Path(__file__).with_name("bootstrap.yaml").read_text())
+        job = next(
+            yaml.safe_load_all(Path(__file__).with_name("bootstrap.yaml").read_text())
+        )
         program = job["spec"]["template"]["spec"]["initContainers"][0]["args"][0]
         unavailable = urllib.error.URLError(
             ConnectionRefusedError("fixture management is starting")
@@ -275,6 +285,108 @@ class BootstrapTests(unittest.TestCase):
         ):
             exec(compile(program, "management-readiness", "exec"), {})
         self.assertIn("Management is ready", output.getvalue())
+
+    def test_operator_google_approval_and_administrator_grant(self):
+        owner = {
+            "id": "local-owner",
+            "email": "saikat@atmz.ai",
+            "role": "owner",
+            "is_service_user": False,
+            "idp_id": "local",
+        }
+        google = {
+            "id": "google-operator",
+            "email": "saikat@atmz.ai",
+            "role": "user",
+            "is_service_user": False,
+            "idp_id": "google-fixture",
+            "pending_approval": True,
+            "is_blocked": False,
+            "auto_groups": ["peer-group"],
+        }
+        approve = transition(
+            Phase.USERS, [owner, google], self.setup, self.provider, True
+        )
+        self.assertEqual(
+            approve,
+            Request(Phase.USER_APPROVED, "POST", "/api/users/google-operator/approve"),
+        )
+        approved = dict(google, pending_approval=False)
+        refreshed = transition(approve.phase, approved, self.setup, self.provider, True)
+        self.assertEqual(refreshed, Request(Phase.USERS, "GET", "/api/users"))
+        grant = transition(
+            refreshed.phase, [owner, approved], self.setup, self.provider, True
+        )
+        self.assertEqual(
+            grant.body,
+            {"role": "admin", "auto_groups": ["peer-group"], "is_blocked": False},
+        )
+        administrator = dict(approved, role="admin")
+        verify = transition(grant.phase, administrator, self.setup, self.provider, True)
+        self.assertEqual(verify, Request(Phase.USER_VERIFIED, "GET", "/api/users"))
+        self.assertIs(
+            transition(
+                verify.phase, [owner, administrator], self.setup, self.provider, True
+            ),
+            Completion.OPERATOR_READY,
+        )
+        self.assertIs(
+            operator_update([owner, administrator], self.setup["email"]),
+            Completion.OPERATOR_READY,
+        )
+        self.assertEqual(owner["role"], "owner")
+
+    def test_operator_approval_never_grants_other_or_ambiguous_identities(self):
+        owner = {
+            "email": "saikat@atmz.ai",
+            "role": "owner",
+            "is_service_user": False,
+            "idp_id": "local",
+        }
+        google = {
+            "id": "google-operator",
+            "email": "saikat@atmz.ai",
+            "role": "user",
+            "is_service_user": False,
+            "idp_id": "google-fixture",
+            "pending_approval": True,
+            "is_blocked": False,
+            "auto_groups": [],
+        }
+        for candidate in (
+            dict(google, email="another@atmz.ai"),
+            dict(google, idp_id="oidc-fixture"),
+        ):
+            with self.subTest(candidate=candidate):
+                self.assertIs(
+                    operator_update([owner, candidate], self.setup["email"]),
+                    Completion.WAITING_FOR_GOOGLE_SIGNIN,
+                )
+        for users in (
+            [google, google],
+            [dict(google, is_service_user=True)],
+            [],
+            [dict(google, pending_approval="true")],
+        ):
+            with self.subTest(users=users), self.assertRaises(ValueError):
+                operator_update(users, self.setup["email"])
+        with self.assertRaises(ValueError):
+            transition(
+                Phase.USER_VERIFIED, [owner, google], self.setup, self.provider, True
+            )
+        with self.assertRaises(ValueError):
+            transition(
+                Phase.USER_UPDATED,
+                dict(
+                    google,
+                    email="another@atmz.ai",
+                    role="admin",
+                    pending_approval=False,
+                ),
+                self.setup,
+                self.provider,
+                True,
+            )
 
 
 if __name__ == "__main__":

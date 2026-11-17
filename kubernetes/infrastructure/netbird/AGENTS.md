@@ -8,6 +8,11 @@ and [Google integration](https://docs.netbird.io/selfhosted/identity-providers/m
 are the authoritative contracts. Google is a native embedded-IdP connector,
 not an oauth2-proxy layer around the dashboard or peer APIs. Preserve mandatory
 approval for additional users; the initial owner is the operator's exact email.
+Google sign-in creates a separate identity from the local bootstrap owner.
+The operator approval CronJob admits only the exact operator email through a
+Google connector and grants it administrator access. All other Google users
+remain subject to manual approval. After a fresh installation, the first
+operator Google sign-in is approved on the next five-minute run.
 
 Run `mise run netbird-contract-generate` when upgrading the server. It downloads
 the complete byte-verbatim OpenAPI document and uses

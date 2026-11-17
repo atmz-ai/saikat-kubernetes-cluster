@@ -1,3 +1,4 @@
+import argparse
 import json
 import os
 import urllib.error
@@ -7,7 +8,7 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
-from api_models import IdentityProviderRequest, SetupRequest
+from api_models import IdentityProviderRequest, SetupRequest, UserRequest
 
 
 class Phase(Enum):
@@ -18,7 +19,20 @@ class Phase(Enum):
     PROVIDERS = "reading identity providers"
     PROVIDER_UPDATED = "configuring Google"
     PROVIDER_VERIFIED = "verifying Google"
+    USERS = "reading the operator Google identity"
+    USER_APPROVED = "approving the operator Google identity"
+    USER_UPDATED = "granting operator administrator access"
+    USER_VERIFIED = "verifying operator administrator access"
     DONE = "complete"
+
+
+class Completion(Enum):
+    WAITING_FOR_GOOGLE_SIGNIN = (
+        "Waiting for the operator's first Google sign-in; no other users were changed"
+    )
+    OPERATOR_READY = (
+        "Verified the exact operator Google identity has active administrator access"
+    )
 
 
 @dataclass(frozen=True)
@@ -61,6 +75,7 @@ def provider_update(providers: list, desired: IdentityProviderRequest) -> Reques
         return Request(
             Phase.PROVIDER_UPDATED, "POST", "/api/identity-providers", desired
         )
+
     if len(providers) != 1 or not isinstance(providers[0], dict):
         raise ValueError("Expected only the declared ATMZ Google identity provider")
     provider = providers[0]
@@ -81,13 +96,66 @@ def provider_update(providers: list, desired: IdentityProviderRequest) -> Reques
     )
 
 
+def operator_update(users: list, operator_email: str) -> Request | Completion:
+    if any(not isinstance(user, dict) for user in users):
+        raise ValueError("NetBird users response contains an invalid user")
+    candidates = [
+        user
+        for user in users
+        if user.get("email") == operator_email
+        and isinstance(user.get("idp_id"), str)
+        and user["idp_id"].startswith("google-")
+    ]
+    if not candidates:
+        owners = [
+            user
+            for user in users
+            if user.get("email") == operator_email
+            and user.get("role") == "owner"
+            and user.get("is_service_user") is False
+        ]
+        if len(owners) != 1:
+            raise ValueError(
+                "NetBird users do not contain the declared bootstrap owner"
+            )
+        return Completion.WAITING_FOR_GOOGLE_SIGNIN
+    if len(candidates) != 1:
+        raise ValueError(
+            "Expected exactly one Google identity for the declared operator"
+        )
+    operator = candidates[0]
+    if (
+        not isinstance(operator.get("id"), str)
+        or not operator["id"]
+        or operator.get("is_service_user") is not False
+    ):
+        raise ValueError("Operator Google identity is invalid or is a service user")
+    if (
+        type(operator.get("pending_approval")) is not bool
+        or type(operator.get("is_blocked")) is not bool
+    ):
+        raise ValueError("Operator Google identity is missing its approval status")
+    endpoint = "/api/users/" + urllib.parse.quote(operator["id"], safe="")
+    if operator["pending_approval"]:
+        return Request(Phase.USER_APPROVED, "POST", endpoint + "/approve")
+    if operator.get("role") in ("admin", "owner") and not operator["is_blocked"]:
+        return Completion.OPERATOR_READY
+    groups = operator.get("auto_groups")
+    if not isinstance(groups, list) or any(
+        not isinstance(group, str) for group in groups
+    ):
+        raise ValueError("Operator Google identity is missing its auto groups")
+    update = UserRequest(role="admin", auto_groups=list(groups), is_blocked=False)
+    return Request(Phase.USER_UPDATED, "PUT", endpoint, update)
+
+
 def transition(
     phase: Phase,
     response: dict | list,
     setup: SetupRequest,
     provider: IdentityProviderRequest,
     token_available: bool,
-) -> Request | SaveToken | None:
+) -> Request | SaveToken | Completion | None:
     match phase:
         case Phase.INSTANCE:
             if (
@@ -143,18 +211,48 @@ def transition(
             if not isinstance(response.get("id"), str) or not response["id"]:
                 raise ValueError("NetBird Google provider is missing its identifier")
             if phase is Phase.PROVIDER_VERIFIED:
-                return None
+                return Request(Phase.USERS, "GET", "/api/users")
             return Request(
                 Phase.PROVIDER_VERIFIED,
                 "GET",
                 "/api/identity-providers/"
                 + urllib.parse.quote(response["id"], safe=""),
             )
+        case Phase.USERS | Phase.USER_VERIFIED:
+            if not isinstance(response, list):
+                raise ValueError("NetBird users response is not a list")
+            result = operator_update(response, setup["email"])
+            if phase is Phase.USER_VERIFIED and result is not Completion.OPERATOR_READY:
+                raise ValueError(
+                    "NetBird did not persist the operator administrator grant"
+                )
+            return result
+        case Phase.USER_APPROVED:
+            if (
+                not isinstance(response, dict)
+                or response.get("email") != setup["email"]
+                or response.get("pending_approval") is not False
+            ):
+                raise ValueError("NetBird did not persist the operator approval")
+            return Request(Phase.USERS, "GET", "/api/users")
+        case Phase.USER_UPDATED:
+            if (
+                not isinstance(response, dict)
+                or response.get("email") != setup["email"]
+                or response.get("role") not in ("admin", "owner")
+                or response.get("pending_approval") is not False
+                or response.get("is_blocked") is not False
+            ):
+                raise ValueError("NetBird did not grant operator administrator access")
+            return Request(Phase.USER_VERIFIED, "GET", "/api/users")
         case _:
             return None
 
 
-def main():
+def main(command_line_arguments=None):
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--approve-operator", action="store_true")
+    arguments = parser.parse_args(command_line_arguments)
     setup = SetupRequest(
         email=os.environ["NETBIRD_OPERATOR_EMAIL"],
         password=os.environ["NETBIRD_BOOTSTRAP_PASSWORD"],
@@ -171,7 +269,13 @@ def main():
     )
     token_path = Path("/var/lib/netbird/gitops-bootstrap.pat")
     token = token_path.read_text().strip() if token_path.exists() else ""
-    request = Request(Phase.INSTANCE, "GET", "/api/instance")
+    if arguments.approve_operator and not token:
+        raise RuntimeError("The initializer has not persisted its bootstrap PAT")
+    request = (
+        Request(Phase.USERS, "GET", "/api/users")
+        if arguments.approve_operator
+        else Request(Phase.INSTANCE, "GET", "/api/instance")
+    )
     while request is not None:
         print(
             request.phase.value + ": " + request.method + " " + request.path, flush=True
@@ -201,10 +305,7 @@ def main():
             with error:
                 error_body = error.read(1048576).decode(errors="replace")
             raise RuntimeError(
-                "NetBird HTTP "
-                + str(error.code)
-                + ": "
-                + error_body
+                "NetBird HTTP " + str(error.code) + ": " + error_body
             ) from error
         effect = transition(request.phase, result, setup, provider, bool(token))
         if isinstance(effect, SaveToken):
@@ -217,12 +318,11 @@ def main():
                 os.fsync(destination.fileno())
             token = effect.token
             request = effect.request
+        elif isinstance(effect, Completion):
+            print(effect.value, flush=True)
+            request = None
         else:
             request = effect
-    print(
-        "Verified native ATMZ Google authentication and mandatory user approval",
-        flush=True,
-    )
 
 
 if __name__ == "__main__":

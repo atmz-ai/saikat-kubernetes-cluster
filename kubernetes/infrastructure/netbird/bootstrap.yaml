@@ -73,3 +73,62 @@ spec:
         - name: data
           persistentVolumeClaim:
             claimName: netbird-data
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: netbird-operator-approval
+  namespace: netbird
+spec:
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 240
+      template:
+        spec:
+          automountServiceAccountToken: false
+          restartPolicy: Never
+          affinity:
+            podAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                - labelSelector:
+                    matchLabels:
+                      app: netbird-server
+                  topologyKey: kubernetes.io/hostname
+          containers:
+            - name: approve-operator
+              image: docker.io/library/python:3.15.2-slim
+              command: [python, -u, /configuration/bootstrap.py, --approve-operator]
+              env:
+                - name: NETBIRD_OPERATOR_EMAIL
+                  value: saikat@atmz.ai
+                - name: NETBIRD_BOOTSTRAP_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: netbird-server
+                      key: bootstrap-password
+                - name: NETBIRD_GOOGLE_CLIENT_ID
+                  valueFrom:
+                    secretKeyRef:
+                      name: atmz-internal-apps-google-oauth
+                      key: client-id
+                - name: NETBIRD_GOOGLE_CLIENT_SECRET
+                  valueFrom:
+                    secretKeyRef:
+                      name: atmz-internal-apps-google-oauth
+                      key: client-secret
+              volumeMounts:
+                - name: configuration
+                  mountPath: /configuration
+                  readOnly: true
+                - name: data
+                  mountPath: /var/lib/netbird
+                  readOnly: true
+          volumes:
+            - name: configuration
+              configMap:
+                name: netbird-bootstrap
+            - name: data
+              persistentVolumeClaim:
+                claimName: netbird-data
