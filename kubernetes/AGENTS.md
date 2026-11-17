@@ -61,6 +61,11 @@ Render the affected tree locally with `mise exec -- kubectl kustomize <directory
 
 Remove ordinary resources from Git and let Flux prune them. For complete removal of a Flux Kustomization, first reconcile an empty resource set with the CR resumed, verify its inventory and resources are gone, then remove the empty CR. Deleting a suspended CR orphans its resources. Stateful storage and external data require their own explicit retention or migration decision.
 
+Flux pruning tracks [status.inventory](https://fluxcd.io/flux/components/kustomize/kustomizations/#inventory),
+not ownership labels alone. For approved orphan cleanup, first reconcile the exact
+existing declaration into the owning Kustomization and verify inventory membership;
+then remove it from Git. Do not recreate a retired backend merely to delete its route.
+
 For approved Longhorn backup deletion, adopt only the exact `BackupVolume` CRs
 into GitOps before pruning them. Their [native finalizer](https://github.com/longhorn/longhorn-manager/blob/v1.12.1/controller/backup_volume_controller.go)
 deletes remote data only while the BackupTarget is available and no
