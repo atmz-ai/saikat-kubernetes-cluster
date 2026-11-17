@@ -12,6 +12,19 @@ Harbor's PostgreSQL database uses a dedicated low-privilege `harbor` role, not C
 
 ## Browser and Registry Access
 
+Native Google OIDC is declared in [oidc-values.sops.yaml](oidc-values.sops.yaml),
+consumed through Helm `core.configureUserSettings`. The chart injects Harbor's
+[CONFIG_OVERWRITE_JSON](https://goharbor.io/docs/2.15.0/install-config/configure-system-settings-cli/)
+through a checksum-tracked Secret; authentication settings are then read-only in
+the UI and must be changed in Git. Switching from database auth requires no added
+local users; verify migration eligibility before changing the mode.
+
+The Google client's audience must remain Internal in the atmz.ai Workspace
+organization. Native OIDC does not enforce an exact-email allowlist. New Google
+users onboard with their email as username and have no automatic system-admin
+privileges. Preserve local administrator and robot credentials for registry access.
+The native callback is `https://harbor.saikat.dev/c/oidc/callback`.
+
 The [Harbor HTTPRoute](../../networking/routes/harbor.yaml) sends browser UI requests through `oauth2-proxy-harbor`. Registry `/v2/` and `/service/token` requests go directly to Harbor so container clients can use native registry authentication; do not put browser OAuth redirects in that path.
 
 The shared OAuth credentials are owned by the oauth2-proxy declarations. Its Google OAuth registration must include `https://harbor.saikat.dev/oauth2/callback`. The gateway's exact-email allowlist admits only `saikat@atmz.ai`; Harbor's native registry and browser credentials remain separate.

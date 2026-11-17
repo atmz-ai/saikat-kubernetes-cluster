@@ -24,7 +24,6 @@ spec:
   values:
     externalURL: https://harbor.saikat.dev
     
-    # Expose core service internally for oauth2-proxy backend
     expose:
       type: clusterIP
       tls:
@@ -32,9 +31,6 @@ spec:
         certSource: none
       core:
         servicePort: 80
-    
-    # Disable Harbor's built-in auth — oauth2-proxy provides authentication
-    # oauth2-proxy will handle authz/authn before reaching Harbor core
     
     # Storage backend for images
     persistence:
@@ -123,6 +119,9 @@ spec:
       type: internal
   
   valuesFrom:
+    - kind: Secret
+      name: harbor-oidc-values
+      valuesKey: values.yaml
     # Admin password lives in harbor-admin-secret.sops.yaml (SOPS-encrypted).
     # When the Harbor admin password or robot account credentials change, update ALL:
     #   1. kubernetes/infrastructure/harbor/harbor-admin-secret.sops.yaml  (admin password)

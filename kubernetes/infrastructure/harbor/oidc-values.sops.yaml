@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: Secret
+metadata:
+    name: harbor-oidc-values
+    namespace: harbor
+    labels:
+        reconcile.fluxcd.io/watch: Enabled
+type: Opaque
+stringData:
+    values.yaml: ENC[AES256_GCM,data:t9eF2UoCgHwqZIEKLbGdnZ/a5ZCYmLM6XMKtB0QdaWyJE0i/+TLjp5k5HwFKE0QM329VNpwIvlknSN0RzgNtCr+dwf2nYCPiVE+CXVBpT1vEhS3zOOTR1ll7zUQpX1tp8fLEK0NQrla+Ee6Vn2onuRzEcyBMHEL1R9QseTd0agJwTJNGBKFCfFs3nhwiuAOHWeVQD7W/XMB3FAV5Sqmq5pACWjQPgwLkFzWfmh/WR6RZs4JJaYlVqIAaR0AKScZPBfHw+A8/W50+oqa6OoWIZvGBWevjytAOaKb7shqJ/2FQgO6ZVVovsQk/JPOoCsfzAE1BV1HVywnWUs4+NufQ/gR/oNs2lYCCbZYTy2q3neS4ejmOoNQN0JtQXdK9JhKToLXQgQA+HyKxVwjt9ZEnyLAclP192BL9fao8nX/f+OehoeUn4GIgu018TjD80ZzMMYZOXUm7aIAiNxpuFSjs+H0o2AtSv9l4MBActGpKpG0W23yA4e59v5D9tgHACFefhbdFa2ZoI5Dje+KiP/jnvg2z5a4Kxqlf5tRr1lGf6Sbi7eKeFhveOz59BcGtCwpItd8+KD/0jubt46b6FZcL1fMhkRCDxtKD+K4dTGxN2lpiNdIXXvtBXlzP3qBt0oLQ6Sozs6SN+ukFT5RDS80=,iv:jpO8t/yF1OFlzVJ1w+dML7lREUSvTZvBCtS8zQ4jDIM=,tag:HNjU5ISRN7BsmRJeUK71xQ==,type:str]
+sops:
+    age:
+        - enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBuektBSHVjc01SaDYyYk14
+            TXlRbWJsOTRPdVZZR2xmOVNhS2l0aGZPYWl3CjJKRktUeDJnT2U1aFNSOVMrZ1B0
+            WXJTdlAzZGZSU0YwU3BHQkE2WGRTYVkKLS0tIGdUNnhuazRuTjBCaHU1cXpFMXhT
+            aVJFaTlwbjNYQndUK3hXVS9lRFpDdkEKatQDCJUutrHJxd9ExmEDR6t59/4fsASu
+            ZhbGFzfcuZvfIVzC0y5d1/msn+/azFmhacjuNE2PW9PHDqSKQMEQog==
+            -----END AGE ENCRYPTED FILE-----
+          recipient: age1pdqae3ffmt9rxtmn2758pxjqaaxnytg6mzx3wpepuhs7de2ttfkqk3z7hl
+    encrypted_regex: ^(data|stringData)$
+    lastmodified: "2026-11-17T02:58:54Z"
+    mac: ENC[AES256_GCM,data:OXVz+lEPH0072jF/Z/mQoZMW1JhriOYhpfrAPKIVL1REuY1VzxJV4x9QqPPnUIm2Sy9+kEip0+zbCfkLrKDFj651SG85ryFOaqm1VnQn3TwnO8Y8EQWCPpvTGXBllDGOudBA/A1AgpmyzP1uIj40IOXelgPVtEEST68nmARvRfk=,iv:e/qsUyqTcLsshDNg6Oiql1Vbg4pMpCJgoHDFOACaudY=,tag:yAQgFcZ/vnOqfzBLn68Tfg==,type:str]
+    version: 3.13.3
