@@ -3,6 +3,8 @@ kind: DaemonSet
 metadata:
   name: netbird-stun
   namespace: netbird
+  annotations:
+    configmap.reloader.stakater.com/reload: netbird-stun
 spec:
   selector:
     matchLabels:
@@ -23,12 +25,12 @@ spec:
         - name: stun
           image: docker.io/coturn/coturn:4.19.1-r0
           args:
-            - -n
-            - --stun-only
-            - --no-tls
-            - --no-dtls
-            - --no-cli
-            - --log-file=stdout
+            - -c
+            - /etc/coturn/turnserver.conf
+          volumeMounts:
+            - name: configuration
+              mountPath: /etc/coturn
+              readOnly: true
           ports:
             - name: stun
               containerPort: 3478
@@ -36,3 +38,19 @@ spec:
           readinessProbe:
             tcpSocket:
               port: 3478
+      volumes:
+        - name: configuration
+          configMap:
+            name: netbird-stun
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: netbird-stun
+  namespace: netbird
+data:
+  turnserver.conf: |
+    stun-only
+    no-tls
+    no-cli
+    log-file=stdout

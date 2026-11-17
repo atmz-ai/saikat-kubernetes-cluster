@@ -196,10 +196,14 @@ class BootstrapTests(unittest.TestCase):
 
     def test_source_preserving_stun_and_bootstrap_exposure_order(self):
         directory = Path(__file__).parent
-        stun = yaml.safe_load((directory / "stun.yaml").read_text())
+        stun, configuration = yaml.safe_load_all((directory / "stun.yaml").read_text())
         self.assertTrue(stun["spec"]["template"]["spec"]["hostNetwork"])
         self.assertIn(
-            "--stun-only", stun["spec"]["template"]["spec"]["containers"][0]["args"]
+            "stun-only", configuration["data"]["turnserver.conf"].splitlines()
+        )
+        self.assertNotIn("no-dtls", configuration["data"]["turnserver.conf"])
+        self.assertNotIn(
+            "--no-dtls", stun["spec"]["template"]["spec"]["containers"][0]["args"]
         )
         services = list(yaml.safe_load_all((directory / "service.yaml").read_text()))
         grpc_service = next(
@@ -230,6 +234,30 @@ class BootstrapTests(unittest.TestCase):
             self.assertEqual(
                 rule["timeouts"], {"request": "0s", "backendRequest": "0s"}
             )
+
+    def test_bootstrap_waits_for_management_without_false_readiness(self):
+        job = yaml.safe_load(Path(__file__).with_name("bootstrap.yaml").read_text())
+        program = job["spec"]["template"]["spec"]["initContainers"][0]["args"][0]
+        unavailable = urllib.error.URLError(
+            ConnectionRefusedError("fixture management is starting")
+        )
+        output = io.StringIO()
+        with (
+            patch("urllib.request.urlopen", side_effect=unavailable),
+            redirect_stdout(output),
+        ):
+            with self.assertRaises(urllib.error.URLError):
+                exec(compile(program, "management-readiness", "exec"), {})
+        self.assertNotIn("Management is ready", output.getvalue())
+        ready = io.BytesIO()
+        ready.status = 200
+        output = io.StringIO()
+        with (
+            patch("urllib.request.urlopen", return_value=ready),
+            redirect_stdout(output),
+        ):
+            exec(compile(program, "management-readiness", "exec"), {})
+        self.assertIn("Management is ready", output.getvalue())
 
 
 if __name__ == "__main__":

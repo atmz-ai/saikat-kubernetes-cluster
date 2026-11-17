@@ -7,8 +7,15 @@
 </script>
 
 <MetadataComponent title={post.title} description={post.description} />
-<article class="prose prose-emerald max-w-screen-md mx-auto my-8 px-4">
-  <h1 class="!mb-2">{post.title}</h1>
-  <span class="text-gray-400">published on <span class="text-emerald-600 font-medium">{formatDate(post.created)}</span></span>
-  <div>{@html post.bodyHtml}</div>
-</article>
+<main class="page-shell reading-shell">
+  <a class="back-link" href="/blog"><span aria-hidden="true">←</span> All articles</a>
+  <article class="prose reading-content">
+    <header class="article-heading">
+      <p class="eyebrow">From the blog</p>
+      <h1>{post.title}</h1>
+      <p class="content-date">Published <time datetime={post.created}>{formatDate(post.created)}</time> <span aria-hidden="true">/</span> {post.author}</p>
+    </header>
+    <div>{@html post.bodyHtml}</div>
+  </article>
+  <a class="back-link article-end" href="/blog"><span aria-hidden="true">←</span> Back to the blog</a>
+</main>

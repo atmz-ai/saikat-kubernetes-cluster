@@ -7,7 +7,6 @@ metadata:
     # ! Recreate only this initializer when image updates change its immutable template.
     kustomize.toolkit.fluxcd.io/force: enabled
 spec:
-  backoffLimit: 3
   activeDeadlineSeconds: 600
   template:
     spec:
@@ -21,6 +20,24 @@ spec:
                 matchLabels:
                   app: netbird-server
               topologyKey: kubernetes.io/hostname
+      initContainers:
+        - name: wait-for-management
+          image: docker.io/library/python:3.15.2-slim
+          command: [python, -u, -c]
+          args:
+            - |
+              import urllib.error
+              import urllib.request
+              print("Checking management readiness before authenticated bootstrap", flush=True)
+              try:
+                  with urllib.request.urlopen("http://netbird-server.netbird.svc.cluster.local/api/instance", timeout=30) as response:
+                      if response.status != 200:
+                          raise RuntimeError("Management readiness returned HTTP " + str(response.status))
+              except urllib.error.HTTPError as error:
+                  with error:
+                      body = error.read(1048576).decode(errors="replace")
+                  raise RuntimeError("Management HTTP " + str(error.code) + ": " + body) from error
+              print("Management is ready", flush=True)
       containers:
         - name: configure-google
           image: docker.io/library/python:3.15.2-slim

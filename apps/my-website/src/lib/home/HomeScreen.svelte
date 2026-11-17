@@ -9,35 +9,45 @@
   import IndiaFlagComponent from './icons/IndiaFlagComponent.svelte';
 
   const socialLinks = [
-    { href: 'https://saikat.dev', label: 'My Website', border: 'border-yellow-600', icon: SvelteComponent },
-    { href: 'https://github.com/saikatdas0790', label: 'Github', border: 'border-black', icon: GithubComponent },
-    { href: 'https://www.npmjs.com/~saikatdas0790', label: 'NPM', border: 'border-red-600', icon: NpmComponent },
-    { href: 'mailto:saikatdas0790@gmail.com', label: 'Email', border: 'border-red-500', icon: GmailComponent },
-    { href: 'https://www.linkedin.com/in/saikat-das-13674166/', label: 'LinkedIn', border: 'border-blue-700', icon: LinkedinComponent },
-    { href: 'https://stackoverflow.com/users/3462837/saikat-das', label: 'Stack Overflow', border: 'border-yellow-500', icon: StackOverflowComponent }
+    { href: 'https://saikat.dev', label: 'My Website', icon: SvelteComponent },
+    { href: 'https://github.com/saikatdas0790', label: 'Github', icon: GithubComponent },
+    { href: 'https://www.npmjs.com/~saikatdas0790', label: 'NPM', icon: NpmComponent },
+    { href: 'mailto:saikatdas0790@gmail.com', label: 'Email', icon: GmailComponent },
+    { href: 'https://www.linkedin.com/in/saikat-das-13674166/', label: 'LinkedIn', icon: LinkedinComponent },
+    { href: 'https://stackoverflow.com/users/3462837/saikat-das', label: 'Stack Overflow', icon: StackOverflowComponent }
   ];
 </script>
 
 <MetadataComponent title="Saikat's Website" description="This is a website where I blog about full stack JavaScript including things like SvelteJS, TailwindCSS, NodeJS, Linux, PostgreSQL among a few and showcase projects I've worked on" />
-<main class="max-w-screen-md mx-auto p-2 mb-8">
-  <section class="text-xl mt-8 border-l-4 pl-8 border-fuchsia-500">
-    <p><span role="img" aria-label="Hi">👋</span>, I'm Saikat!<br />
-      I'm a programmer based out of <span role="img" aria-label="India" class="align-text-bottom"><IndiaFlagComponent className="inline h-5" /></span><br />
-      I like <span role="img" aria-label="computers">🖥️</span> and <span role="img" aria-label="gaming">🎮</span><br />
-      Connect with me on <a href="https://www.linkedin.com/in/saikat-das-13674166/" target="_blank" rel="noopener noreferrer"><span role="img" aria-label="LinkedIn" class="align-text-bottom"><LinkedinComponent className="inline h-5" /></span></a>
-      or <a href="https://github.com/saikatdas0790" target="_blank" rel="noopener noreferrer"><span role="img" aria-label="github" class="align-text-bottom"><GithubComponent className="inline h-5" /></span></a>
-    </p>
+<main class="page-shell home-screen">
+  <section class="home-hero">
+    <div class="hero-copy">
+      <p class="eyebrow"><span class="status-dot" aria-hidden="true"></span> Welcome to my corner of the internet</p>
+      <h1>Hi, I'm Saikat<span class="heading-dot">.</span><span class="hero-wave" role="img" aria-label="Hi">👋</span></h1>
+      <p class="hero-description">A programmer based out of <span class="hero-location"><span role="img" aria-label="India"><IndiaFlagComponent className="inline h-5" /></span> India.</span><br />Curious about code. Always building something.</p>
+      <p class="hero-interests">I like <span role="img" aria-label="computers">🖥️</span> computers and <span role="img" aria-label="gaming">🎮</span> gaming.</p>
+      <div class="hero-actions">
+        <a class="button-link" href="/projects">Explore my work <span aria-hidden="true">↗</span></a>
+        <a class="quiet-link" href="/blog">Read the blog <span aria-hidden="true">→</span></a>
+      </div>
+    </div>
+    <div class="hero-note" aria-hidden="true">
+      <span class="note-label">A work in progress, just like me.</span>
+      <span class="note-code">&lt;hello<br /><span>world</span> /&gt;</span>
+      <span class="note-footer">Learn. Build. Share. Repeat.</span>
+    </div>
   </section>
-  <article>
-    <h2 class="text-3xl my-8 mt-16">Find me at</h2>
-    <ul class="grid grid-cols-2 md:grid-cols-3">
-      {#each socialLinks as link (link.href)}
-        <li class="mb-4"><a href={link.href} target="_blank" rel="noopener noreferrer" class="flex gap-2 items-center text-xl p-4 border-l-2 {link.border} hover:shadow-md transition duration-300"><link.icon className="w-5 h-5" /><span>{link.label}</span></a></li>
+  <section class="social-section">
+    <div class="section-heading"><h2>Find me at</h2><p>Around the web, or just an email away.</p></div>
+    <ul class="social-grid">
+      {#each socialLinks as socialLink (socialLink.href)}
+        <li><a href={socialLink.href} target="_blank" rel="noopener noreferrer"><span class="social-icon"><socialLink.icon className="w-5 h-5" /></span><span>{socialLink.label}</span><span class="social-arrow" aria-hidden="true">↗</span></a></li>
       {/each}
     </ul>
-  </article>
-  <h2 class="text-3xl my-8">A bit about me</h2>
-  <article class="prose prose-emerald">
+  </section>
+  <section class="profile-section">
+  <div class="section-heading"><p class="eyebrow">The person behind the code</p><h2>A bit about me</h2></div>
+  <article class="prose">
     <p>I'm elated to have discovered SvelteJS last year and since then have dived headfirst into the SvelteJS, TypeScript and TailwindCSS ecosystems. Was tinkering with static site generation, ReactJS and GatsbyJS prior to that.</p>
     <p>Have a decent amount of experience with NodeJS / ExpressJS. Have also gone through the docs on Apollo Server/GraphQL Nexus but haven't built any GraphQL servers yet. Understand the fundamentals though, so, shouldn't be difficult at all.</p>
     <p>Used Firebase (BaaS) for various projects to rapidly accelerate initial time to market. Am also quite competent with Google Cloud as a whole and used their products extensively. Huge proponent of the entire serverless movement. Google Cloud Run is a goto choice for all kinds of deployments.</p>
@@ -48,14 +58,21 @@
     </section>
     <p>Decent experience with Figma to be able to quickly do some wireframes to put thought into form that can be collaborated/ideated on with a team.</p>
   </article>
-  <h2 class="text-3xl my-8">Orthogonal Skills</h2>
-  <article class="prose prose-emerald"><p>Have worked as a product manager before, so I understand what it takes to build, manage, scale a product and the team behind it. Worked closely with customer support and on occasion, taken customer chats/calls to speak directly to end users and get feedback on products. Managed engineering teams with direct reportees, able to manage expectations and build rapport.</p></article>
-  <h2 class="text-3xl my-8">What I'm Learning</h2>
-  <article class="prose prose-emerald"><ul>
+  </section>
+  <section class="profile-section">
+  <div class="section-heading"><p class="eyebrow">Beyond engineering</p><h2>Orthogonal Skills</h2></div>
+  <article class="prose"><p>Have worked as a product manager before, so I understand what it takes to build, manage, scale a product and the team behind it. Worked closely with customer support and on occasion, taken customer chats/calls to speak directly to end users and get feedback on products. Managed engineering teams with direct reportees, able to manage expectations and build rapport.</p></article>
+  </section>
+  <section class="profile-section">
+  <div class="section-heading"><p class="eyebrow">Forever a student</p><h2>What I'm Learning</h2></div>
+  <article class="prose"><ul>
     <li>Test driven development (TDD) especially in the context of testing frontend and backend apps. Exploring unit tests, integration tests and end-to-end (e2e) tests. As a library I'm favouring Jest for unit and integration and Playwright for end-to-end testing.</li>
     <li>Blockchains and building decentralized tokenized apps and smart contracts. I'm favouring Dfinity's Internet Computer (ICP) for this.</li>
     <li>WebAssembly and how to use them in web apps. Still exploring this space.</li>
   </ul></article>
-  <h2 class="text-3xl my-8">What I'm Working On</h2>
-  <article class="prose prose-emerald"><p>I'm currently building the Go Bazzinga app as a progressive web app (PWA). You can check out what it's about <a href="/projects/entries/go-bazzinga" target="_blank" rel="noopener noreferrer">here</a> and the app <a href="https://gobazzinga.io" target="_blank" rel="noopener noreferrer">here</a></p></article>
+  </section>
+  <section class="profile-section">
+  <div class="section-heading"><p class="eyebrow">On the workbench</p><h2>What I'm Working On</h2></div>
+  <article class="prose"><p>I'm currently building the Go Bazzinga app as a progressive web app (PWA). You can check out what it's about <a href="/projects/entries/go-bazzinga" target="_blank" rel="noopener noreferrer">here</a> and the app <a href="https://gobazzinga.io" target="_blank" rel="noopener noreferrer">here</a></p></article>
+  </section>
 </main>
