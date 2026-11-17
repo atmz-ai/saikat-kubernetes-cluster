@@ -1,0 +1,9 @@
+---
+- name: Reconcile NetBird STUN access on the existing Azure firewall
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    ansible_python_interpreter: "{{ playbook_dir }}/../../../.venv-azure/bin/python"
+  roles:
+    - netbird_azure_firewall

@@ -1,0 +1,12 @@
+---
+netbird_azure_firewall_subscription_identifier: fa73e99f-18d6-48e6-a9f9-4a020e82f34b
+netbird_azure_firewall_resource_group: saikat-resource-group
+netbird_azure_firewall_security_group: saikat-1-nsg
+netbird_azure_firewall_stun_rule:
+  name: AllowNetbirdStun
+  description: NetBird self-hosted STUN binding discovery
+  protocol: Udp
+  destination_port_range: "3478"
+  priority: 1060
+  access: Allow
+  direction: Inbound

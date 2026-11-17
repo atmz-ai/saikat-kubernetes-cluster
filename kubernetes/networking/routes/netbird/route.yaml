@@ -1,0 +1,72 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: netbird-redirect
+  namespace: kube-system
+spec:
+  parentRefs:
+    - name: web-gateway
+      namespace: kube-system
+      sectionName: http
+  hostnames:
+    - netbird.saikat.dev
+  rules:
+    - filters:
+        - type: RequestRedirect
+          requestRedirect:
+            scheme: https
+            statusCode: 301
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: netbird
+  namespace: kube-system
+spec:
+  parentRefs:
+    - name: web-gateway
+      namespace: kube-system
+      sectionName: https-saikat-dev
+  hostnames:
+    - netbird.saikat.dev
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /management.ManagementService
+        - path:
+            type: PathPrefix
+            value: /signalexchange.SignalExchange
+      # ! Signal and management streams are long-lived, not ordinary HTTP requests.
+      timeouts:
+        request: 0s
+        backendRequest: 0s
+      backendRefs:
+        - name: netbird-grpc
+          namespace: netbird
+          port: 80
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api
+        - path:
+            type: PathPrefix
+            value: /oauth2
+        - path:
+            type: PathPrefix
+            value: /relay
+        - path:
+            type: PathPrefix
+            value: /ws-proxy
+      # ! Relay WebSockets must remain open beyond a request timeout.
+      timeouts:
+        request: 0s
+        backendRequest: 0s
+      backendRefs:
+        - name: netbird-server
+          namespace: netbird
+          port: 80
+    - backendRefs:
+        - name: netbird-dashboard
+          namespace: netbird
+          port: 80

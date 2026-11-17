@@ -1,0 +1,104 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: netbird-server
+  namespace: netbird
+  annotations:
+    secret.reloader.stakater.com/reload: netbird-server
+spec:
+  replicas: 1
+  # ! The management, IdP, and event SQLite stores must have one server writer.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: netbird-server
+  template:
+    metadata:
+      labels:
+        app: netbird-server
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: server
+          image: docker.io/netbirdio/netbird-server:0.83.1
+          args: [--config, /etc/netbird/config.yaml]
+          env:
+            - name: NB_SETUP_PAT_ENABLED
+              value: "true"
+          ports:
+            - name: http
+              containerPort: 80
+          readinessProbe:
+            httpGet:
+              path: /api/instance
+              port: http
+          startupProbe:
+            httpGet:
+              path: /api/instance
+              port: http
+            failureThreshold: 60
+            periodSeconds: 5
+          volumeMounts:
+            - name: configuration
+              mountPath: /etc/netbird
+              readOnly: true
+            - name: data
+              mountPath: /var/lib/netbird
+      volumes:
+        - name: configuration
+          secret:
+            secretName: netbird-server
+            items:
+              - key: config.yaml
+                path: config.yaml
+        - name: data
+          persistentVolumeClaim:
+            claimName: netbird-data
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: netbird-dashboard
+  namespace: netbird
+spec:
+  selector:
+    matchLabels:
+      app: netbird-dashboard
+  template:
+    metadata:
+      labels:
+        app: netbird-dashboard
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: dashboard
+          image: docker.io/netbirdio/dashboard:v2.97.0
+          env:
+            - name: NETBIRD_MGMT_API_ENDPOINT
+              value: https://netbird.saikat.dev
+            - name: NETBIRD_MGMT_GRPC_API_ENDPOINT
+              value: https://netbird.saikat.dev
+            - name: AUTH_AUTHORITY
+              value: https://netbird.saikat.dev/oauth2
+            - name: AUTH_CLIENT_ID
+              value: netbird-dashboard
+            - name: AUTH_AUDIENCE
+              value: netbird-dashboard
+            - name: AUTH_SUPPORTED_SCOPES
+              value: openid profile email offline_access
+            - name: AUTH_REDIRECT_URI
+              value: /nb-auth
+            - name: AUTH_SILENT_REDIRECT_URI
+              value: /nb-silent-auth
+            - name: NETBIRD_TOKEN_SOURCE
+              value: idToken
+            - name: USE_AUTH0
+              value: "false"
+          ports:
+            - name: http
+              containerPort: 80
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http

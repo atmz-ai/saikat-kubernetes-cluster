@@ -1,6 +1,44 @@
+[netbird-contract-generate]
+description = "Refresh the full version-matched NetBird API snapshot and generate Python bindings"
+run = '''
+#!/usr/bin/env -S ./.venv/bin/python -u
+import subprocess
+import urllib.request
+from pathlib import Path
+import yaml
+
+directory = Path("kubernetes/infrastructure/netbird")
+deployment = next(yaml.safe_load_all((directory / "deployment.yaml").read_text()))
+version = deployment["spec"]["template"]["spec"]["containers"][0]["image"].rsplit(":", 1)[1]
+url = "https://raw.githubusercontent.com/netbirdio/netbird/v" + version + "/shared/management/http/api/openapi.yml"
+print("Fetching full NetBird contract:", url, flush=True)
+with urllib.request.urlopen(url, timeout=30) as response:
+    (directory / "openapi.yaml").write_bytes(response.read())
+subprocess.run([
+    ".venv/bin/datamodel-codegen", "--input", str(directory / "openapi.yaml"),
+    "--input-file-type", "openapi", "--output-model-type", "typing.TypedDict",
+    "--target-python-version", "3.11", "--use-standard-collections",
+    "--use-union-operator", "--disable-timestamp", "--formatters", "builtin",
+    "--type-mappings", "string+cidr=string", "--output", str(directory / "api_models.py"),
+], check=True)
+print("Generated Python bindings from the complete NetBird API", flush=True)
+'''
+
+[netbird-checks]
+description = "Test NetBird bootstrap decisions and validate Kubernetes rendering and version-matched API bindings"
+depends = ["netbird-contract-generate"]
+run = '''
+#!/usr/bin/env -S ./.venv/bin/python -u
+import subprocess
+subprocess.run([".venv/bin/python", "-B", "-m", "unittest", "discover", "-v", "-s", "kubernetes/infrastructure/netbird", "-p", "test_*.py"], check=True)
+for directory in ("kubernetes/infrastructure/netbird", "kubernetes/networking/routes/netbird", "kubernetes/clusters/saikat-kubernetes-cluster"):
+    print("Rendering", directory, flush=True)
+    subprocess.run(["kubectl", "kustomize", directory], check=True)
+'''
+
 [infrastructure-release-checks]
 description = "Render every upstream infrastructure bundle and validate release integrity and consumed CRD contracts"
-depends = ["tekton-triggers-configuration-checks"]
+depends = ["tekton-triggers-configuration-checks", "netbird-checks"]
 run = '''
 #!/usr/bin/env -S ./.venv/bin/python -u
 import ast
