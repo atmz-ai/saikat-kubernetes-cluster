@@ -11,7 +11,7 @@ spec:
   template:
     spec:
       automountServiceAccountToken: false
-      restartPolicy: OnFailure
+      restartPolicy: Never
       # ! The bootstrap token shares the server's RWO volume, so colocate both pods.
       affinity:
         podAffinity:
