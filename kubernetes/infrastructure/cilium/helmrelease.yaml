@@ -78,6 +78,9 @@ spec:
     # Cloudflare proxy connects to origin port 443 → hits these pods on every CP node.
     gatewayAPI:
       enabled: true
+      # ! NetBird gRPC requires TLS HTTP/2 negotiation and an h2c backend.
+      enableAlpn: true
+      enableAppProtocol: true
       # ! Preserve the existing CRD channel during this patch upgrade.
       # ? A separate channel migration must verify stored TLSRoute API versions.
       experimentalChannel: true

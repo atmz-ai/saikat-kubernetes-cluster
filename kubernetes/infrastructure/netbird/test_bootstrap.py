@@ -243,6 +243,19 @@ class BootstrapTests(unittest.TestCase):
             "netbird-stun", [service["metadata"]["name"] for service in services]
         )
         root = directory.parents[1]
+        gateway_configuration = yaml.safe_load(
+            (root / "infrastructure/cilium/helmrelease.yaml").read_text()
+        )["spec"]["values"]["gatewayAPI"]
+        for restored_default in (None, "enableAlpn", "enableAppProtocol"):
+            candidate = dict(gateway_configuration)
+            if restored_default:
+                candidate[restored_default] = False
+            with self.subTest(restored_default=restored_default):
+                grpc_supported = (
+                    candidate.get("enableAlpn") is True
+                    and candidate.get("enableAppProtocol") is True
+                )
+                self.assertEqual(grpc_supported, restored_default is None)
         exposure = yaml.safe_load(
             (
                 root
