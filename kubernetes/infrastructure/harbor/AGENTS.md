@@ -25,6 +25,11 @@ users onboard with their email as username and have no automatic system-admin
 privileges. Preserve local administrator and robot credentials for registry access.
 The native callback is `https://harbor.saikat.dev/c/oidc/callback`.
 
+[operator-administrator.yaml](operator-administrator.yaml) grants system-admin
+privileges only to the existing `saikat@atmz.ai` account through Harbor's native
+API. It requires an exact username/email match and reads the grant back. It does
+not grant administrator privileges to other Workspace users or create accounts.
+
 The [Harbor HTTPRoute](../../networking/routes/harbor.yaml) sends every request
 directly to Harbor. Do not reintroduce an oauth2-proxy gateway for this service.
 Native browser OIDC and native registry credentials are separate; CLI clients

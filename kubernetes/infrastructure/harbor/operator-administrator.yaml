@@ -1,0 +1,74 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: harbor-operator-administrator-v1
+  namespace: harbor
+spec:
+  template:
+    spec:
+      automountServiceAccountToken: false
+      restartPolicy: OnFailure
+      containers:
+        - name: grant-operator-administrator
+          image: docker.io/library/python:3.15.2-slim
+          command: [python, -u, -c]
+          args:
+            - |
+              import base64
+              import json
+              import os
+              import urllib.error
+              import urllib.parse
+              import urllib.request
+
+              def select_operator(users, operator_email):
+                  if not isinstance(users, list) or len(users) != 1:
+                      raise ValueError("Expected exactly one existing Harbor operator account")
+                  operator = users[0]
+                  if not isinstance(operator, dict):
+                      raise ValueError("Harbor operator response is not an object")
+                  if operator.get("username") != operator_email or operator.get("email") != operator_email:
+                      raise ValueError("Harbor operator username and email do not match the declared identity")
+                  if type(operator.get("user_id")) is not int or operator["user_id"] <= 0:
+                      raise ValueError("Harbor operator has an invalid user identifier")
+                  if type(operator.get("sysadmin_flag")) is not bool:
+                      raise ValueError("Harbor operator response is missing its administrator status")
+                  return operator
+
+              operator_email = os.environ["HARBOR_OPERATOR_EMAIL"]
+              endpoint = "http://harbor-core.harbor.svc.cluster.local/api/v2.0"
+              authorization = base64.b64encode(("admin:" + os.environ["HARBOR_ADMIN_PASSWORD"]).encode()).decode()
+              headers = {"Authorization": "Basic " + authorization, "Content-Type": "application/json"}
+              query = urllib.parse.urlencode({"q": "username=" + operator_email, "page": 1, "page_size": 2})
+              print("Looking up the existing Harbor operator:", operator_email)
+              try:
+                  request = urllib.request.Request(endpoint + "/users?" + query, headers=headers)
+                  with urllib.request.urlopen(request, timeout=30) as response:
+                      operator = select_operator(json.load(response), operator_email)
+                  user_endpoint = endpoint + "/users/" + str(operator["user_id"])
+                  if not operator["sysadmin_flag"]:
+                      print("Granting Harbor system-administrator privileges:", operator_email)
+                      request = urllib.request.Request(
+                          user_endpoint + "/sysadmin", data=json.dumps({"sysadmin_flag": True}).encode(),
+                          headers=headers, method="PUT"
+                      )
+                      with urllib.request.urlopen(request, timeout=30) as response:
+                          print("Harbor administrator grant returned HTTP", response.status)
+                  else:
+                      print("Harbor operator already has system-administrator privileges:", operator_email)
+                  request = urllib.request.Request(user_endpoint, headers=headers)
+                  with urllib.request.urlopen(request, timeout=30) as response:
+                      verified_operator = select_operator([json.load(response)], operator_email)
+                  if not verified_operator["sysadmin_flag"]:
+                      raise RuntimeError("Harbor did not persist the operator administrator grant")
+                  print("Verified Harbor system-administrator privileges:", operator_email)
+              except urllib.error.HTTPError as error:
+                  raise RuntimeError("Harbor HTTP " + str(error.code) + ": " + error.read(1048576).decode(errors="replace")) from error
+          env:
+            - name: HARBOR_OPERATOR_EMAIL
+              value: saikat@atmz.ai
+            - name: HARBOR_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: harbor-secrets
+                  key: admin-password

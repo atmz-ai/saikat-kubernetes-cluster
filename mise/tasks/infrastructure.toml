@@ -3,6 +3,7 @@ description = "Render every upstream infrastructure bundle and validate release 
 depends = ["tekton-triggers-configuration-checks"]
 run = '''
 #!/usr/bin/env -S ./.venv/bin/python -u
+import ast
 import base64
 import copy
 import json
@@ -17,6 +18,32 @@ import yaml
 from jinja2 import Environment
 
 configuration = json.loads(Path("renovate.json").read_text())
+administrator_job = yaml.safe_load(Path("kubernetes/infrastructure/harbor/operator-administrator.yaml").read_text())
+administrator_container = administrator_job["spec"]["template"]["spec"]["containers"][0]
+administrator_program = ast.parse(administrator_container["args"][0])
+selector = next(node for node in administrator_program.body if isinstance(node, ast.FunctionDef) and node.name == "select_operator")
+selector_namespace = {}
+exec(compile(ast.Module(body=[selector], type_ignores=[]), "harbor-operator-selector", "exec"), selector_namespace)
+operator_fixture = {"user_id": 2, "username": "saikat@atmz.ai", "email": "saikat@atmz.ai", "sysadmin_flag": False}
+for scenario, users, accepted in (
+    ("operator", [operator_fixture], True),
+    ("existing-administrator", [dict(operator_fixture, sysadmin_flag=True)], True),
+    ("missing-user", [], False),
+    ("ambiguous-user", [operator_fixture, operator_fixture], False),
+    ("another-email", [dict(operator_fixture, email="another@atmz.ai")], False),
+    ("another-username", [dict(operator_fixture, username="admin")], False),
+    ("invalid-identifier", [dict(operator_fixture, user_id=True)], False),
+    ("missing-administrator-status", [{key: value for key, value in operator_fixture.items() if key != "sysadmin_flag"}], False),
+):
+    try:
+        result = selector_namespace["select_operator"](users, "saikat@atmz.ai")
+    except ValueError:
+        assert not accepted, "valid operator rejected: " + scenario
+        print("PASS: administrator grant rejects unsafe operator lookup", scenario)
+    else:
+        assert accepted, "unsafe administrator grant accepted: " + scenario
+        assert result["user_id"] == 2 and result["email"] == "saikat@atmz.ai"
+        print("PASS: administrator grant selects the exact existing operator", scenario)
 registry_declaration = yaml.safe_load(Path("kubernetes/infrastructure/harbor/helmrelease.yaml").read_text())
 oidc_secret = yaml.safe_load(Path("kubernetes/infrastructure/harbor/oidc-values.sops.yaml").read_text())
 for scenario in ("complete", "missing-native-oidc-values", "plaintext-oidc-values"):
