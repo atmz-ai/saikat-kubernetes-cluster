@@ -649,8 +649,10 @@ run = "./.venv/bin/ansible-playbook ansible/playbooks/operations/update-dns-zone
 description = "Validate Renovate schema, generic bundle and image extraction, and check-gated merging"
 run = '''
 #!/usr/bin/env -S ./.venv/bin/python -u
+import copy
 import json
 import subprocess
+import tomllib
 import urllib.request
 from pathlib import Path
 
@@ -662,6 +664,36 @@ with urllib.request.urlopen(configuration["$schema"], timeout=30) as response:
     schema = json.load(response)
 jsonschema.validate(configuration, schema)
 print("PASS: Renovate configuration matches the published schema")
+
+flux_request = tomllib.loads(Path("mise.toml").read_text())["tools"]["flux2"]
+flux_lock = tomllib.loads(Path("mise.lock").read_text())["tools"]["flux2"]
+for scenario in ("verified", "original-tag-only", "missing-issuer", "stale-version", "missing-provenance", "stale-provenance"):
+    request_candidate = copy.deepcopy(flux_request)
+    lock_candidate = copy.deepcopy(flux_lock)
+    if scenario == "original-tag-only":
+        request_candidate = flux_request["version"]
+    elif scenario == "missing-issuer":
+        request_candidate.pop("slsa_signer_issuer", None)
+    elif scenario == "stale-version":
+        lock_candidate[0]["version"] = "2.9.5"
+    elif scenario == "missing-provenance":
+        lock_candidate[0]["platforms.linux-arm64"].pop("provenance", None)
+    elif scenario == "stale-provenance":
+        lock_candidate[0]["platforms.linux-arm64"]["provenance"]["slsa"]["url"] = "https://github.com/fluxcd/flux2/releases/download/v2.9.5/provenance.intoto.jsonl"
+    try:
+        assert isinstance(request_candidate, dict), "Flux requires an explicit SLSA signer"
+        assert all(request_candidate.get(key) for key in ("slsa_signer_identity", "slsa_signer_issuer")), "both signer options are required"
+        assert len(lock_candidate) == 1 and lock_candidate[0]["version"] == request_candidate["version"], "Flux's request and lock must agree"
+        platforms = {key for key in lock_candidate[0] if key.startswith("platforms.")}
+        assert platforms == {"platforms." + platform for platform in ("linux-arm64", "linux-arm64-musl", "linux-x64", "linux-x64-musl", "macos-arm64", "macos-x64", "windows-x64")}, "all supported platforms must be locked"
+        provenance_url = "https://github.com/fluxcd/flux2/releases/download/v" + request_candidate["version"] + "/provenance.intoto.jsonl"
+        assert all(lock_candidate[0][platform].get("provenance", {}).get("slsa", {}).get("url") == provenance_url for platform in platforms), "every Flux artifact must retain current SLSA provenance"
+    except AssertionError:
+        assert scenario != "verified", "Flux signer configuration or lockfile is invalid"
+        print("PASS: rejected Flux provenance regression", scenario)
+    else:
+        assert scenario == "verified", "unsafe Flux lock accepted: " + scenario
+        print("PASS: Flux signer and all seven provenance-bearing lock entries agree")
 
 release = next(
     resource for resource in yaml.safe_load_all(Path("kubernetes/infrastructure/rustfs/helmrelease.yaml").read_text())
