@@ -169,7 +169,7 @@ for filename in ("kubernetes/infrastructure/cilium/helmrelease.yaml", "ansible/m
         else:
             assert scenario == "complete", "invalid Hubble configuration accepted"
             print("PASS: Hubble UI retired while relay and metrics remain enabled", filename)
-for application in ("grafana", "headlamp", "dashboard"):
+for application in ("grafana", "headlamp", "dashboard", "longhorn-ui"):
     deployment = yaml.safe_load(Path("kubernetes/infrastructure/oauth2-proxy/deployment-" + application + ".yaml").read_text())
     allowlist = yaml.safe_load(Path("kubernetes/infrastructure/oauth2-proxy/" + application + "-allowed-emails.yaml").read_text())
     for scenario in ("complete", "legacy-google-group", "domain-bypasses-allowlist", "missing-email-file", "additional-user"):
@@ -197,6 +197,33 @@ for application in ("grafana", "headlamp", "dashboard"):
         else:
             assert scenario == "complete", "overbroad or unusable policy accepted: " + application
             print("PASS: operator-only mounted allowlist", application)
+longhorn_routes = [resource for resource in yaml.safe_load_all(Path("kubernetes/networking/routes/longhorn-ui.yaml").read_text()) if resource]
+longhorn_proxy = yaml.safe_load(Path("kubernetes/infrastructure/oauth2-proxy/deployment-longhorn-ui.yaml").read_text())
+for scenario in ("complete", "missing-new-host", "direct-frontend", "retired-callback", "missing-tls-listener"):
+    routes_candidate = copy.deepcopy(longhorn_routes)
+    proxy_candidate = copy.deepcopy(longhorn_proxy)
+    secure_route = next(route for route in routes_candidate if route["metadata"]["name"] == "longhorn-ui")
+    proxy_arguments = proxy_candidate["spec"]["template"]["spec"]["containers"][0]["args"]
+    if scenario == "missing-new-host":
+        secure_route["spec"]["hostnames"].remove("longhorn-ui.saikat.dev")
+    elif scenario == "direct-frontend":
+        secure_route["spec"]["rules"][0]["backendRefs"] = [{"name": "longhorn-frontend", "namespace": "longhorn-system", "port": 80}]
+    elif scenario == "retired-callback":
+        proxy_arguments[:] = ["--redirect-url=https://retired.example.invalid/oauth2/callback" if argument.startswith("--redirect-url=") else argument for argument in proxy_arguments]
+    elif scenario == "missing-tls-listener":
+        secure_route["spec"]["parentRefs"] = [parent for parent in secure_route["spec"]["parentRefs"] if parent["sectionName"] != "https-saikat-dev"]
+    try:
+        assert all("longhorn-ui.saikat.dev" in route["spec"]["hostnames"] for route in routes_candidate), "both Longhorn routes must serve the migrated origin"
+        assert "https-saikat-dev" in {parent["sectionName"] for parent in secure_route["spec"]["parentRefs"]}, "the new Longhorn origin requires its wildcard TLS listener"
+        assert secure_route["spec"]["rules"] == [{"backendRefs": [{"name": "oauth2-proxy-longhorn-ui", "namespace": "oauth2-proxy", "port": 4180}]}], "Longhorn's frontend must never bypass authentication"
+        assert "--redirect-url=https://longhorn-ui.saikat.dev/oauth2/callback" in proxy_arguments
+        assert "--upstream=http://longhorn-frontend.longhorn-system.svc.cluster.local:80" in proxy_arguments
+    except AssertionError:
+        assert scenario != "complete", "Longhorn domain cutover breaks authentication"
+        print("PASS: rejected Longhorn domain/authentication regression", scenario)
+    else:
+        assert scenario == "complete", "unsafe Longhorn domain cutover accepted: " + scenario
+        print("PASS: migrated Longhorn UI remains behind its existing authentication proxy")
 dashboard_addresses = re.findall(r'href="(https://[^"]+)"', Path("kubernetes/apps/dashboard/index.html").read_text())
 for scenario in ("complete", "dashboard-before-oauth-cutover"):
     candidate = list(dashboard_addresses)
