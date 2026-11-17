@@ -5,6 +5,7 @@ metadata:
   namespace: flux-system
 spec:
   interval: 1h
+  retryInterval: 1m
   path: ./kubernetes/networking/routes/netbird
   prune: true
   wait: true

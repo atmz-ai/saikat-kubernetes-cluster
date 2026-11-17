@@ -5,6 +5,8 @@ metadata:
   namespace: flux-system
 spec:
   interval: 1h
+  # ! Initial dependency/readiness failures must not inherit the one-hour retry delay.
+  retryInterval: 1m
   path: ./kubernetes/infrastructure/netbird
   prune: true
   wait: true

@@ -34,6 +34,10 @@ jobs:
           install_args: kubectl python node
       - name: Install declared Python tooling
         run: mise run --skip-tools python-setup
+      - name: Test infrastructure logic
+        run: |
+          ./.venv/bin/python -B -m unittest discover -s kubernetes/infrastructure/harbor/tests -v
+          ./.venv/bin/python -B -m unittest discover -s ansible/roles/beszel-agent/tests -v
       - name: Validate upstream bundles and update discovery
         run: |
           mise run --skip-tools infrastructure-release-checks ::: renovate-configuration-checks

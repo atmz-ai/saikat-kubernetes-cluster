@@ -13,7 +13,11 @@ Run `mise run netbird-contract-generate` when upgrading the server. It downloads
 the complete byte-verbatim OpenAPI document and uses
 [datamodel-code-generator](https://datamodel-code-generator.koxudaxi.dev/openapi/)
 to generate standard-library TypedDict bindings. Do not edit generated models
-or maintain a subset of the upstream contract. Run `mise run netbird-checks`
+or maintain a subset of the upstream contract.
+The generator disables PEP 728 closed TypedDict output because that requires
+`typing_extensions` on older Python targets; the bootstrap image intentionally
+uses no site packages. Verify imports with `python -I -S`, not only the dev venv.
+Run `mise run netbird-checks`
 and `mise run renovate-configuration-checks` before deployment.
 
 The bootstrap Job creates the owner and configures Google using the official

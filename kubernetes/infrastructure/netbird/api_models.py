@@ -3,9 +3,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal, NotRequired, TypeAlias
-
-from typing_extensions import TypedDict
+from typing import Any, Literal, NotRequired, TypeAlias, TypedDict
 
 
 class PasswordChangeRequest(TypedDict):
@@ -892,7 +890,7 @@ class EDRIntuneRequest(TypedDict):
     enabled: NotRequired[bool]
 
 
-class SentinelOneMatchAttributes(TypedDict, closed=True):
+class SentinelOneMatchAttributes(TypedDict):
     active_threats: NotRequired[int]
     encrypted_applications: NotRequired[bool]
     firewall_enabled: NotRequired[bool]
@@ -913,14 +911,14 @@ class EDRFalconRequest(TypedDict):
     enabled: NotRequired[bool]
 
 
-class HuntressMatchAttributes(TypedDict, closed=True):
+class HuntressMatchAttributes(TypedDict):
     defender_policy_status: NotRequired[str]
     defender_status: NotRequired[str]
     defender_substatus: NotRequired[str]
     firewall_status: NotRequired[str]
 
 
-class FleetDMMatchAttributes(TypedDict, closed=True):
+class FleetDMMatchAttributes(TypedDict):
     disk_encryption_enabled: NotRequired[bool]
     failing_policies_count_max: NotRequired[int]
     vulnerable_software_count_max: NotRequired[int]
