@@ -15,41 +15,14 @@ all:
     ansible_python_interpreter: /usr/bin/python3
     ansible_ssh_common_args: "-o StrictHostKeyChecking=no"
 
-    # Kubernetes cluster configuration
-    #
-    # control_plane_endpoint becomes `controlPlaneEndpoint` in the kubeadm-config
-    # ConfigMap, which is the address every NEWLY JOINING node bakes into its
-    # kubeconfig via `kubeadm token create --print-join-command`.
-    #
-    # It reaches no component on an already-joined node — those hold their own baked
-    # URL and nothing re-reads this value — so changing it affects only future joins
-    # and is safe to do while the fleet is still running.
-    #
-    # Nodes joined before 2026-09 reference the PREVIOUS endpoint and keep working
-    # because that name is still in the certificate below and still in DNS. They
-    # converge by reprovisioning, and the old name is retired once none remain.
+    # ! Changing the join endpoint does not change existing kubeconfigs.
     control_plane_endpoint: "kubernetes-api.oleole.ai"
-    # Additional Subject Alternative Names for the kube-apiserver serving
-    # certificate, on top of `control_plane_endpoint` (which kubeadm already embeds)
-    # and the node name/IP.
-    #
-    # List EVERY name that must stay valid at the same time — including the current
-    # endpoint. The certificate is the gate: a name absent from it fails TLS
-    # verification and loses the control plane, so a name is added here and rolled out
-    # to the nodes BEFORE any client uses it, and removed only once no client remains.
-    #
-    # Keeping the previous endpoint listed is what makes the endpoint move a
-    # no-flag-day change rather than a simultaneous switch. Combined with the endpoint
-    # above, both nodes joined BEFORE the move and nodes joined AFTER it end up
-    # carrying the same two names, so the fleet stays uniform throughout and either
-    # name works on every node.
-    #
-    # Rendered into ansible/manifests/kubeadm-cluster-configuration.yaml.j2. The
-    # control-plane-certificates role asserts each entry is actually present in the
-    # live certificate, since changing this does not itself change any node.
+    # ! Desired SANs do not change existing certificates. Verify every serving
+    # ! endpoint before DNS regeneration or client cutover; retain old names meanwhile.
     api_server_cert_sans:
       - kubernetes-api.oleole.ai
-      - kubernetes-api.yral.com # previous endpoint — retire once no node references it
+      - kubernetes-api.saikat.dev
+      - kubernetes-api.yral.com # ! Retain until every client has moved.
     pod_network_cidr: "10.244.0.0/16"
 
     # Hetzner Robot API credentials

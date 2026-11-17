@@ -1,15 +1,8 @@
 apiVersion: kubeadm.k8s.io/v1beta4
 kind: ClusterConfiguration
-# Single declarative source of truth for the cluster, rendered by:
-#   - cluster-init (bootstrap, passed to kubeadm init --config)
-#   - control-plane-join (uploaded to the kubeadm-config ConfigMap before a join,
-#     which is where a joining node reads it from)
-#   - control-plane-metrics / control-plane-certificates (reconcile existing nodes)
-#
-# WARNING: kubeadm writes static pod manifests from this config only at
-# init/join/upgrade time, so a change here does NOT reach an existing node — a
-# ConfigMap edit reaches no running pod. Existing nodes converge only via the
-# ! serial node replacement (see AGENTS.md). Never edit the ConfigMap directly.
+# ! ConfigMap edits do not update running static manifests or serving certificates.
+# ! Approved SAN-only reissuance uses certificate_reissue; other
+# ! static component changes still converge through the node lifecycle.
 kubernetesVersion: v{{ kubernetes_version }}
 controlPlaneEndpoint: "{{ control_plane_endpoint }}:6443"
 networking:
@@ -24,67 +17,19 @@ encryptionAlgorithm: RSA-2048
 proxy:
   disabled: true
 apiServer:
-  # Additional SANs for the apiserver serving certificate, beyond what kubeadm
-  # derives from controlPlaneEndpoint. Sourced from `api_server_cert_sans`.
-  #
-  # WARNING: the certificate is written only at init/join time, so adding a name
-  # here does not add it to an existing certificate — and a name absent from the
-  # certificate fails TLS verification, losing control-plane access while the API
-  # ! stays healthy. Existing nodes need serial replacement to adopt new SANs.
-  # Adding a SAN must be ADDITIVE: carry old and new names together.
-  #
-  # Emitted as an empty list rather than omitted when the variable is unset, so this
-  # file stays valid YAML for `kubeadm config` parsing. kubeadm treats an empty
-  # certSANs the same as an absent one, so the fallback cannot change cluster
-  # behaviour.
+  # ! Adding a desired SAN does not update existing certificates. Preserve old
+  # ! names until serving certificates and clients have both completed cutover.
   certSANs:
 {% for subject_alternative_name in api_server_cert_sans | default([], true) %}
     - {{ subject_alternative_name }}
 {% endfor %}
-    # Every control plane's ADVERTISE address — DERIVED from ansible_host.
-    #
-    # ! THIS IS NOT OPTIONAL, and omitting it takes a node NotReady. Each kubelet's
-    # ! /etc/kubernetes/kubelet.conf points at its own node's PUBLIC address
-    # ! (`server: https://<public-ip>:6443`), so that address must be in the
-    # ! certificate or the kubelet cannot post node status:
-    # !
-    # !   Error updating node status ... x509: certificate is valid for
-    # !   10.96.0.1, 172.16.0.4, 172.16.0.5, 172.16.0.6, not 20.219.32.205
-    # !
-    # ! kubeadm puts the advertise address in the certificate AT INIT, from the join
-    # ! command's --apiserver-advertise-address — it is NOT in this config and NOT
-    # ! re-derived on regeneration. So a list that names only the endpoint and the
-    # ! private addresses REPLACES the public one rather than adding to it. Measured
-    # ! 2026-10-09: node-1 went NotReady for exactly this reason.
-    # !
-    # ! Adding a SAN must be ADDITIVE (AGENTS.md) — carry every address a client
-    # ! dials, old and new together.
+    # ! Node kubeconfigs dial their public IPs; omitting these SANs makes nodes
+    # ! fail TLS even while the API process stays healthy.
 {% for control_plane_node in groups['control_plane'] %}
     - "{{ hostvars[control_plane_node]['ansible_host'] }}"
 {% endfor %}
-    # Every control plane's VNet private address — DERIVED, not declared in
-    # `api_server_cert_sans`, because the value already exists per host as
-    # `powerdns_frontend_address` and duplicating it would be a second source of truth
-    # for the same address.
-    #
-    # WHY THEY MUST BE HERE: `kubeadm init phase upload-config kubeadm` (which
-    # `control-plane-join` runs before every join, and the metrics reconcile playbook
-    # runs after) does not use the kubeconfig's `server:` URL. It discovers the node's
-    # LOCAL address and dials `https://<node-ip>:6443` directly to bootstrap the
-    # kubeadm:cluster-admins ClusterRoleBinding. On a NAT'd cloud VM that local address
-    # is the private one, and without it here the handshake fails:
-    #
-    #   x509: certificate is valid for 10.96.0.1, 20.219.32.205, not 172.16.0.4
-    #
-    # — which fails `upload-config`, and therefore a future join, even though the API
-    # itself is perfectly healthy. Measured 2026-10-09.
-    #
-    # A join reads these from the kubeadm-config ConfigMap rather than from its own
-    # facts, so listing every control plane's address is what makes the ConfigMap
-    # correct for whichever node joins next.
-    #
-    # ! Rendered from INVENTORY values, not gathered facts, so identical at every
-    # ! render site (cluster-init, control-plane-join, and the reconcile roles).
+    # ! kubeadm upload-config discovers local VNet addresses rather than using
+    # ! the kubeconfig URL; retain their SANs for future joins.
 {% for control_plane_node in groups['control_plane'] %}
     - "{{ hostvars[control_plane_node]['powerdns_frontend_address'] }}"
 {% endfor %}

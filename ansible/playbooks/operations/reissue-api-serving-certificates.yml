@@ -1,0 +1,9 @@
+---
+- name: Reissue only API serving certificates while preserving node and storage identity
+  hosts: "{{ target_host | default('control_plane') }}"
+  gather_facts: false
+  become: true
+  serial: 1
+  any_errors_fatal: true
+  roles:
+    - role: certificate_reissue

@@ -1,0 +1,123 @@
+---
+- name: Validate serving fingerprint and every certificate SAN through real TLS
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -c
+      - |
+        import hashlib
+        import json
+        import socket
+        import ssl
+        import sys
+
+        context = ssl.create_default_context(cafile="/etc/kubernetes/pki/ca.crt")
+        address = sys.argv[1]
+        names = json.loads(sys.argv[2])
+        fingerprint = sys.argv[3].replace(":", "").lower()
+        for name in names:
+            with socket.create_connection((address, 6443), timeout=10) as connection:
+                with context.wrap_socket(connection, server_hostname=name) as secured:
+                    actual = hashlib.sha256(secured.getpeercert(binary_form=True)).hexdigest()
+                    if actual != fingerprint:
+                        raise RuntimeError("Serving certificate fingerprint mismatch for " + name)
+            print("Verified serving TLS:", address, name)
+      - "{{ ansible_host }}"
+      - "{{ certificate_reissue_expected_information.subject_alt_name | map('regex_replace', '^(DNS|IP):', '') | list | to_json }}"
+      - "{{ certificate_reissue_expected_information.fingerprints.sha256 }}"
+  changed_when: false
+  register: certificate_reissue_serving_verification
+  retries: 10
+  delay: 2
+  until: certificate_reissue_serving_verification.rc == 0
+
+- name: Verify unchanged etcd membership through the restored API
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - --kubeconfig=/etc/kubernetes/admin.conf
+      - "--server=https://{{ ansible_host }}:6443"
+      - exec
+      - -n
+      - kube-system
+      - "etcd-{{ inventory_hostname }}"
+      - --
+      - etcdctl
+      - --endpoints=https://127.0.0.1:2379
+      - --cacert=/etc/kubernetes/pki/etcd/ca.crt
+      - --cert=/etc/kubernetes/pki/etcd/healthcheck-client.crt
+      - --key=/etc/kubernetes/pki/etcd/healthcheck-client.key
+      - member
+      - list
+      - --write-out=json
+  changed_when: false
+  register: certificate_reissue_final_membership
+
+- name: Wait for the node's Ready condition before proceeding
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - --kubeconfig=/etc/kubernetes/admin.conf
+      - "--server=https://{{ ansible_host }}:6443"
+      - get
+      - node
+      - "{{ inventory_hostname }}"
+      - -o
+      - json
+  changed_when: false
+  register: certificate_reissue_node_ready
+  retries: 30
+  delay: 2
+  until: >-
+    certificate_reissue_node_ready.rc == 0 and
+    ((certificate_reissue_node_ready.stdout | from_json).status.conditions
+      | selectattr('type', 'equalto', 'Ready') | map(attribute='status') | list) == ['True']
+
+- name: Require identical etcd members
+  ansible.builtin.assert:
+    that:
+      - >-
+        (certificate_reissue_original_membership.stdout | from_json).members | sort(attribute='ID')
+        == (certificate_reissue_final_membership.stdout | from_json).members | sort(attribute='ID')
+
+- name: Verify every etcd endpoint remains healthy
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - --kubeconfig=/etc/kubernetes/admin.conf
+      - "--server=https://{{ ansible_host }}:6443"
+      - exec
+      - -n
+      - kube-system
+      - "etcd-{{ inventory_hostname }}"
+      - --
+      - etcdctl
+      - --endpoints=https://127.0.0.1:2379
+      - --cacert=/etc/kubernetes/pki/etcd/ca.crt
+      - --cert=/etc/kubernetes/pki/etcd/healthcheck-client.crt
+      - --key=/etc/kubernetes/pki/etcd/healthcheck-client.key
+      - endpoint
+      - health
+      - --cluster
+  changed_when: false
+
+- name: Verify CA identity and API manifest remain byte-identical
+  ansible.builtin.stat:
+    path: "{{ certificate_file_snapshot.certificate_path }}"
+    checksum_algorithm: sha256
+  loop: >-
+    {{ certificate_reissue_required_files.results | selectattr('certificate_path', 'in',
+      ['/etc/kubernetes/pki/ca.crt', '/etc/kubernetes/pki/ca.key', '/etc/kubernetes/manifests/kube-apiserver.yaml']) | list }}
+  loop_control:
+    loop_var: certificate_file_snapshot
+  register: certificate_reissue_identity_snapshots
+  no_log: true
+
+- name: Require unchanged cluster CA and static manifest
+  ansible.builtin.assert:
+    that:
+      - certificate_file_snapshot.stat.checksum == certificate_file_snapshot.certificate_file_snapshot.stat.checksum
+  loop: "{{ certificate_reissue_identity_snapshots.results }}"
+  loop_control:
+    loop_var: certificate_file_snapshot
+  no_log: true

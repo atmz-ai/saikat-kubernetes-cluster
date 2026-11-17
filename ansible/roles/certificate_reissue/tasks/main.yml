@@ -1,0 +1,504 @@
+---
+- name: Require an existing control plane and the declared API SANs
+  ansible.builtin.assert:
+    that:
+      - inventory_hostname in groups['control_plane']
+      - api_server_cert_sans | length > 0
+
+- name: Require existing API certificate, key, CA identity and static manifest
+  ansible.builtin.stat:
+    path: "{{ certificate_path }}"
+    checksum_algorithm: sha256
+  loop:
+    - /etc/kubernetes/pki/apiserver.crt
+    - /etc/kubernetes/pki/apiserver.key
+    - /etc/kubernetes/pki/ca.crt
+    - /etc/kubernetes/pki/ca.key
+    - /etc/kubernetes/manifests/kube-apiserver.yaml
+  loop_control:
+    loop_var: certificate_path
+  register: certificate_reissue_required_files
+  no_log: true
+
+- name: Refuse bootstrap or incomplete PKI instead of generating a new CA
+  ansible.builtin.assert:
+    that:
+      - certificate_reissue_required_files.results | map(attribute='stat.exists') | min
+      - certificate_reissue_required_files.results | map(attribute='stat.isreg') | min
+
+- name: Retain original file permissions
+  ansible.builtin.set_fact:
+    certificate_reissue_original_file_modes: >-
+      {{ dict(certificate_reissue_required_files.results | map(attribute='certificate_path')
+        | zip(certificate_reissue_required_files.results | map(attribute='stat.mode'))) }}
+
+- name: Read the node's existing public CA
+  ansible.builtin.slurp:
+    src: /etc/kubernetes/pki/ca.crt
+  register: certificate_reissue_original_authority
+
+- name: Read only the controller kubeconfig's public CA
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - config
+      - view
+      - --minify
+      - --raw
+      - -o
+      - "jsonpath={.clusters[0].cluster.certificate-authority-data}"
+  delegate_to: localhost
+  become: false
+  check_mode: false
+  changed_when: false
+  register: certificate_reissue_controller_authority
+
+- name: Require the same existing cluster CA trusted by the controller
+  ansible.builtin.assert:
+    that:
+      - certificate_reissue_controller_authority.stdout | length > 0
+      - certificate_reissue_original_authority.content | b64decode | trim == certificate_reissue_controller_authority.stdout | b64decode | trim
+
+- name: Read the existing public API certificate
+  ansible.builtin.slurp:
+    src: /etc/kubernetes/pki/apiserver.crt
+  register: certificate_reissue_original_certificate
+
+- name: Inspect original certificate with the maintained crypto module
+  community.crypto.x509_certificate_info:
+    content: "{{ certificate_reissue_original_certificate.content | b64decode }}"
+    valid_at:
+      now: "+0s"
+  delegate_to: localhost
+  become: false
+  register: certificate_reissue_original_information
+
+- name: Read installed kubeadm version without changing components
+  ansible.builtin.command:
+    argv: [kubeadm, version, -o, short]
+  check_mode: false
+  changed_when: false
+  register: certificate_reissue_kubeadm_version
+
+- name: Read this node's API version and readiness through its existing kubeconfig
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - --kubeconfig=/etc/kubernetes/admin.conf
+      - "--server=https://{{ ansible_host }}:6443"
+      - get
+      - --raw=/version
+  check_mode: false
+  changed_when: false
+  register: certificate_reissue_api_version
+
+- name: Require a healthy API and compatible installed kubeadm minor version
+  ansible.builtin.assert:
+    that:
+      - certificate_reissue_original_information.valid_at.now
+      - >-
+        (certificate_reissue_kubeadm_version.stdout | trim).split('.')[:2]
+        == (certificate_reissue_api_version.stdout | from_json).gitVersion.split('.')[:2]
+
+- name: Read this node's API readiness before certificate work
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - --kubeconfig=/etc/kubernetes/admin.conf
+      - "--server=https://{{ ansible_host }}:6443"
+      - get
+      - --raw=/readyz
+  check_mode: false
+  changed_when: false
+
+- name: Capture existing etcd membership without changing it
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - --kubeconfig=/etc/kubernetes/admin.conf
+      - "--server=https://{{ ansible_host }}:6443"
+      - exec
+      - -n
+      - kube-system
+      - "etcd-{{ inventory_hostname }}"
+      - --
+      - etcdctl
+      - --endpoints=https://127.0.0.1:2379
+      - --cacert=/etc/kubernetes/pki/etcd/ca.crt
+      - --cert=/etc/kubernetes/pki/etcd/healthcheck-client.crt
+      - --key=/etc/kubernetes/pki/etcd/healthcheck-client.key
+      - member
+      - list
+      - --write-out=json
+  check_mode: false
+  changed_when: false
+  register: certificate_reissue_original_membership
+
+- name: Require healthy etcd endpoints before certificate work
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - --kubeconfig=/etc/kubernetes/admin.conf
+      - "--server=https://{{ ansible_host }}:6443"
+      - exec
+      - -n
+      - kube-system
+      - "etcd-{{ inventory_hostname }}"
+      - --
+      - etcdctl
+      - --endpoints=https://127.0.0.1:2379
+      - --cacert=/etc/kubernetes/pki/etcd/ca.crt
+      - --cert=/etc/kubernetes/pki/etcd/healthcheck-client.crt
+      - --key=/etc/kubernetes/pki/etcd/healthcheck-client.key
+      - endpoint
+      - health
+      - --cluster
+  check_mode: false
+  changed_when: false
+
+- name: Render the canonical cluster declaration and retain every current SAN
+  ansible.builtin.set_fact:
+    certificate_reissue_cluster_configuration: "{{ lookup('template', playbook_dir + '/../../manifests/kubeadm-cluster-configuration.yaml.j2') | from_yaml }}"
+    certificate_reissue_original_subject_alternative_names: >-
+      {{ certificate_reissue_original_information.subject_alt_name
+        | map('regex_replace', '^(DNS|IP):', '') | list }}
+
+- name: Decide whether the desired DNS SANs require reissuance
+  ansible.builtin.set_fact:
+    certificate_reissue_required: "{{ api_server_cert_sans | difference(certificate_reissue_original_subject_alternative_names) | length > 0 }}"
+
+- name: Report certificate-only scope
+  ansible.builtin.debug:
+    msg:
+      - "Node: {{ inventory_hostname }}; reissuance required: {{ certificate_reissue_required }}"
+      - "Existing SANs: {{ certificate_reissue_original_subject_alternative_names }}"
+      - "Desired DNS SANs: {{ api_server_cert_sans }}"
+      - "No node reset, etcd membership change, disk operation, DNS change or client cutover"
+
+- name: Generate and activate a verified certificate transaction
+  when:
+    - certificate_reissue_required
+    - not ansible_check_mode
+  block:
+    - name: Create a protected candidate directory outside the static manifest watch directory
+      ansible.builtin.tempfile:
+        state: directory
+        path: /etc/kubernetes/pki
+        prefix: .apiserver-candidate-
+      register: certificate_reissue_candidate_directory
+
+    - name: Stage only the existing CA identity on the same node
+      ansible.builtin.copy:
+        src: "/etc/kubernetes/pki/{{ certificate_authority_file }}"
+        dest: "{{ certificate_reissue_candidate_directory.path }}/{{ certificate_authority_file }}"
+        remote_src: true
+        mode: "0600"
+      loop: [ca.crt, ca.key]
+      loop_control:
+        loop_var: certificate_authority_file
+      no_log: true
+      diff: false
+
+    - name: Build complete node-specific certificate configuration
+      ansible.builtin.set_fact:
+        certificate_reissue_candidate_configuration: >-
+          {{ certificate_reissue_cluster_configuration | combine({
+            'certificatesDir': certificate_reissue_candidate_directory.path,
+            'kubernetesVersion': (certificate_reissue_api_version.stdout | from_json).gitVersion,
+            'apiServer': {'certSANs': (certificate_reissue_cluster_configuration.apiServer.certSANs
+              + certificate_reissue_original_subject_alternative_names) | unique | list}
+          }, recursive=true) }}
+        certificate_reissue_init_configuration:
+          apiVersion: kubeadm.k8s.io/v1beta4
+          kind: InitConfiguration
+          localAPIEndpoint:
+            advertiseAddress: "{{ ansible_host }}"
+            bindPort: 6443
+          nodeRegistration:
+            name: "{{ inventory_hostname }}"
+
+    - name: Write the complete certificate-only kubeadm configuration
+      ansible.builtin.copy:
+        dest: "{{ certificate_reissue_candidate_directory.path }}/configuration.yaml"
+        content: |
+          {{ certificate_reissue_init_configuration | to_nice_yaml }}
+          ---
+          {{ certificate_reissue_candidate_configuration | to_nice_yaml }}
+        mode: "0600"
+
+    - name: Generate only the candidate API certificate using the existing CA
+      ansible.builtin.command:
+        argv:
+          - kubeadm
+          - init
+          - phase
+          - certs
+          - apiserver
+          - --config
+          - "{{ certificate_reissue_candidate_directory.path }}/configuration.yaml"
+      changed_when: true
+
+    - name: Validate candidate chain, server usage and desired DNS names with OpenSSL
+      ansible.builtin.command:
+        argv:
+          - openssl
+          - verify
+          - -CAfile
+          - /etc/kubernetes/pki/ca.crt
+          - -purpose
+          - sslserver
+          - -verify_hostname
+          - "{{ certificate_subject_alternative_name }}"
+          - "{{ certificate_reissue_candidate_directory.path }}/apiserver.crt"
+      loop: "{{ api_server_cert_sans }}"
+      loop_control:
+        loop_var: certificate_subject_alternative_name
+      changed_when: false
+
+    - name: Read candidate certificate public information
+      ansible.builtin.slurp:
+        src: "{{ certificate_reissue_candidate_directory.path }}/apiserver.crt"
+      register: certificate_reissue_candidate_certificate
+
+    - name: Inspect candidate certificate with the maintained crypto module
+      community.crypto.x509_certificate_info:
+        content: "{{ certificate_reissue_candidate_certificate.content | b64decode }}"
+        valid_at:
+          now: "+0s"
+      delegate_to: localhost
+      become: false
+      register: certificate_reissue_candidate_information
+
+    - name: Validate every existing SAN and certificate subject before stopping the API
+      ansible.builtin.assert:
+        that:
+          - certificate_reissue_candidate_information.valid_at.now
+          - certificate_reissue_original_information.subject_alt_name | difference(certificate_reissue_candidate_information.subject_alt_name) | length == 0
+          - certificate_reissue_candidate_information.subject == certificate_reissue_original_information.subject
+
+    - name: Derive the candidate key's public component without exporting private data
+      ansible.builtin.command:
+        argv: [openssl, pkey, -in, "{{ certificate_reissue_candidate_directory.path }}/apiserver.key", -pubout]
+      changed_when: false
+      register: certificate_reissue_candidate_public_key
+
+    - name: Require the candidate certificate and key to match
+      ansible.builtin.assert:
+        that:
+          - certificate_reissue_candidate_public_key.stdout | trim == certificate_reissue_candidate_information.public_key | trim
+
+    - name: Create protected persistent backup storage
+      ansible.builtin.file:
+        path: /etc/kubernetes/serving-certificate-backups
+        state: directory
+        mode: "0700"
+
+    - name: Create a unique original-pair and manifest recovery directory
+      ansible.builtin.tempfile:
+        state: directory
+        path: /etc/kubernetes/serving-certificate-backups
+        prefix: apiserver-
+      register: certificate_reissue_backup_directory
+
+    - name: Back up the exact original certificate, key and manifest on the same node
+      ansible.builtin.copy:
+        src: "{{ certificate_backup_file }}"
+        dest: "{{ certificate_reissue_backup_directory.path }}/{{ certificate_backup_file | basename }}"
+        remote_src: true
+        mode: "0600"
+      loop:
+        - /etc/kubernetes/pki/apiserver.crt
+        - /etc/kubernetes/pki/apiserver.key
+        - /etc/kubernetes/manifests/kube-apiserver.yaml
+      loop_control:
+        loop_var: certificate_backup_file
+      no_log: true
+      diff: false
+
+    - name: Recheck source files immediately before activation
+      ansible.builtin.stat:
+        path: "{{ certificate_file_snapshot.certificate_path }}"
+        checksum_algorithm: sha256
+      loop: "{{ certificate_reissue_required_files.results }}"
+      loop_control:
+        loop_var: certificate_file_snapshot
+      register: certificate_reissue_activation_snapshots
+      no_log: true
+
+    - name: Refuse concurrent changes to original PKI or the static manifest
+      ansible.builtin.assert:
+        that:
+          - certificate_file_snapshot.stat.checksum == certificate_file_snapshot.certificate_file_snapshot.stat.checksum
+      loop: "{{ certificate_reissue_activation_snapshots.results }}"
+      loop_control:
+        loop_var: certificate_file_snapshot
+      no_log: true
+
+    - name: Activate only the API serving pair with failure recovery
+      block:
+        - name: Remove only the API static manifest while retaining its exact recovery copy
+          ansible.builtin.file:
+            path: /etc/kubernetes/manifests/kube-apiserver.yaml
+            state: absent
+
+        - name: Wait for this API server to stop before replacing either file
+          ansible.builtin.wait_for:
+            host: "{{ ansible_host }}"
+            port: 6443
+            state: stopped
+            timeout: 120
+            sleep: 2
+
+        - name: Install the validated certificate and key while the API server is stopped
+          ansible.builtin.copy:
+            src: "{{ certificate_reissue_candidate_directory.path }}/{{ certificate_serving_file }}"
+            dest: "/etc/kubernetes/pki/{{ certificate_serving_file }}"
+            remote_src: true
+            mode: "{{ certificate_reissue_original_file_modes['/etc/kubernetes/pki/' + certificate_serving_file] }}"
+          loop: [apiserver.crt, apiserver.key]
+          loop_control:
+            loop_var: certificate_serving_file
+          no_log: true
+          diff: false
+
+        - name: Restore the exact API manifest to restart only this API server
+          ansible.builtin.copy:
+            src: "{{ certificate_reissue_backup_directory.path }}/kube-apiserver.yaml"
+            dest: /etc/kubernetes/manifests/kube-apiserver.yaml
+            remote_src: true
+            mode: "{{ certificate_reissue_original_file_modes['/etc/kubernetes/manifests/kube-apiserver.yaml'] }}"
+
+        - name: Wait for this API server to listen again
+          ansible.builtin.wait_for:
+            host: "{{ ansible_host }}"
+            port: 6443
+            state: started
+            timeout: 120
+            sleep: 2
+
+        - name: Verify this node's authenticated readiness before proceeding
+          ansible.builtin.command:
+            argv:
+              - kubectl
+              - --kubeconfig=/etc/kubernetes/admin.conf
+              - "--server=https://{{ ansible_host }}:6443"
+              - get
+              - --raw=/readyz
+          changed_when: false
+          register: certificate_reissue_ready
+          retries: 30
+          delay: 2
+          until: certificate_reissue_ready.rc == 0
+
+        - name: Verify actual serving TLS and unchanged etcd before the next node
+          ansible.builtin.include_tasks: verify-serving.yml
+          vars:
+            certificate_reissue_expected_information: "{{ certificate_reissue_candidate_information }}"
+
+      rescue:
+        - name: Retain the activation failure for the final explicit error
+          ansible.builtin.set_fact:
+            certificate_reissue_activation_failure: "{{ ansible_failed_result.msg | default(ansible_failed_result) }}"
+
+        - name: Restore the old pair with unconditional manifest recovery
+          block:
+            - name: Stop only the API server before restoring the original pair
+              ansible.builtin.file:
+                path: /etc/kubernetes/manifests/kube-apiserver.yaml
+                state: absent
+
+            - name: Wait for this API server to stop for rollback
+              ansible.builtin.wait_for:
+                host: "{{ ansible_host }}"
+                port: 6443
+                state: stopped
+                timeout: 120
+                sleep: 2
+
+            - name: Restore the original serving pair
+              ansible.builtin.copy:
+                src: "{{ certificate_reissue_backup_directory.path }}/{{ certificate_serving_file }}"
+                dest: "/etc/kubernetes/pki/{{ certificate_serving_file }}"
+                remote_src: true
+                mode: "{{ certificate_reissue_original_file_modes['/etc/kubernetes/pki/' + certificate_serving_file] }}"
+              loop: [apiserver.crt, apiserver.key]
+              loop_control:
+                loop_var: certificate_serving_file
+              no_log: true
+              diff: false
+
+          always:
+            - name: Restore the original API manifest even if rollback fails
+              ansible.builtin.copy:
+                src: "{{ certificate_reissue_backup_directory.path }}/kube-apiserver.yaml"
+                dest: /etc/kubernetes/manifests/kube-apiserver.yaml
+                remote_src: true
+                mode: "{{ certificate_reissue_original_file_modes['/etc/kubernetes/manifests/kube-apiserver.yaml'] }}"
+
+        - name: Verify original API readiness after rollback
+          ansible.builtin.command:
+            argv:
+              - kubectl
+              - --kubeconfig=/etc/kubernetes/admin.conf
+              - "--server=https://{{ ansible_host }}:6443"
+              - get
+              - --raw=/readyz
+          changed_when: false
+          register: certificate_reissue_rollback_ready
+          retries: 60
+          delay: 2
+          until: certificate_reissue_rollback_ready.rc == 0
+
+        - name: Verify original serving TLS and unchanged etcd after rollback
+          ansible.builtin.include_tasks: verify-serving.yml
+          vars:
+            certificate_reissue_expected_information: "{{ certificate_reissue_original_information }}"
+
+        - name: Abort the serial workflow after restoring the original API
+          ansible.builtin.fail:
+            msg: >-
+              Certificate activation failed on {{ inventory_hostname }}; original serving files restored.
+              Failure: {{ certificate_reissue_activation_failure }}
+
+  always:
+    - name: Require cleanup to remain inside the generated candidate namespace
+      ansible.builtin.assert:
+        that:
+          - certificate_reissue_candidate_directory.path | dirname == '/etc/kubernetes/pki'
+          - (certificate_reissue_candidate_directory.path | basename).startswith('.apiserver-candidate-')
+      when: certificate_reissue_candidate_directory.path is defined
+
+    - name: Remove candidate CA copies and staged private material
+      ansible.builtin.file:
+        path: "{{ certificate_reissue_candidate_directory.path }}"
+        state: absent
+      when: certificate_reissue_candidate_directory.path is defined
+
+- name: Verify the final local certificate SANs
+  ansible.builtin.slurp:
+    src: /etc/kubernetes/pki/apiserver.crt
+  register: certificate_reissue_final_certificate
+
+- name: Inspect final certificate with the maintained crypto module
+  community.crypto.x509_certificate_info:
+    content: "{{ certificate_reissue_final_certificate.content | b64decode }}"
+  delegate_to: localhost
+  become: false
+  register: certificate_reissue_final_information
+
+- name: Require final SAN preservation before the next node
+  ansible.builtin.assert:
+    that:
+      - certificate_reissue_original_information.subject_alt_name | difference(certificate_reissue_final_information.subject_alt_name) | length == 0
+      - >-
+        ansible_check_mode or api_server_cert_sans
+        | difference(certificate_reissue_final_information.subject_alt_name
+          | map('regex_replace', '^(DNS|IP):', '') | list) | length == 0
+
+- name: Verify actual serving state when certificates already satisfy the declaration
+  ansible.builtin.include_tasks: verify-serving.yml
+  vars:
+    certificate_reissue_expected_information: "{{ certificate_reissue_final_information }}"
+  when:
+    - not certificate_reissue_required
+    - not ansible_check_mode

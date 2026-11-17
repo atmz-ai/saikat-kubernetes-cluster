@@ -19,4 +19,18 @@ run = "./.venv/bin/ansible-playbook"
 
 [ansible-lint]
 description = "Lint Ansible playbooks, roles and manifests (ansible-lint on ansible/playbooks/operations/ + ansible/manifests/)"
-run = "./.venv/bin/ansible-lint ansible/playbooks/operations/ ansible/manifests/"
+run = '''
+#!/usr/bin/env bash
+if [ "$#" -gt 0 ]; then
+  exec ./.venv/bin/ansible-lint --project-dir . "$@"
+fi
+exec ./.venv/bin/ansible-lint --project-dir . ansible/playbooks/operations/ ansible/manifests/
+'''
+
+[ansible-collections-install]
+description = "Install the declared Ansible collections without changing infrastructure credentials"
+run = "./.venv/bin/ansible-galaxy collection install -r ansible/requirements.yml -p ansible/collections"
+
+[certificate-reissue-checks]
+description = "Test SAN preservation and real TLS certificate activation/rollback in local fixtures"
+run = "./.venv/bin/python -m unittest discover -s ansible/roles/certificate_reissue/tests -v"
