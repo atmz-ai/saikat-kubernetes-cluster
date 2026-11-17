@@ -77,18 +77,8 @@ metadata:
   namespace: external-dns
 spec:
   endpoints:
-    # API server endpoint names for this zone — the control planes on :6443.
-    #
-    # Only emitted for names the API server CERTIFICATE actually carries (see the
-    # pdns-zones role, which derives this list from `api_server_cert_sans` in
-    # ansible/inventory/00-hosts.yml). That coupling is deliberate: a record for a name the
-    # certificate lacks sends every client into a TLS failure, and a certificate for a
-    # name with no record is unreachable, so declaring them separately means one can be
-    # updated while the other is forgotten — and neither failure is loud.
-    #
-    # These target control plane IPs only, not the full node list. The apiserver listens
-    # on the control planes; a worker has nothing on :6443, so the wildcard's node set
-    # would include dead targets here.
+    # ! Publish only after serving certificates match the declared SANs.
+    # ! API records use control planes only; wildcard worker targets cannot serve :6443.
 {% for endpoint_name in pdns_zone_endpoint_names %}
     - dnsName: {{ endpoint_name }}
       recordTTL: 300

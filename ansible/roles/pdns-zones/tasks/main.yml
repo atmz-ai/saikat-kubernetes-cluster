@@ -177,15 +177,20 @@
     loop_var: zone
     label: "{{ zone.name }}"
 
-- name: Compute the content checksum that names the apex ConfigMap and Job
-  # ! The checksum belongs in the NAME, not an annotation. A Job's pod template is
-  # ! immutable and a ConfigMap change does not alter the Job's spec, so a fixed name
-  # ! would never re-run and a changed node set would be silently ignored — the trap
-  # ! pdns-static-records documents, solved here instead of by a manual delete.
-  # ! A changed checksum is a NEW Job object: Flux creates it (it runs) and prunes the
-  # ! previous one. No hand step, no --force on the Kustomization.
+- name: Read the authoritative deployment image for the apex apply Job
   ansible.builtin.set_fact:
-    pdns_apex_checksum: "{{ (((pdns_apex_record_lines | join(';')) ~ (pdns_zones | to_json)) | hash('sha256'))[:12] }}"
+    pdns_zones_authoritative_image: >-
+      {{ (lookup('file', pdns_zones_output_dir + '/pdns-deployment.yaml') | from_yaml)
+         .spec.template.spec.containers | selectattr('name', 'equalto', 'powerdns')
+         | map(attribute='image') | first }}
+
+- name: Compute the content checksum that names the apex ConfigMap and Job
+  # ! Records and image belong in the Job name checksum: pod templates are immutable,
+  # ! and changing only a ConfigMap never reruns a completed Job.
+  ansible.builtin.set_fact:
+    pdns_apex_checksum: >-
+      {{ (((pdns_apex_record_lines | join(';')) ~ (pdns_zones | to_json)
+           ~ pdns_zones_authoritative_image) | hash('sha256'))[:12] }}
 
 - name: Generate the apex records ConfigMap and its apply Job
   ansible.builtin.template:

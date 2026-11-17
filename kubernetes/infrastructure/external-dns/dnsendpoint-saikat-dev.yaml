@@ -78,3 +78,20 @@ spec:
         - 20.198.74.224
         - 20.219.32.205
         - 20.235.109.17
+---
+apiVersion: externaldns.k8s.io/v1alpha1
+kind: DNSEndpoint
+metadata:
+  name: saikat-dev-control-plane-endpoint
+  namespace: external-dns
+spec:
+  endpoints:
+    # ! Publish only after serving certificates match the declared SANs.
+    # ! API records use control planes only; wildcard worker targets cannot serve :6443.
+    - dnsName: kubernetes-api.saikat.dev
+      recordTTL: 300
+      recordType: A
+      targets:
+        - 20.198.74.224
+        - 20.219.32.205
+        - 20.235.109.17

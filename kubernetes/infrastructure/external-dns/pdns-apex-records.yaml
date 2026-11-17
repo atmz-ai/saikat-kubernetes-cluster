@@ -24,7 +24,7 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: pdns-apex-records-1f93924b4439
+  name: pdns-apex-records-71152355c877
   namespace: external-dns
   labels:
     app.kubernetes.io/name: pdns-apex-records
@@ -38,7 +38,7 @@ data:
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: pdns-apex-records-1f93924b4439
+  name: pdns-apex-records-71152355c877
   namespace: external-dns
   labels:
     app.kubernetes.io/name: pdns-apex-records
@@ -49,7 +49,7 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: apply
-          image: docker.io/powerdns/pdns-auth-52:latest@sha256:cd9b058c35b478c71039926b4a7e68efc30d3d87419234df4b45a4b6c148c8c6
+          image: "docker.io/powerdns/pdns-auth-52:latest@sha256:cd9b058c35b478c71039926b4a7e68efc30d3d87419234df4b45a4b6c148c8c6"
           command:
             - /bin/bash
             - -c
@@ -144,4 +144,4 @@ spec:
       volumes:
         - name: apex-records
           configMap:
-            name: pdns-apex-records-1f93924b4439
+            name: pdns-apex-records-71152355c877

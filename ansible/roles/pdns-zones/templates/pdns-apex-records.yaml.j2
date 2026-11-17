@@ -46,7 +46,7 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: apply
-          image: docker.io/powerdns/pdns-auth-52:latest
+          image: "{{ pdns_zones_authoritative_image }}"
           command:
             - /bin/bash
             - -c
