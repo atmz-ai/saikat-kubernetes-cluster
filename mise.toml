@@ -12,22 +12,18 @@ aws-cli = "latest"
 azure-cli = { version = "latest", python = "3.14" }
 cargo-binstall = "latest"
 "cargo:cargo-leptos" = "latest"
-"cargo:trunk" = "latest"
-eza = "latest"
 flux2 = "2.9.5"
 gh = "latest"
 # ! The vfox gcloud backend imports an unavailable Lua python module before installation.
 "asdf:mise-plugins/mise-gcloud" = { version = "latest", depends = ["python"] }
 helm = "latest"
 "github:wasm-bindgen/wasm-bindgen" = "0.2.130"
-jq = "latest"
 kubectl = "latest"
 node = "latest"
 pitchfork = "latest"
 # * Apple's container runtime is declared in the machine-wide dotfiles on macOS.
 python = "3.15.2"
 rg = "latest"
-ruff = "latest"
 "core:rust" = { version = "stable", targets = [
   "wasm32-unknown-unknown",
   "x86_64-unknown-linux-musl",
@@ -38,9 +34,7 @@ ruff = "latest"
   "rust-analyzer",
 ] }
 sops = "latest"
-sqlite = "latest"
 uv = "latest"
-yq = "latest"
 
 [bootstrap.repos]
 "~/.dotfiles" = { url = "git@github.com:saikatdas0790/.dotfiles.git" }
@@ -108,6 +102,3 @@ else
 fi
 '''
 ready_http = "http://localhost:8083/"
-
-[daemon_groups]
-dev = ["my-website"]

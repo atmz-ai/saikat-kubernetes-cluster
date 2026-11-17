@@ -599,6 +599,8 @@ For multiline or Base64 input, use `--stdin` instead of `--prompt`, keeping plai
 
 **Prefer existing mise tasks for recurring workflows.** Use the corresponding `mise run` task when its environment, secrets, dependency chain, or safety checks are needed. One-off tooling commands may run directly with the necessary prerequisites; do not create a task just to run them once.
 
+Use `my-website-build`, `my-website-run`, and `my-website-stop` for the maintained application; inspect daemon status with `mise daemons ls`. Do not duplicate these with generic `dev-*` tasks. Retain indirect tool dependencies: Binaryen supplies cargo-leptos's `wasm-opt`, and `uv` installs mise's PyPI tools, including Azure CLI. See [cargo-leptos dependencies](https://github.com/leptos-rs/cargo-leptos#dependencies) and [mise PyPI requirements](https://mise.jdx.dev/dev-tools/backends/pypi.html#requirements).
+
 **Long-running processes (dev servers, containers) are declared in `[daemons]` in the root `mise.toml` and managed by mise.** There is no `pitchfork.toml` — `mise daemons start|stop|restart|ls|status|logs|urls|tui` drives them (see the `[daemons]` section and the top-of-file note in `mise.toml`).
 
 **pitchfork is still a hard dependency** — `mise daemons` is a front-end that generates a pitchfork config and delegates process supervision and readiness checks to it. `pitchfork` stays pinned in `[tools]`, and must be resolvable in the project (`mise daemons stop` fails with "No version is set for shim: pitchfork" if it is not). Do not remove it.
