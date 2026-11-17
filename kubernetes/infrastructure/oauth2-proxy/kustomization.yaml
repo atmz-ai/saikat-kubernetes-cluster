@@ -4,6 +4,7 @@ resources:
   - namespace.yaml
   - secret.sops.yaml
   - deployment-harbor.yaml
+  - harbor-allowed-emails.yaml
   - service-harbor.yaml
   - deployment-grafana.yaml
   - grafana-allowed-emails.yaml

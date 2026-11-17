@@ -22,7 +22,7 @@ spec:
         name: harbor
         namespace: harbor
   values:
-    externalURL: https://harbor.yral.com
+    externalURL: https://harbor.saikat.dev
     
     # Expose core service internally for oauth2-proxy backend
     expose:
@@ -30,8 +30,6 @@ spec:
       tls:
         enabled: false
         certSource: none
-        auto:
-          commonName: harbor.yral.com
       core:
         servicePort: 80
     

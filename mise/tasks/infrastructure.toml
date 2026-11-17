@@ -86,7 +86,7 @@ for filename in ("kubernetes/infrastructure/cilium/helmrelease.yaml", "ansible/m
         else:
             assert scenario == "complete", "invalid Hubble configuration accepted"
             print("PASS: Hubble UI retired while relay and metrics remain enabled", filename)
-for application in ("grafana", "headlamp", "dashboard"):
+for application in ("grafana", "headlamp", "dashboard", "harbor"):
     deployment = yaml.safe_load(Path("kubernetes/infrastructure/oauth2-proxy/deployment-" + application + ".yaml").read_text())
     allowlist = yaml.safe_load(Path("kubernetes/infrastructure/oauth2-proxy/" + application + "-allowed-emails.yaml").read_text())
     for scenario in ("complete", "legacy-google-group", "domain-bypasses-allowlist", "missing-email-file", "additional-user"):
