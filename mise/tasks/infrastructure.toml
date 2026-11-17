@@ -231,7 +231,7 @@ for scenario in ("complete", "missing-new-host", "direct-frontend", "retired-cal
 rustfs_release = next(resource for resource in yaml.safe_load_all(Path("kubernetes/infrastructure/rustfs/helmrelease.yaml").read_text()) if resource["kind"] == "HelmRelease")
 rustfs_routes = list(yaml.safe_load_all(Path("kubernetes/infrastructure/rustfs/route.yaml").read_text()))
 rustfs_authorization = list(yaml.safe_load_all(Path("kubernetes/infrastructure/rustfs/google-authorization.yaml").read_text()))
-for scenario in ("complete", "callback-origin-mismatch", "dynamic-callback", "load-balanced-oauth-state", "another-email", "s3-origin-changed", "retired-console-origin", "retired-console-listener"):
+for scenario in ("complete", "callback-origin-mismatch", "dynamic-callback", "load-balanced-oauth-state", "another-email", "retired-console-origin", "retired-console-listener"):
     values_candidate = copy.deepcopy(rustfs_release["spec"]["values"])
     routes_candidate = copy.deepcopy(rustfs_routes)
     authorization_candidate = copy.deepcopy(rustfs_authorization)
@@ -247,8 +247,6 @@ for scenario in ("complete", "callback-origin-mismatch", "dynamic-callback", "lo
         console_service["spec"]["selector"] = {"app.kubernetes.io/name": "rustfs"}
     elif scenario == "another-email":
         policy["Statement"][-1]["Condition"]["StringEquals"]["jwt:email"] = "another@atmz.ai"
-    elif scenario == "s3-origin-changed":
-        s3_route["spec"]["hostnames"] = ["s3.saikat.dev"]
     elif scenario == "retired-console-origin":
         next(route for route in routes_candidate if route["metadata"]["name"] == "rustfs-console")["spec"]["hostnames"] = ["rust-fs.saikat.oleole.ai"]
     elif scenario == "retired-console-listener":
@@ -270,14 +268,38 @@ for scenario in ("complete", "callback-origin-mismatch", "dynamic-callback", "lo
         console_route = next(route for route in routes_candidate if route["metadata"]["name"] == "rustfs-console")
         assert {parent["sectionName"] for parent in console_route["spec"]["parentRefs"]} == {"https-saikat-dev"}
         assert console_route["spec"]["rules"][0]["backendRefs"] == [{"name": "rustfs-console", "port": 9001}]
-        assert s3_route["spec"]["hostnames"] == ["s3.saikat.oleole.ai"], "Console migration must not change the S3 endpoint"
         assert s3_route["spec"]["rules"][0]["backendRefs"] == [{"name": "rustfs-svc", "port": 9000}]
     except AssertionError:
         assert scenario != "complete", "RustFS Console cutover breaks native authentication or S3 isolation"
         print("PASS: rejected RustFS Console cutover regression", scenario)
     else:
         assert scenario == "complete", "unsafe RustFS Console cutover accepted: " + scenario
-        print("PASS: RustFS Console origin, native email policy, and unchanged S3 endpoint")
+        print("PASS: RustFS Console origin, native email policy, and independent S3 backend")
+s3_route = next(route for route in rustfs_routes if route["metadata"]["name"] == "rustfs-s3")
+for scenario in ("complete", "missing-new-origin", "browser-auth-proxy", "host-rewrite", "path-rewrite", "host-redirect", "missing-tls-parent"):
+    candidate = copy.deepcopy(s3_route)
+    if scenario == "missing-new-origin":
+        candidate["spec"]["hostnames"].remove("s3.saikat.dev")
+    elif scenario == "browser-auth-proxy":
+        candidate["spec"]["rules"][0]["backendRefs"] = [{"name": "oauth2-proxy-dashboard", "namespace": "oauth2-proxy", "port": 4180}]
+    elif scenario == "host-rewrite":
+        candidate["spec"]["rules"][0]["filters"] = [{"type": "RequestHeaderModifier", "requestHeaderModifier": {"set": [{"name": "Host", "value": "rustfs-svc"}]}}]
+    elif scenario == "path-rewrite":
+        candidate["spec"]["rules"][0]["filters"] = [{"type": "URLRewrite", "urlRewrite": {"path": {"type": "ReplacePrefixMatch", "replacePrefixMatch": "/rustfs/console"}}}]
+    elif scenario == "host-redirect":
+        candidate["spec"]["rules"][0]["filters"] = [{"type": "RequestRedirect", "requestRedirect": {"hostname": "s3.saikat.dev", "statusCode": 301}}]
+    elif scenario == "missing-tls-parent":
+        candidate["spec"]["parentRefs"] = [{"name": "web-gateway", "namespace": "kube-system", "sectionName": "http"}]
+    try:
+        assert "s3.saikat.dev" in candidate["spec"]["hostnames"]
+        assert "https-saikat-dev" in {parent["sectionName"] for parent in candidate["spec"]["parentRefs"]}
+        assert candidate["spec"]["rules"] == [{"matches": [{"path": {"type": "PathPrefix", "value": "/"}}], "backendRefs": [{"name": "rustfs-svc", "port": 9000}]}], "S3 signatures require unchanged Host/path and a direct native backend"
+    except AssertionError:
+        assert scenario != "complete", "S3 origin migration breaks native signed requests"
+        print("PASS: rejected S3 routing/signature regression", scenario)
+    else:
+        assert scenario == "complete", "unsafe S3 route accepted: " + scenario
+        print("PASS: migrated S3 TLS origin preserves native request signing")
 dashboard_addresses = re.findall(r'href="(https://[^"]+)"', Path("kubernetes/apps/dashboard/index.html").read_text())
 for scenario, addresses in (("migrated-longhorn-link", dashboard_addresses), ("original-broken-longhorn-link", ["https://longhorn.saikat.oleole.ai" if address == "https://longhorn-ui.saikat.dev" else address for address in dashboard_addresses])):
     try:
@@ -657,6 +679,9 @@ for owner in ("rustfs", "longhorn", "longhorn-backup", "cloudnative-pg", "harbor
 entrypoint = yaml.safe_load(Path("kubernetes/clusters/saikat-kubernetes-cluster/kustomization.yaml").read_text())
 assert "infrastructure-velero.yaml" not in entrypoint["resources"]
 print("PASS: Velero is absent from the reconciliation entrypoint")
+loki_release = yaml.safe_load(Path("kubernetes/infrastructure/loki/helmrelease.yaml").read_text())
+assert loki_release["spec"]["values"]["loki"]["storage"]["s3"]["endpoint"] == "http://rustfs-svc.rustfs.svc.cluster.local:9000"
+print("PASS: Loki retains internal RustFS Service DNS during public S3 migration")
 
 for owner in ("longhorn-backup",):
     declaration = yaml.safe_load(Path("kubernetes/infrastructure", owner, "kustomization.yaml").read_text())
@@ -664,6 +689,7 @@ for owner in ("longhorn-backup",):
     secret_name = "longhorn-rustfs-credentials"
     secret = next(resource for resource in rendered[owner] if resource["kind"] == "Secret" and resource["metadata"]["name"] == secret_name)
     assert {"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"} <= set(secret["stringData"])
+    assert secret["stringData"]["AWS_ENDPOINTS"] == "http://rustfs-svc.rustfs.svc.cluster.local:9000"
     print("PASS:", owner, "decrypts shared credentials before authenticated key renaming")
 
 jobs = [resource for resource in rendered["longhorn-backup"] if resource["kind"] == "RecurringJob"]
@@ -727,6 +753,7 @@ with tempfile.TemporaryDirectory(prefix="backup-chart-checks-") as directory:
                 for owner, application_role in (("harbor", "harbor"), ("external-dns", "pdns")):
                     cluster = next(resource for resource in rendered[owner] if resource["kind"] == "Cluster")
                     store = next(resource for resource in rendered[owner] if resource["kind"] == "ObjectStore")
+                    assert store["spec"]["configuration"]["endpointURL"] == "http://rustfs-svc.rustfs.svc.cluster.local:9000", "WAL and base backups must retain internal Service DNS"
                     scheduled = next(resource for resource in rendered[owner] if resource["kind"] == "ScheduledBackup")
                     jsonschema.validate(store, schema)
                     assert cluster["spec"]["plugins"][0]["isWALArchiver"] is True

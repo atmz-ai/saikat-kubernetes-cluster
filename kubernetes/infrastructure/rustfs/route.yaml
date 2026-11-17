@@ -8,7 +8,10 @@ spec:
     - name: web-gateway
       namespace: kube-system
       sectionName: https-rustfs
-  hostnames: [s3.saikat.oleole.ai]
+    - name: web-gateway
+      namespace: kube-system
+      sectionName: https-saikat-dev
+  hostnames: [s3.saikat.dev, s3.saikat.oleole.ai]
   rules:
     - matches:
         - path:
