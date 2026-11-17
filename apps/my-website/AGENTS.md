@@ -6,6 +6,7 @@ SvelteKit 3 / Svelte 5, strict TypeScript, Tailwind CSS 4 and XState 5. Root too
 
 From this directory: `npm ci`, `npm run check`, `npm test`, `npm run build`.
 `npm test` runs pure Vitest tests once, without services or browser binaries.
+From the repository root, `mise run my-website-browser-test` builds first and then runs the isolated browser suite. `mise run my-website-validate` includes the same browser assertions against `https://saikat.dev`, alongside production health validation.
 `npm run test:browser` runs Playwright separately after building; its webServer starts and stops `node build` on loopback port 4179. It uses installed Chrome (`channel: 'chrome'`).
 To test an existing production daemon without starting or stopping a server, run `PLAYWRIGHT_BASE_URL=http://localhost:8081 npm run test:browser`. An explicit base URL disables Playwright's `webServer` entirely.
 
@@ -17,6 +18,7 @@ Production runs `node build` with production dependencies. Set `HOST`, `PORT` an
 
 - Feature folders under `src/lib/` colocate screens, components, machines, pure logic and unit tests. SvelteKit route files only load data and compose screens.
 - `useMachine` from the official `@xstate/svelte` integration creates an actor for each component lifetime. Never export a running actor or share mutable SSR state. UI sends typed events; filtering is pure and derived, never another mutable list.
+- Interactive feature machines begin in `initializing`; their component's `onMount` sends `component.mounted` to enter `ready`. Render controls disabled until the actor matches `ready`, so SSR cannot accept actions before hydration installs handlers. Tests wait for enabled controls before interaction or taking the browser offline; delayed-script tests verify the actual readiness boundary without sleeps or retries.
 - `content/blog/` and `content/projects/` are preserved Markdown with YAML frontmatter. Server-only Vite raw imports bundle the complete content into the server; production needs no separate content directory. Markdown supports raw trusted repository HTML, tables, autolinks, strikethrough, tasks, footnotes and Prism syntax highlighting. Never process untrusted Markdown through this renderer.
 - `public/` remains the authoritative source of static assets, configured through `files.assets`. Keep existing URLs and files unchanged.
 - Blog dates sort descending by `date`; projects by `startDate`. Dates render in UTC to preserve historical date labels across build/server/browser timezones. Search is literal case-insensitive substring matching of title, description or individual tags, without trimming or regex interpretation.
@@ -33,6 +35,7 @@ Presentation components use same-file typed fixture fallback props, so rendering
 - [Node adapter](https://svelte.dev/docs/kit/adapter-node): `sveltekit({ adapter: adapter() })`, then `node build`.
 - [Page options](https://svelte.dev/docs/kit/page-options): explicit `entries` and `prerender = 'auto'` retain SSR fallback.
 - [Svelte props and fixture defaults](https://svelte.dev/docs/svelte/$props).
+- [Svelte mount lifecycle](https://svelte.dev/docs/svelte/lifecycle-hooks#onMount), [Playwright hydration guidance](https://playwright.dev/docs/navigations#hydration).
 - [Official XState Svelte integration](https://stately.ai/docs/xstate-svelte), [machines and pure transitions](https://stately.ai/docs/machines).
 - [Markdown-it](https://markdown-it.github.io/markdown-it/), [Vitest](https://vitest.dev/guide/), [Playwright webServer](https://playwright.dev/docs/test-webserver).
 - [npm install-script approvals](https://docs.npmjs.com/cli/v11/commands/npm-install-scripts), [selector parser release contracts](https://github.com/postcss/postcss-selector-parser/blob/master/CHANGELOG.md).

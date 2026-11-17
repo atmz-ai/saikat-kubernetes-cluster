@@ -33,6 +33,12 @@ depends = ["my-website-install"]
 dir = "apps/my-website"
 run = "npm test"
 
+[my-website-browser-test]
+description = "Run website browser regressions against a fresh production server"
+depends = ["my-website-build"]
+dir = "apps/my-website"
+run = "npm run test:browser"
+
 [my-website-image]
 description = "Build the my-website container image locally (container on macOS, podman on Linux)"
 depends = ["container-system-start"]
@@ -55,7 +61,9 @@ run = "mise daemons stop my-website my-website-container"
 
 [my-website-validate]
 description = "Validate my-website on prod (read-only kubectl checks)"
+depends = ["my-website-install"]
 run = '''
+set -euo pipefail
 echo "=== Pods ==="
 kubectl -n my-website get pods -l app=my-website -o wide
 echo ""
@@ -66,4 +74,5 @@ echo "=== Logs from the first pod ==="
 FIRST_POD=$(kubectl -n my-website get pods -l app=my-website -o jsonpath='{.items[0].metadata.name}')
 kubectl -n my-website logs "$FIRST_POD"
 curl --fail --show-error --location https://saikat.dev/
+PLAYWRIGHT_BASE_URL=https://saikat.dev npm --prefix apps/my-website run test:browser
 '''

@@ -32,22 +32,39 @@ describe('case-insensitive substring search', () => {
 });
 
 describe('search lifecycle', () => {
+  test('SSR initializes without accepting input until mounted', () => {
+    const [initial] = initialTransition(searchMachine);
+    expect(initial.matches('initializing')).toBe(true);
+    expect(initial.matches('ready')).toBe(false);
+    const [unchanged] = transition(searchMachine, initial, { type: 'query.changed', query: 'REACT' });
+    expect(unchanged.matches('initializing')).toBe(true);
+    expect(unchanged.context.query).toBe('');
+    const [ready] = transition(searchMachine, unchanged, { type: 'component.mounted' });
+    expect(ready.matches({ ready: 'empty' })).toBe(true);
+    const [searching] = transition(searchMachine, ready, { type: 'query.changed', query: 'REACT' });
+    const [stillSearching] = transition(searchMachine, searching, { type: 'component.mounted' });
+    expect(stillSearching.matches({ ready: 'searching' })).toBe(true);
+    expect(stillSearching.context.query).toBe('REACT');
+  });
   test('query events enter searching, replace query and clear to empty', () => {
     const [initial] = initialTransition(searchMachine);
-    expect(initial.matches('empty')).toBe(true);
-    const [searching] = transition(searchMachine, initial, { type: 'query.changed', query: 'REACT' });
-    expect(searching.matches('searching')).toBe(true);
+    const [ready] = transition(searchMachine, initial, { type: 'component.mounted' });
+    expect(ready.matches({ ready: 'empty' })).toBe(true);
+    const [searching] = transition(searchMachine, ready, { type: 'query.changed', query: 'REACT' });
+    expect(searching.matches({ ready: 'searching' })).toBe(true);
     expect(filterBlogPosts(posts, searching.context.query)).toEqual([posts[0]]);
     const [changed] = transition(searchMachine, searching, { type: 'query.changed', query: 'HTOP' });
     expect(changed.context.query).toBe('HTOP');
     const [cleared] = transition(searchMachine, changed, { type: 'query.changed', query: '' });
-    expect(cleared.matches('empty')).toBe(true);
+    expect(cleared.matches({ ready: 'empty' })).toBe(true);
     expect(cleared.context.query).toBe('');
     expect(initial.context.query).toBe('');
   });
   test('component actors do not share SSR search state', () => {
     const first = createActor(searchMachine).start();
     const second = createActor(searchMachine).start();
+    first.send({ type: 'component.mounted' });
+    second.send({ type: 'component.mounted' });
     first.send({ type: 'query.changed', query: 'REACT' });
     expect(second.getSnapshot().context.query).toBe('');
     first.stop();

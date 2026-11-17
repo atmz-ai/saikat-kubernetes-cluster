@@ -5,15 +5,15 @@
   import { navigationMachine } from './NavigationMachine.js';
   let { previewViewport }: { previewViewport?: 'narrow' | 'wide' } = $props();
   const { snapshot, send } = useMachine(navigationMachine);
-  const open = $derived($snapshot.matches({ narrow: 'open' }) || $snapshot.matches({ wide: 'open' }));
+  const open = $derived($snapshot.matches({ ready: { narrow: 'open' } }) || $snapshot.matches({ ready: { wide: 'open' } }));
   afterNavigate(() => send({ type: 'navigation.completed' }));
   onMount(() => {
     if (previewViewport) {
-      send({ type: 'viewport.changed', wide: previewViewport === 'wide' });
+      send({ type: 'component.mounted', wide: previewViewport === 'wide' });
       return;
     }
     const viewport = window.matchMedia('(min-width: 1536px)');
-    send({ type: 'viewport.changed', wide: viewport.matches });
+    send({ type: 'component.mounted', wide: viewport.matches });
     const changed = (event: MediaQueryListEvent) => send({ type: 'viewport.changed', wide: event.matches });
     viewport.addEventListener('change', changed);
     return () => viewport.removeEventListener('change', changed);
@@ -21,7 +21,7 @@
 </script>
 
 <svelte:window onkeydown={(event) => { if (event.key === 'Escape') send({ type: 'menu.escape' }); }} />
-<button type="button" aria-label="Toggle navigation menu" aria-expanded={open} aria-controls="site-navigation" onclick={() => send({ type: 'menu.toggle' })} class="w-12 h-12 fixed bottom-8 right-8 bg-gradient-to-tr from-emerald-500 via-blue-500 to-fuchsia-500 rounded-lg focus:outline-none focus:ring focus:ring-emerald-300 shadow-lg z-10">
+<button type="button" aria-label="Toggle navigation menu" disabled={!$snapshot.matches('ready')} aria-expanded={open} aria-controls="site-navigation" onclick={() => send({ type: 'menu.toggle' })} class="w-12 h-12 fixed bottom-8 right-8 bg-gradient-to-tr from-emerald-500 via-blue-500 to-fuchsia-500 rounded-lg focus:outline-none focus:ring focus:ring-emerald-300 shadow-lg z-10">
   <span class:open class="hamburger"><span></span><span></span><span></span></span>
 </button>
 <aside id="site-navigation" hidden={!open} class="fixed bottom-8 right-8 w-64 h-96 shadow rounded-lg bg-gray-50 z-[9]">
