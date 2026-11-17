@@ -12,6 +12,7 @@ resources:
   - harbor-admin-secret.sops.yaml
   - oidc-values.sops.yaml
   - operator-administrator.yaml
+  - registry-cleanup.yaml
   # The `harbor` application role and its password. This is the only credential Harbor
   # uses, and the DatabaseRole owns it, so it cannot drift the way the superuser's did.
   - harbor-role-secret.sops.yaml

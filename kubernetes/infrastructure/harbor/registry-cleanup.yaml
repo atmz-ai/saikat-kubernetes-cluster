@@ -1,0 +1,252 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: harbor-registry-cleanup
+  namespace: harbor
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: harbor-registry-cleanup
+rules:
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [list]
+  - apiGroups: [apps]
+    resources: [deployments, statefulsets, daemonsets, replicasets]
+    verbs: [list]
+  - apiGroups: [batch]
+    resources: [jobs, cronjobs]
+    verbs: [list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: harbor-registry-cleanup
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: harbor-registry-cleanup
+subjects:
+  - kind: ServiceAccount
+    name: harbor-registry-cleanup
+    namespace: harbor
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: harbor-registry-cleanup-v1
+  namespace: harbor
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 3600
+  template:
+    spec:
+      serviceAccountName: harbor-registry-cleanup
+      restartPolicy: Never
+      containers:
+        - name: clean-approved-registry-content
+          image: docker.io/library/python:3.15.2-slim
+          command: [python, -u, -c]
+          args:
+            - |
+              import base64
+              import json
+              import os
+              import ssl
+              import time
+              import urllib.error
+              import urllib.parse
+              import urllib.request
+              from pathlib import Path
+
+              def build_cleanup_plan(inventory, protected_images, approval):
+                  protected_repositories = set()
+                  protected_references = set()
+                  for image in protected_images:
+                      for hostname in ("harbor.saikat.dev/", "harbor.yral.com/"):
+                          if hostname not in image:
+                              continue
+                          image_path = image.split(hostname, 1)[1]
+                          if "@" in image_path:
+                              repository, reference = image_path.split("@", 1)
+                          elif ":" in image_path.rsplit("/", 1)[-1]:
+                              repository, reference = image_path.rsplit(":", 1)
+                          else:
+                              repository, reference = image_path, ""
+                          protected_repositories.add(repository)
+                          protected_references.add((repository, reference))
+                  repositories = {repository["name"]: repository for project in inventory for repository in project["repositories"]}
+                  retired_projects = set(approval["retired_projects"])
+                  retired_repositories = set(approval["retired_repositories"])
+                  retired_repositories.update(name for name in repositories if name.split("/", 1)[0] in retired_projects)
+                  for repository in protected_repositories:
+                      if repository in retired_repositories or repository.split("/", 1)[0] in retired_projects:
+                          raise ValueError("Retired content has a declared or live consumer: " + repository)
+                  deletions = [{"kind": "repository", "name": name} for name in sorted(retired_repositories) if name in repositories]
+                  retained = set()
+                  for repository_name in {candidate["repository"] for candidate in approval["artifacts"]}:
+                      if repository_name not in repositories:
+                          raise ValueError("Maintained repository is missing: " + repository_name)
+                      artifacts = repositories[repository_name]["artifacts"]
+                      protected_digests = {artifact["digest"] for artifact in sorted(artifacts, key=lambda artifact: artifact["push_time"], reverse=True)[:approval["keep_newest"]]}
+                      for artifact in artifacts:
+                          references = [artifact["digest"], *artifact["tags"]]
+                          if any((repository_name, reference) in protected_references for reference in references):
+                              protected_digests.add(artifact["digest"])
+                      pending = list(protected_digests)
+                      artifacts_by_digest = {artifact["digest"]: artifact for artifact in artifacts}
+                      while pending:
+                          digest = pending.pop()
+                          for reference in artifacts_by_digest.get(digest, {}).get("references", []):
+                              child_digest = reference["child_digest"]
+                              if child_digest not in protected_digests:
+                                  protected_digests.add(child_digest)
+                                  pending.append(child_digest)
+                      retained.update((repository_name, digest) for digest in protected_digests)
+                      for candidate in approval["artifacts"]:
+                          if candidate["repository"] != repository_name or candidate["digest"] not in artifacts_by_digest:
+                              continue
+                          artifact = artifacts_by_digest[candidate["digest"]]
+                          if artifact["digest"] in protected_digests:
+                              raise ValueError("Approved artifact became protected: " + artifact["digest"])
+                          if sorted(artifact["tags"]) != sorted(candidate["tags"]) or artifact["push_time"] != candidate["push_time"]:
+                              raise ValueError("Approved artifact changed after review: " + artifact["digest"])
+                          deletions.append({"kind": "artifact", "name": repository_name, "digest": artifact["digest"]})
+                  deletions.extend({"kind": "project", "name": project["name"]} for project in inventory if project["name"] in retired_projects)
+                  return deletions, retained
+
+              def read_protected_images():
+                  token_directory = Path("/var/run/secrets/kubernetes.io/serviceaccount")
+                  context = ssl.create_default_context(cafile=str(token_directory / "ca.crt"))
+                  headers = {"Authorization": "Bearer " + (token_directory / "token").read_text().strip()}
+                  images = set(approval["git_images"])
+                  resources = ["/api/v1/pods", *["/apis/apps/v1/" + name for name in ("deployments", "statefulsets", "daemonsets", "replicasets")], *["/apis/batch/v1/" + name for name in ("jobs", "cronjobs")]]
+                  for resource in resources:
+                      request = urllib.request.Request("https://kubernetes.default.svc" + resource, headers=headers)
+                      with urllib.request.urlopen(request, context=context, timeout=30) as response:
+                          pending = [json.load(response)]
+                      while pending:
+                          value = pending.pop()
+                          if isinstance(value, dict):
+                              for key, item in value.items():
+                                  if key in ("image", "imageID") and isinstance(item, str):
+                                      images.add(item)
+                                  else:
+                                      pending.append(item)
+                          elif isinstance(value, list):
+                              pending.extend(value)
+                      print("Read live image references:", resource)
+                  return images
+
+              def list_harbor(path):
+                  entries = []
+                  page = 1
+                  while True:
+                      query = urllib.parse.urlencode({"page": page, "page_size": 100})
+                      request = urllib.request.Request(endpoint + path + ("&" if "?" in path else "?") + query, headers=headers)
+                      with urllib.request.urlopen(request, timeout=30) as response:
+                          batch = json.load(response)
+                      if not isinstance(batch, list):
+                          raise ValueError("Harbor list response is not an array: " + path)
+                      entries.extend(batch)
+                      if len(batch) < 100:
+                          print("Read Harbor inventory:", path, "entries:", len(entries))
+                          return entries
+                      page += 1
+
+              def read_inventory():
+                  inventory = []
+                  for project in list_harbor("/projects"):
+                      project_path = "/projects/" + urllib.parse.quote(project["name"], safe="")
+                      repositories = []
+                      for repository in list_harbor(project_path + "/repositories"):
+                          repository_name = repository["name"].split("/", 1)[1]
+                          repository_path = project_path + "/repositories/" + urllib.parse.quote(urllib.parse.quote(repository_name, safe=""), safe="")
+                          artifacts = list_harbor(repository_path + "/artifacts?with_tag=true")
+                          repositories.append({"name": repository["name"], "artifacts": [{"digest": artifact["digest"], "push_time": artifact["push_time"], "tags": [tag["name"] for tag in artifact.get("tags") or []], "references": artifact.get("references") or []} for artifact in artifacts]})
+                      inventory.append({"name": project["name"], "repositories": repositories})
+                  return inventory
+
+              approval = json.loads(os.environ["HARBOR_CLEANUP_APPROVAL"])
+              endpoint = "http://harbor-core.harbor.svc.cluster.local/api/v2.0"
+              authorization = base64.b64encode(("admin:" + os.environ["HARBOR_ADMIN_PASSWORD"]).encode()).decode()
+              headers = {"Authorization": "Basic " + authorization, "Content-Type": "application/json"}
+              try:
+                  inventory = read_inventory()
+                  deletions, retained = build_cleanup_plan(inventory, read_protected_images(), approval)
+                  for repository, digest in sorted(retained):
+                      print("Protecting maintained artifact:", repository, digest)
+                  for deletion in deletions:
+                      current_inventory = read_inventory()
+                      current_deletions, _ = build_cleanup_plan(current_inventory, read_protected_images(), approval)
+                      if deletion not in current_deletions:
+                          raise RuntimeError("Reviewed deletion is no longer eligible: " + json.dumps(deletion))
+                      if deletion["kind"] == "project":
+                          path = "/projects/" + urllib.parse.quote(deletion["name"], safe="")
+                      else:
+                          project_name, repository_name = deletion["name"].split("/", 1)
+                          path = "/projects/" + urllib.parse.quote(project_name, safe="") + "/repositories/" + urllib.parse.quote(urllib.parse.quote(repository_name, safe=""), safe="")
+                          if deletion["kind"] == "artifact":
+                              path += "/artifacts/" + urllib.parse.quote(deletion["digest"], safe="")
+                      print("Deleting reviewed Harbor content:", json.dumps(deletion))
+                      request = urllib.request.Request(endpoint + path, headers=headers, method="DELETE")
+                      with urllib.request.urlopen(request, timeout=30) as response:
+                          print("Harbor deletion returned HTTP", response.status, path)
+                  verified_inventory = read_inventory()
+                  remaining_deletions, _ = build_cleanup_plan(verified_inventory, read_protected_images(), approval)
+                  remaining_artifacts = {(repository["name"], artifact["digest"]) for project in verified_inventory for repository in project["repositories"] for artifact in repository["artifacts"]}
+                  if remaining_deletions or not retained.issubset(remaining_artifacts):
+                      raise RuntimeError("Harbor cleanup verification failed")
+                  project_names = {project["name"] for project in verified_inventory}
+                  if "library" not in project_names:
+                      raise RuntimeError("The retained library project is missing")
+                  print("Verified every reviewed deletion and protected artifact")
+                  request = urllib.request.Request(endpoint + "/system/gc/schedule", headers=headers, method="POST", data=json.dumps({"schedule": {"type": "Manual"}, "parameters": {"delete_untagged": False, "delete_tag": False}}).encode())
+                  with urllib.request.urlopen(request, timeout=30) as response:
+                      garbage_collection_path = response.headers["Location"]
+                      if response.status != 201 or not garbage_collection_path or not garbage_collection_path.startswith("/api/v2.0/system/gc/"):
+                          raise RuntimeError("Harbor did not return the native garbage-collection execution location")
+                  print("Started native garbage collection without additional artifact deletion:", garbage_collection_path)
+                  deadline = time.monotonic() + 3000
+                  while time.monotonic() < deadline:
+                      request = urllib.request.Request(endpoint.removesuffix("/api/v2.0") + garbage_collection_path, headers=headers)
+                      with urllib.request.urlopen(request, timeout=30) as response:
+                          execution = json.load(response)
+                      status = execution["job_status"]
+                      print("Harbor garbage collection:", execution["id"], status)
+                      if status == "Success":
+                          request = urllib.request.Request(endpoint.removesuffix("/api/v2.0") + garbage_collection_path + "/log", headers=headers)
+                          with urllib.request.urlopen(request, timeout=30) as response:
+                              print(response.read().decode())
+                          break
+                      if status not in ("Pending", "Scheduled", "Running"):
+                          raise RuntimeError("Harbor garbage collection did not succeed: " + str(execution["id"]) + " " + status)
+                      time.sleep(5)
+                  else:
+                      raise TimeoutError("Harbor garbage collection did not finish within 50 minutes")
+              except urllib.error.HTTPError as error:
+                  raise RuntimeError("API HTTP " + str(error.code) + ": " + error.read(1048576).decode(errors="replace")) from error
+          env:
+            - name: HARBOR_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: harbor-secrets
+                  key: admin-password
+            - name: HARBOR_CLEANUP_APPROVAL
+              value: |
+                {
+                  "retired_projects": ["off-chain-agent", "yral-auth", "yral-legacy", "yral-metadata", "yral-web"],
+                  "retired_repositories": ["library/goose", "library/goose-browser"],
+                  "keep_newest": 5,
+                  "git_images": ["harbor.saikat.dev/my-website/my-website:20261117062818-34b46254"],
+                  "artifacts": [
+                    {"repository": "my-website/my-website", "digest": "sha256:d48f49d3b7d7157ebef2961235b279c647728b5d71f174b7d19eba03051a5ce9", "tags": [], "push_time": "2026-11-16T09:33:21.732Z"},
+                    {"repository": "my-website/my-website", "digest": "sha256:f9c9cd45dcf8fe22b0278d5e91e15181d751326310974cf5f7ae7086e1439301", "tags": ["20260825221211-721424b7"], "push_time": "2026-08-25T18:16:36.156Z"},
+                    {"repository": "my-website/my-website", "digest": "sha256:6c53b7149953234e25fa59fc9e689b880bc77fd56fcdd98e233060b44ccae10d", "tags": ["20260825214847-c40c5f46"], "push_time": "2026-08-25T17:53:29.930Z"},
+                    {"repository": "my-website/my-website", "digest": "sha256:9e1d648b9e06a0d33aee108305244099fc68df81a876b691497a1c65419e0dbf", "tags": ["20260821205839-a3f6d283"], "push_time": "2026-08-21T17:02:20.279Z"},
+                    {"repository": "my-website/my-website", "digest": "sha256:a709358838efe80e2e261e8b45703444a0812d3c6f234391a7533548243e2328", "tags": ["20260821203913-26b537cb"], "push_time": "2026-08-21T16:43:34.548Z"},
+                    {"repository": "my-website/my-website", "digest": "sha256:437be18caab3731294424ba31b9c8e9f29a1302d07167d15b7f2ea020ea23eb8", "tags": ["20260817141108-6fcff30c"], "push_time": "2026-08-17T10:12:11.182Z"},
+                    {"repository": "my-website/my-website", "digest": "sha256:1c917b5e649a594d46737169d7b3f46f0163099527b2be80ba8433ff13d85746", "tags": ["20260813140330-a587c64a"], "push_time": "2026-08-13T10:04:32.227Z"}
+                  ]
+                }

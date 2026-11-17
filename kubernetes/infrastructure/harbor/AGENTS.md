@@ -50,3 +50,16 @@ mise exec -- kubectl logs -n harbor deployment/harbor-core
 ```
 
 For authentication failures, distinguish browser OAuth, registry credentials, and database role/password ownership before changing configuration. Removing an application's deployment does not automatically retire its stored registry images or external data; retention and deletion require a separate authorized decision.
+
+Use an explicitly scoped GitOps Job for approved registry cleanup. Recheck all
+declared and live image references, including ReplicaSet rollback images, before
+each native API deletion. Retention must protect referenced OCI child manifests
+as well as the newest versions. Freeze reviewed artifact digests, tags and push
+timestamps; new references or retagging must stop the cleanup, not widen it.
+
+Native [garbage collection](https://goharbor.io/docs/2.15.0/administration/garbage-collection/)
+reclaims unreferenced blobs after logical deletion. Disable both untagged and
+tagged artifact deletion when collecting blobs for a scoped cleanup, verify the
+native execution status and log, and account for its two-hour upload protection
+window. Remove the completed cleanup Job and its read-only RBAC from Git after
+verification; do not leave a recurring destructive declaration behind.
