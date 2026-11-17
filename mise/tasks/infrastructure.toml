@@ -17,6 +17,7 @@ with urllib.request.urlopen(url, timeout=30) as response:
 subprocess.run([
     ".venv/bin/datamodel-codegen", "--input", str(directory / "openapi.yaml"),
     "--input-file-type", "openapi", "--output-model-type", "typing.TypedDict",
+    "--no-use-closed-typed-dict",
     "--target-python-version", "3.11", "--use-standard-collections",
     "--use-union-operator", "--disable-timestamp", "--formatters", "builtin",
     "--type-mappings", "string+cidr=string", "--output", str(directory / "api_models.py"),

@@ -1,6 +1,8 @@
 import copy
 import io
 import os
+import subprocess
+import sys
 import unittest
 import urllib.error
 from contextlib import redirect_stdout
@@ -22,6 +24,21 @@ from bootstrap import (
 
 
 class BootstrapTests(unittest.TestCase):
+    def test_bootstrap_imports_without_site_packages(self):
+        directory = str(Path(__file__).parent.resolve())
+        subprocess.run(
+            [
+                sys.executable,
+                "-I",
+                "-S",
+                "-c",
+                "import sys; sys.path.insert(0, "
+                + repr(directory)
+                + "); import bootstrap",
+            ],
+            check=True,
+        )
+
     def setUp(self):
         self.setup = SetupRequest(
             email="saikat@atmz.ai",
