@@ -18,6 +18,33 @@ import yaml
 from jinja2 import Environment
 
 configuration = json.loads(Path("renovate.json").read_text())
+gateway = yaml.safe_load(Path("kubernetes/networking/gateway.yaml").read_text())
+route_index = yaml.safe_load(Path("kubernetes/networking/routes/kustomization.yaml").read_text())
+network_routes = [resource for filename in route_index["resources"] for resource in yaml.safe_load_all(Path("kubernetes/networking/routes", filename).read_text()) if resource]
+for scenario in ("complete", "orphan-route-restored", "legacy-listener-restored", "legacy-certificate-restored", "current-listener-removed"):
+    gateway_candidate = copy.deepcopy(gateway)
+    routes_candidate = copy.deepcopy(network_routes)
+    listeners = gateway_candidate["spec"]["listeners"]
+    if scenario == "orphan-route-restored":
+        routes_candidate.append({"kind": "HTTPRoute", "metadata": {"name": "goldilocks", "namespace": "kube-system"}, "spec": {"hostnames": ["goldilocks.yral.com"]}})
+    elif scenario == "legacy-listener-restored":
+        listeners.append({"name": "https", "port": 443, "protocol": "HTTPS", "hostname": "*.yral.com", "tls": {"certificateRefs": [{"name": "wildcard-yral-com-tls"}]}})
+    elif scenario == "legacy-certificate-restored":
+        next(listener for listener in listeners if listener["name"] == "https-saikat-dev")["tls"]["certificateRefs"] = [{"name": "wildcard-yral-com-tls"}]
+    elif scenario == "current-listener-removed":
+        listeners[:] = [listener for listener in listeners if listener["name"] != "https-saikat-dev"]
+    try:
+        assert {"http", "https-saikat-dev", "https-saikat-dev-apex"} <= {listener["name"] for listener in listeners}, "active saikat.dev exposure must remain available"
+        assert not any(listener.get("hostname", "") == "yral.com" or listener.get("hostname", "").endswith(".yral.com") for listener in listeners), "retired Yral TLS exposure must not return"
+        assert not any(reference["name"] == "wildcard-yral-com-tls" for listener in listeners for reference in listener.get("tls", {}).get("certificateRefs", []))
+        assert not any(resource["metadata"]["name"] in ("goldilocks", "goldilocks-redirect") for resource in routes_candidate), "retired orphan routes must not be recreated"
+        assert not any(hostname == "yral.com" or hostname.endswith(".yral.com") for resource in routes_candidate if resource["kind"] == "HTTPRoute" for hostname in resource["spec"]["hostnames"])
+    except AssertionError:
+        assert scenario != "complete", "legacy route retirement breaks active networking"
+        print("PASS: rejected legacy Gateway/route retirement regression", scenario)
+    else:
+        assert scenario == "complete", "retired route/listener or broken current exposure accepted: " + scenario
+        print("PASS: Goldilocks and legacy TLS exposure remain retired while current listeners survive")
 administrator_job = yaml.safe_load(Path("kubernetes/infrastructure/harbor/operator-administrator.yaml").read_text())
 administrator_container = administrator_job["spec"]["template"]["spec"]["containers"][0]
 administrator_program = ast.parse(administrator_container["args"][0])
