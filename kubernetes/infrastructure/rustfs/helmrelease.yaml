@@ -39,7 +39,7 @@ spec:
       autoInject: true
     extraEnv:
       - name: RUSTFS_BROWSER_REDIRECT_URL
-        value: https://rust-fs.saikat.oleole.ai
+        value: https://rust-fs.saikat.dev
       - name: RUSTFS_IDENTITY_OPENID_CONFIG_URL_google
         value: https://accounts.google.com/.well-known/openid-configuration
       - name: RUSTFS_IDENTITY_OPENID_CLIENT_ID_google
@@ -53,7 +53,7 @@ spec:
             name: atmz-internal-apps-google-oauth
             key: client-secret
       - name: RUSTFS_IDENTITY_OPENID_REDIRECT_URI_google
-        value: https://rust-fs.saikat.oleole.ai/rustfs/admin/v3/oidc/callback/google
+        value: https://rust-fs.saikat.dev/rustfs/admin/v3/oidc/callback/google
       - name: RUSTFS_IDENTITY_OPENID_REDIRECT_URI_DYNAMIC_google
         value: "off"
       - name: RUSTFS_IDENTITY_OPENID_DISPLAY_NAME_google

@@ -28,7 +28,10 @@ spec:
     - name: web-gateway
       namespace: kube-system
       sectionName: https-rustfs-console
-  hostnames: [rust-fs.saikat.oleole.ai]
+    - name: web-gateway
+      namespace: kube-system
+      sectionName: https-saikat-dev
+  hostnames: [rust-fs.saikat.dev, rust-fs.saikat.oleole.ai]
   rules:
     - matches:
         - path:
@@ -48,7 +51,7 @@ spec:
     - name: web-gateway
       namespace: kube-system
       sectionName: http
-  hostnames: [rust-fs.saikat.oleole.ai]
+  hostnames: [rust-fs.saikat.dev, rust-fs.saikat.oleole.ai]
   rules:
     - filters:
         - type: RequestRedirect

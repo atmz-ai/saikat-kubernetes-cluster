@@ -228,7 +228,62 @@ for scenario in ("complete", "missing-new-host", "direct-frontend", "retired-cal
     else:
         assert scenario == "complete", "unsafe Longhorn domain cutover accepted: " + scenario
         print("PASS: migrated Longhorn UI remains behind its existing authentication proxy")
+rustfs_release = next(resource for resource in yaml.safe_load_all(Path("kubernetes/infrastructure/rustfs/helmrelease.yaml").read_text()) if resource["kind"] == "HelmRelease")
+rustfs_routes = list(yaml.safe_load_all(Path("kubernetes/infrastructure/rustfs/route.yaml").read_text()))
+rustfs_authorization = list(yaml.safe_load_all(Path("kubernetes/infrastructure/rustfs/google-authorization.yaml").read_text()))
+for scenario in ("complete", "callback-origin-mismatch", "dynamic-callback", "load-balanced-oauth-state", "another-email", "s3-origin-changed"):
+    values_candidate = copy.deepcopy(rustfs_release["spec"]["values"])
+    routes_candidate = copy.deepcopy(rustfs_routes)
+    authorization_candidate = copy.deepcopy(rustfs_authorization)
+    environment = {variable["name"]: variable for variable in values_candidate["extraEnv"]}
+    console_service = next(resource for resource in authorization_candidate if resource["kind"] == "Service")
+    policy = json.loads(next(resource for resource in authorization_candidate if resource["kind"] == "ConfigMap")["data"]["policy.json"])
+    s3_route = next(route for route in routes_candidate if route["metadata"]["name"] == "rustfs-s3")
+    if scenario == "callback-origin-mismatch":
+        environment["RUSTFS_IDENTITY_OPENID_REDIRECT_URI_google"]["value"] = "https://retired.example.invalid/rustfs/admin/v3/oidc/callback/google"
+    elif scenario == "dynamic-callback":
+        environment["RUSTFS_IDENTITY_OPENID_REDIRECT_URI_DYNAMIC_google"]["value"] = "on"
+    elif scenario == "load-balanced-oauth-state":
+        console_service["spec"]["selector"] = {"app.kubernetes.io/name": "rustfs"}
+    elif scenario == "another-email":
+        policy["Statement"][-1]["Condition"]["StringEquals"]["jwt:email"] = "another@atmz.ai"
+    elif scenario == "s3-origin-changed":
+        s3_route["spec"]["hostnames"] = ["s3.saikat.dev"]
+    try:
+        assert environment["RUSTFS_BROWSER_REDIRECT_URL"]["value"] == "https://rust-fs.saikat.dev"
+        assert environment["RUSTFS_IDENTITY_OPENID_REDIRECT_URI_google"]["value"] == "https://rust-fs.saikat.dev/rustfs/admin/v3/oidc/callback/google"
+        assert environment["RUSTFS_IDENTITY_OPENID_REDIRECT_URI_DYNAMIC_google"]["value"] == "off"
+        assert environment["RUSTFS_IDENTITY_OPENID_ROLE_POLICY_google"]["value"] == "google-saikat-administrator"
+        assert console_service["spec"]["selector"] == {"statefulset.kubernetes.io/pod-name": "rustfs-0"}, "native OAuth state must remain on one node"
+        assert len(policy["Statement"]) == 8
+        for statement in policy["Statement"]:
+            operator = "StringEquals" if statement["Effect"] == "Allow" else "StringNotEquals"
+            assert statement["Condition"] == {operator: {"jwt:email": "saikat@atmz.ai"}}, "RustFS Google permissions must remain email-restricted"
+        for route in routes_candidate:
+            if route["metadata"]["name"] != "rustfs-s3":
+                assert "rust-fs.saikat.dev" in route["spec"]["hostnames"]
+        console_route = next(route for route in routes_candidate if route["metadata"]["name"] == "rustfs-console")
+        assert "https-saikat-dev" in {parent["sectionName"] for parent in console_route["spec"]["parentRefs"]}
+        assert console_route["spec"]["rules"][0]["backendRefs"] == [{"name": "rustfs-console", "port": 9001}]
+        assert s3_route["spec"]["hostnames"] == ["s3.saikat.oleole.ai"], "Console migration must not change the S3 endpoint"
+        assert s3_route["spec"]["rules"][0]["backendRefs"] == [{"name": "rustfs-svc", "port": 9000}]
+    except AssertionError:
+        assert scenario != "complete", "RustFS Console cutover breaks native authentication or S3 isolation"
+        print("PASS: rejected RustFS Console cutover regression", scenario)
+    else:
+        assert scenario == "complete", "unsafe RustFS Console cutover accepted: " + scenario
+        print("PASS: RustFS Console origin, native email policy, and unchanged S3 endpoint")
 dashboard_addresses = re.findall(r'href="(https://[^"]+)"', Path("kubernetes/apps/dashboard/index.html").read_text())
+for scenario, addresses in (("migrated-longhorn-link", dashboard_addresses), ("original-broken-longhorn-link", ["https://longhorn.saikat.oleole.ai" if address == "https://longhorn-ui.saikat.dev" else address for address in dashboard_addresses])):
+    try:
+        assert "https://longhorn-ui.saikat.dev" in addresses, "dashboard must link to the verified Longhorn UI origin"
+        assert "https://longhorn.saikat.oleole.ai" not in addresses
+    except AssertionError:
+        assert scenario == "original-broken-longhorn-link", "dashboard Longhorn link is invalid"
+        print("PASS: rejected original broken Longhorn dashboard link")
+    else:
+        assert scenario == "migrated-longhorn-link", "broken Longhorn dashboard link accepted"
+        print("PASS: dashboard links to the migrated Longhorn UI")
 for scenario in ("complete", "dashboard-before-oauth-cutover"):
     candidate = list(dashboard_addresses)
     callbacks = []
