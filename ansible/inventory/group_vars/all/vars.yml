@@ -59,14 +59,6 @@ age_private_key: "{{ vault_age_private_key }}" # Indirection to vault
 saikat_machine_access_ssh_private_key: "{{ vault_saikat_machine_access_ssh_private_key }}"
 saikat_machine_access_ssh_pub_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIM/H7Jp2RgC1xtg1nyzpmhzOTmUz3n+PQPsk83BzUskg saikat-machine-access"
 
-# Cloudflare DNS management for kubernetes-api round-robin A records
-# Used by node-remove and control-plane-join roles to update DNS on CP add/remove
-cloudflare_api_token: "{{ vault_cloudflare_api_token }}" # Indirection to vault
-cloudflare_zone_id: "f0e13310b0b3c66709f0debd5e3bbb10"
-cloudflare_zone_name: "yral.com"
-kubernetes_api_hostname: "kubernetes-api.yral.com"
-cloudflare_app_wildcard_hostname: "*.yral.com" # Proxied wildcard served by cilium-envoy on all nodes
-
 # Namecheap API — for custom nameserver (glue record) management
 # Used by the namecheap-dns role to register ns1–ns13 glue records.
 # Enable API access in Namecheap dashboard: Profile > Tools > Business & Dev Tools > API Access

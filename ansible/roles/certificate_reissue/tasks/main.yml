@@ -4,6 +4,10 @@
     that:
       - inventory_hostname in groups['control_plane']
       - api_server_cert_sans | length > 0
+      - >-
+        certificate_reissue_retired_subject_alternative_names
+        | difference(['kubernetes-api.oleole.ai', 'kubernetes-api.yral.com']) | length == 0
+      - certificate_reissue_retired_subject_alternative_names | intersect(api_server_cert_sans) | length == 0
 
 - name: Require existing API certificate, key, CA identity and static manifest
   ansible.builtin.stat:
@@ -165,7 +169,13 @@
 
 - name: Decide whether the desired DNS SANs require reissuance
   ansible.builtin.set_fact:
-    certificate_reissue_required: "{{ api_server_cert_sans | difference(certificate_reissue_original_subject_alternative_names) | length > 0 }}"
+    certificate_reissue_required: >-
+      {{ api_server_cert_sans | difference(certificate_reissue_original_subject_alternative_names) | length > 0
+         or certificate_reissue_retired_subject_alternative_names
+            | intersect(certificate_reissue_original_subject_alternative_names) | length > 0 }}
+    certificate_reissue_preserved_subject_alternative_names: >-
+      {{ certificate_reissue_original_information.subject_alt_name
+         | difference(certificate_reissue_retired_subject_alternative_names | map('regex_replace', '^', 'DNS:') | list) }}
 
 - name: Report certificate-only scope
   ansible.builtin.debug:
@@ -173,6 +183,7 @@
       - "Node: {{ inventory_hostname }}; reissuance required: {{ certificate_reissue_required }}"
       - "Existing SANs: {{ certificate_reissue_original_subject_alternative_names }}"
       - "Desired DNS SANs: {{ api_server_cert_sans }}"
+      - "Explicitly approved retired DNS SANs: {{ certificate_reissue_retired_subject_alternative_names }}"
       - "No node reset, etcd membership change, disk operation, DNS change or client cutover"
 
 - name: Generate and activate a verified certificate transaction
@@ -206,7 +217,8 @@
             'certificatesDir': certificate_reissue_candidate_directory.path,
             'kubernetesVersion': (certificate_reissue_api_version.stdout | from_json).gitVersion,
             'apiServer': {'certSANs': (certificate_reissue_cluster_configuration.apiServer.certSANs
-              + certificate_reissue_original_subject_alternative_names) | unique | list}
+              + (certificate_reissue_original_subject_alternative_names
+                 | difference(certificate_reissue_retired_subject_alternative_names))) | unique | list}
           }, recursive=true) }}
         certificate_reissue_init_configuration:
           apiVersion: kubeadm.k8s.io/v1beta4
@@ -273,7 +285,10 @@
       ansible.builtin.assert:
         that:
           - certificate_reissue_candidate_information.valid_at.now
-          - certificate_reissue_original_information.subject_alt_name | difference(certificate_reissue_candidate_information.subject_alt_name) | length == 0
+          - certificate_reissue_preserved_subject_alternative_names | difference(certificate_reissue_candidate_information.subject_alt_name) | length == 0
+          - >-
+            certificate_reissue_retired_subject_alternative_names | map('regex_replace', '^', 'DNS:')
+            | intersect(certificate_reissue_candidate_information.subject_alt_name) | length == 0
           - certificate_reissue_candidate_information.subject == certificate_reissue_original_information.subject
 
     - name: Derive the candidate key's public component without exporting private data
@@ -489,11 +504,14 @@
 - name: Require final SAN preservation before the next node
   ansible.builtin.assert:
     that:
-      - certificate_reissue_original_information.subject_alt_name | difference(certificate_reissue_final_information.subject_alt_name) | length == 0
+      - certificate_reissue_preserved_subject_alternative_names | difference(certificate_reissue_final_information.subject_alt_name) | length == 0
       - >-
         ansible_check_mode or api_server_cert_sans
         | difference(certificate_reissue_final_information.subject_alt_name
           | map('regex_replace', '^(DNS|IP):', '') | list) | length == 0
+      - >-
+        ansible_check_mode or certificate_reissue_retired_subject_alternative_names
+        | map('regex_replace', '^', 'DNS:') | intersect(certificate_reissue_final_information.subject_alt_name) | length == 0
 
 - name: Verify actual serving state when certificates already satisfy the declaration
   ansible.builtin.include_tasks: verify-serving.yml

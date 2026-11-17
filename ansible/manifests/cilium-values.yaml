@@ -18,7 +18,7 @@ cluster:
 
 # kube-proxy replacement - STRICT mode
 kubeProxyReplacement: true
-k8sServiceHost: kubernetes-api.oleole.ai
+k8sServiceHost: kubernetes-api.saikat.dev
 k8sServicePort: 6443
 
 # IPAM configuration

@@ -20,9 +20,7 @@ all:
     # ! Desired SANs do not change existing certificates. Verify every serving
     # ! endpoint before DNS regeneration or client cutover; retain old names meanwhile.
     api_server_cert_sans:
-      - kubernetes-api.oleole.ai
       - kubernetes-api.saikat.dev
-      - kubernetes-api.yral.com # ! Retain until every client has moved.
     pod_network_cidr: "10.244.0.0/16"
 
     # Hetzner Robot API credentials

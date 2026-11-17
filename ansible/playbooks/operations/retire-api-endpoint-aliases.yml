@@ -1,0 +1,28 @@
+---
+- name: Retire only explicitly approved API alias SANs one node at a time
+  hosts: control_plane
+  gather_facts: false
+  become: true
+  serial: 1
+  any_errors_fatal: true
+  roles:
+    - role: certificate_reissue
+      certificate_reissue_retired_subject_alternative_names:
+        - kubernetes-api.oleole.ai
+        - kubernetes-api.yral.com
+
+- name: Publish the final kubeadm SAN declaration
+  hosts: "{{ groups['control_plane'][0] }}"
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+  roles:
+    - role: kubeadm_metadata
+
+- name: Retire only the legacy Cloudflare API records
+  hosts: localhost
+  gather_facts: false
+  become: false
+  any_errors_fatal: true
+  roles:
+    - role: api_alias_dns_retirement

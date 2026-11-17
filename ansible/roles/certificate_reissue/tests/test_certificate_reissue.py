@@ -13,6 +13,7 @@ import time
 import unittest
 
 from ansible.plugins.filter.core import combine
+from ansible.plugins.filter.mathstuff import difference, intersect
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
@@ -33,6 +34,8 @@ class CertificateReissueTests(unittest.TestCase):
         self.environment = Environment()
         self.environment.filters["combine"] = combine
         self.environment.filters["from_json"] = json.loads
+        self.environment.filters["difference"] = difference
+        self.environment.filters["intersect"] = intersect
 
     def test_existing_public_ip_and_legacy_dns_sans_survive_candidate_configuration(self):
         configuration_task = next(
@@ -50,12 +53,48 @@ class CertificateReissueTests(unittest.TestCase):
             certificate_reissue_candidate_directory={"path": "/staged/certificate"},
             certificate_reissue_api_version={"stdout": json.dumps({"gitVersion": "v1.36.4"})},
             certificate_reissue_original_subject_alternative_names=original_names,
+            certificate_reissue_retired_subject_alternative_names=[],
         )
         candidate = yaml.safe_load(rendered)
         self.assertTrue(set(original_names).issubset(candidate["apiServer"]["certSANs"]))
         self.assertIn("kubernetes-api.saikat.dev", candidate["apiServer"]["certSANs"])
         self.assertEqual(candidate["kubernetesVersion"], "v1.36.4")
         self.assertEqual(candidate["certificatesDir"], "/staged/certificate")
+
+    def test_explicit_retirement_removes_only_approved_dns_names_and_preserves_ip_sans(self):
+        configuration_task = next(task for task in self.transaction["block"]
+                                  if "certificate_reissue_candidate_configuration" in task.get("ansible.builtin.set_fact", {}))
+        expression = configuration_task["ansible.builtin.set_fact"]["certificate_reissue_candidate_configuration"]
+        original_names = ["20.219.32.205", "10.96.0.1", "old.example.invalid", "kubernetes-api.yral.com", "kubernetes-api.oleole.ai"]
+        rendered = self.environment.from_string(expression).render(
+            certificate_reissue_cluster_configuration={"apiServer": {"certSANs": ["kubernetes-api.saikat.dev"]}},
+            certificate_reissue_candidate_directory={"path": "/staged/certificate"},
+            certificate_reissue_api_version={"stdout": json.dumps({"gitVersion": "v1.36.4"})},
+            certificate_reissue_original_subject_alternative_names=original_names,
+            certificate_reissue_retired_subject_alternative_names=["kubernetes-api.yral.com", "kubernetes-api.oleole.ai"],
+        )
+        names = yaml.safe_load(rendered)["apiServer"]["certSANs"]
+        self.assertEqual(set(names), {"20.219.32.205", "10.96.0.1", "old.example.invalid", "kubernetes-api.saikat.dev"})
+        guard = self.tasks[0]["ansible.builtin.assert"]["that"][2]
+        predicate = self.environment.compile_expression(guard)
+        self.assertFalse(predicate(certificate_reissue_retired_subject_alternative_names=["20.219.32.205"]))
+        self.assertFalse(predicate(certificate_reissue_retired_subject_alternative_names=["kubernetes.default.svc"]))
+
+    def test_metadata_sync_detects_san_removals_not_only_additions(self):
+        metadata_tasks = yaml.safe_load((ROLE_DIRECTORY.parent / "kubeadm_metadata/tasks/main.yml").read_text())
+        expression = next(task for task in metadata_tasks if "kubeadm_metadata_required" in task.get("ansible.builtin.set_fact", {}))["ansible.builtin.set_fact"]["kubeadm_metadata_required"]
+        existing = {"controlPlaneEndpoint": "kubernetes-api.saikat.dev:6443", "apiServer": {"certSANs": ["kubernetes-api.saikat.dev", "kubernetes-api.yral.com"]}}
+        desired = {"controlPlaneEndpoint": "kubernetes-api.saikat.dev:6443", "apiServer": {"certSANs": ["kubernetes-api.saikat.dev"]}}
+        self.assertTrue(yaml.safe_load(self.environment.from_string(expression).render(kubeadm_metadata_existing=existing, kubeadm_metadata_desired=desired)))
+        self.assertFalse(yaml.safe_load(self.environment.from_string(expression).render(kubeadm_metadata_existing=desired, kubeadm_metadata_desired=desired)))
+
+    def test_node_lifecycle_does_not_recreate_retired_cloudflare_endpoints(self):
+        for role_name in ("control-plane-join", "worker-join", "node-remove"):
+            tasks = yaml.safe_load((ROLE_DIRECTORY.parent / role_name / "tasks/main.yml").read_text())
+            with self.subTest(role=role_name):
+                self.assertNotIn("api.cloudflare.com", json.dumps(tasks))
+                self.assertNotIn("kubernetes_api_hostname", json.dumps(tasks))
+                self.assertNotIn("cloudflare_app_wildcard_hostname", json.dumps(tasks))
 
     def test_patch_skew_does_not_require_a_component_upgrade(self):
         assertion = next(

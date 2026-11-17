@@ -40,8 +40,8 @@
   ansible.builtin.set_fact:
     kubeadm_metadata_required: >-
       {{ kubeadm_metadata_existing.controlPlaneEndpoint != kubeadm_metadata_desired.controlPlaneEndpoint
-         or kubeadm_metadata_desired.apiServer.certSANs
-            | difference(kubeadm_metadata_existing.apiServer.certSANs) | length > 0 }}
+         or (kubeadm_metadata_desired.apiServer.certSANs | sort)
+            != (kubeadm_metadata_existing.apiServer.certSANs | sort) }}
 
 - name: Publish only the canonical kubeadm metadata
   when:
@@ -81,5 +81,5 @@
         that:
           - (kubeadm_metadata_verified.resources[0].data.ClusterConfiguration | from_yaml).controlPlaneEndpoint == kubeadm_metadata_desired.controlPlaneEndpoint
           - >-
-            kubeadm_metadata_desired.apiServer.certSANs
-            | difference((kubeadm_metadata_verified.resources[0].data.ClusterConfiguration | from_yaml).apiServer.certSANs) | length == 0
+            (kubeadm_metadata_desired.apiServer.certSANs | sort)
+            == ((kubeadm_metadata_verified.resources[0].data.ClusterConfiguration | from_yaml).apiServer.certSANs | sort)
