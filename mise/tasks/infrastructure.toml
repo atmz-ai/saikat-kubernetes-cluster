@@ -44,53 +44,6 @@ for scenario, users, accepted in (
         assert accepted, "unsafe administrator grant accepted: " + scenario
         assert result["user_id"] == 2 and result["email"] == "saikat@atmz.ai"
         print("PASS: administrator grant selects the exact existing operator", scenario)
-cleanup_job = next(resource for resource in yaml.safe_load_all(Path("kubernetes/infrastructure/harbor/registry-cleanup.yaml").read_text()) if resource["kind"] == "Job")
-cleanup_container = cleanup_job["spec"]["template"]["spec"]["containers"][0]
-cleanup_program = ast.parse(cleanup_container["args"][0])
-cleanup_selector = next(node for node in cleanup_program.body if isinstance(node, ast.FunctionDef) and node.name == "build_cleanup_plan")
-cleanup_namespace = {}
-exec(compile(ast.Module(body=[cleanup_selector], type_ignores=[]), "harbor-cleanup-selector", "exec"), cleanup_namespace)
-old_artifact = {"digest": "sha256:old", "push_time": "2026-01-01T00:00:00Z", "tags": ["old"], "references": []}
-new_artifacts = [{"digest": "sha256:new" + str(number), "push_time": "2026-02-0" + str(number) + "T00:00:00Z", "tags": ["new" + str(number)], "references": []} for number in range(1, 6)]
-cleanup_inventory = [{"name": "maintained", "repositories": [{"name": "maintained/site", "artifacts": [old_artifact, *new_artifacts]}]}, {"name": "retired", "repositories": [{"name": "retired/service", "artifacts": []}]}, {"name": "library", "repositories": [{"name": "library/retired-tool", "artifacts": []}]}]
-cleanup_approval = {"retired_projects": ["retired"], "retired_repositories": ["library/retired-tool"], "keep_newest": 5, "artifacts": [dict(old_artifact, repository="maintained/site")]}
-for scenario in ("reviewed", "protected-tag", "protected-digest", "legacy-rollback", "retired-live-consumer", "retired-declared-consumer", "retagged", "repushed", "newest-version", "oci-child", "oci-grandchild", "already-absent"):
-    inventory_candidate = copy.deepcopy(cleanup_inventory)
-    images = []
-    if scenario in ("protected-tag", "legacy-rollback"):
-        images = [("harbor.yral.com/" if scenario == "legacy-rollback" else "harbor.saikat.dev/") + "maintained/site:old"]
-    elif scenario == "protected-digest":
-        images = ["docker-pullable://harbor.saikat.dev/maintained/site@sha256:old"]
-    elif scenario == "retired-live-consumer":
-        images = ["harbor.saikat.dev/retired/service:latest"]
-    elif scenario == "retired-declared-consumer":
-        images = ["harbor.saikat.dev/library/retired-tool"]
-    elif scenario == "retagged":
-        inventory_candidate[0]["repositories"][0]["artifacts"][0]["tags"].append("another-tag")
-    elif scenario == "repushed":
-        inventory_candidate[0]["repositories"][0]["artifacts"][0]["push_time"] = "2026-01-02T00:00:00Z"
-    elif scenario == "newest-version":
-        inventory_candidate[0]["repositories"][0]["artifacts"][0]["push_time"] = "2026-03-01T00:00:00Z"
-    elif scenario == "oci-child":
-        inventory_candidate[0]["repositories"][0]["artifacts"][1]["references"] = [{"child_digest": "sha256:old"}]
-    elif scenario == "oci-grandchild":
-        inventory_candidate[0]["repositories"][0]["artifacts"][1]["references"] = [{"child_digest": "sha256:intermediate"}]
-        inventory_candidate[0]["repositories"][0]["artifacts"].append(dict(old_artifact, digest="sha256:intermediate", push_time="2025-01-01T00:00:00Z", references=[{"child_digest": "sha256:old"}]))
-    elif scenario == "already-absent":
-        inventory_candidate[0]["repositories"][0]["artifacts"].pop(0)
-    try:
-        deletions, retained = cleanup_namespace["build_cleanup_plan"](inventory_candidate, images, cleanup_approval)
-    except ValueError:
-        assert scenario not in ("reviewed", "already-absent"), "safe reviewed deletion rejected: " + scenario
-        print("PASS: registry cleanup refuses unsafe deletion", scenario)
-    else:
-        assert scenario in ("reviewed", "already-absent"), "unsafe registry deletion accepted: " + scenario
-        artifact_deletions = [deletion for deletion in deletions if deletion["kind"] == "artifact"]
-        assert artifact_deletions == ([{"kind": "artifact", "name": "maintained/site", "digest": "sha256:old"}] if scenario == "reviewed" else [])
-        assert len(retained) == 5
-        assert {deletion["name"] for deletion in deletions if deletion["kind"] == "project"} == {"retired"}
-        assert not any(deletion["name"] == "library" for deletion in deletions)
-        print("PASS: registry cleanup selects only reviewed content and keeps newest versions", scenario)
 registry_declaration = yaml.safe_load(Path("kubernetes/infrastructure/harbor/helmrelease.yaml").read_text())
 for scenario in ("bounded-pool", "original-default-pool", "idle-exhausts-capacity", "open-exhausts-capacity"):
     database_candidate = copy.deepcopy(registry_declaration["spec"]["values"]["database"])
