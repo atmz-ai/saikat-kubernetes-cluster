@@ -2,8 +2,10 @@
 description = "Validate Renovate schema, generic bundle and image extraction, and check-gated merging"
 run = '''
 #!/usr/bin/env -S ./.venv/bin/python -u
+import copy
 import json
 import subprocess
+import tomllib
 import urllib.request
 from pathlib import Path
 
@@ -15,6 +17,54 @@ with urllib.request.urlopen(configuration["$schema"], timeout=30) as response:
     schema = json.load(response)
 jsonschema.validate(configuration, schema)
 print("PASS: Renovate configuration matches the published schema")
+dependabot_configuration = yaml.safe_load(Path(".github/dependabot.yml").read_text())
+with urllib.request.urlopen("https://json.schemastore.org/dependabot-2.0.json", timeout=30) as response:
+    dependabot_schema = json.load(response)
+jsonschema.validate(dependabot_configuration, dependabot_schema)
+assert all(update["schedule"]["interval"] == "daily" for update in dependabot_configuration["updates"]), "Dependabot version checks must run daily"
+for ecosystem, directory, filename in (
+    ("npm", "/apps/my-website", "package.json"),
+    ("npm", "/apps/my-website", "package-lock.json"),
+    ("pip", "/", "pyproject.toml"),
+    ("docker", "/apps/my-website", "Dockerfile.buildkit"),
+):
+    manifest = Path(directory.lstrip("/")) / filename
+    assert manifest.is_file(), "Dependabot targets a missing manifest: " + str(manifest)
+    assert any(update["package-ecosystem"] == ecosystem and directory in update.get("directories", [update.get("directory")]) for update in dependabot_configuration["updates"]), "Dependabot does not cover " + str(manifest)
+    print("PASS: daily Dependabot updates cover", ecosystem, manifest)
+assert any(update["package-ecosystem"] == "github-actions" and "/" in update.get("directories", [update.get("directory")]) for update in dependabot_configuration["updates"])
+print("PASS: Dependabot configuration matches the published schema and covers GitHub Actions")
+
+flux_request = tomllib.loads(Path("mise.toml").read_text())["tools"]["flux2"]
+flux_lock = tomllib.loads(Path("mise.lock").read_text())["tools"]["flux2"]
+for scenario in ("verified", "original-tag-only", "missing-issuer", "stale-version", "missing-provenance", "stale-provenance"):
+    request_candidate = copy.deepcopy(flux_request)
+    lock_candidate = copy.deepcopy(flux_lock)
+    if scenario == "original-tag-only":
+        request_candidate = flux_request["version"]
+    elif scenario == "missing-issuer":
+        request_candidate.pop("slsa_signer_issuer", None)
+    elif scenario == "stale-version":
+        lock_candidate[0]["version"] = "2.9.5"
+    elif scenario == "missing-provenance":
+        lock_candidate[0]["platforms.linux-arm64"].pop("provenance", None)
+    elif scenario == "stale-provenance":
+        lock_candidate[0]["platforms.linux-arm64"]["provenance"]["slsa"]["url"] = "https://github.com/fluxcd/flux2/releases/download/v2.9.5/provenance.intoto.jsonl"
+    try:
+        assert isinstance(request_candidate, dict), "Flux requires an explicit SLSA signer"
+        assert all(request_candidate.get(key) for key in ("slsa_signer_identity", "slsa_signer_issuer")), "both signer options are required"
+        assert len(lock_candidate) == 1 and lock_candidate[0]["version"] == request_candidate["version"], "Flux's request and lock must agree"
+        platforms = {key for key in lock_candidate[0] if key.startswith("platforms.")}
+        assert platforms == {"platforms." + platform for platform in ("linux-arm64", "linux-arm64-musl", "linux-x64", "linux-x64-musl", "macos-arm64", "macos-x64", "windows-x64")}, "all supported platforms must be locked"
+        provenance_url = "https://github.com/fluxcd/flux2/releases/download/v" + request_candidate["version"] + "/provenance.intoto.jsonl"
+        assert all(lock_candidate[0][platform].get("provenance", {}).get("slsa", {}).get("url") == provenance_url for platform in platforms), "every Flux artifact must retain current SLSA provenance"
+    except AssertionError:
+        assert scenario != "verified", "Flux signer configuration or lockfile is invalid"
+        print("PASS: rejected Flux provenance regression", scenario)
+    else:
+        assert scenario == "verified", "unsafe Flux lock accepted: " + scenario
+        print("PASS: Flux signer and all seven provenance-bearing lock entries agree")
+
 release = next(resource for resource in yaml.safe_load_all(Path("kubernetes/infrastructure/rustfs/helmrelease.yaml").read_text()) if resource["kind"] == "HelmRelease")
 image = release["spec"]["values"]["image"]["rustfs"]
 assert image["repository"] == "rustfs/rustfs"
@@ -45,6 +95,27 @@ assert.notEqual(configuration.ignoreTests, true);
 assert.notEqual(configuration.requiredStatusChecks, null);
 assert.equal(configuration.schedule, undefined);
 console.log('PASS: Renovate waits for checks instead of relying on unavailable branch protection');
+
+const dependabotManagers = ['cargo', 'dockerfile', 'github-actions', 'npm', 'pep621', 'pip_requirements', 'pip_setup'];
+const dependabotRule = configuration.packageRules.find(rule => rule.matchManagers?.includes('npm'));
+for (const scenario of ['single-owner', 'original-overlap', 'npm-overlap', 'infrastructure-disabled']) {
+    const candidate = structuredClone(dependabotRule);
+    if (scenario === 'original-overlap') candidate.enabled = true;
+    else if (scenario === 'npm-overlap') candidate.matchManagers = candidate.matchManagers.filter(manager => manager !== 'npm');
+    else if (scenario === 'infrastructure-disabled') candidate.matchManagers.push('mise');
+    let validationSucceeded = false;
+    try {
+        assert.equal(candidate.enabled, false);
+        assert.deepEqual(new Set(candidate.matchManagers), new Set(dependabotManagers));
+        validationSucceeded = true;
+    } catch (error) {
+        assert.equal(error.code, 'ERR_ASSERTION');
+        assert.notEqual(scenario, 'single-owner', 'Dependabot-owned dependencies still have overlapping Renovate updates');
+        console.log('PASS: rejected dependency ownership regression', scenario);
+    }
+    assert.equal(validationSucceeded, scenario === 'single-owner', 'unsafe dependency ownership was accepted');
+    if (scenario === 'single-owner') console.log('PASS: Dependabot-owned managers are disabled without disabling infrastructure or mise');
+}
 
 const tektonTemplate = 'tektoncd/' + '{'.repeat(2) + 'project' + '}'.repeat(2);
 const releaseManagers = configuration.customManagers.filter(manager => manager.datasourceTemplate === 'github-releases' && (manager.depNameTemplate === undefined || manager.depNameTemplate === tektonTemplate));

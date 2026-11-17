@@ -105,6 +105,12 @@ For **deployed cluster components**, always ask the user for an explicit version
 - Upgrade order: one CP at a time → workers → add-ons, one component at a time.
 
 ### Dependency Update Discovery
+
+Dependabot owns application dependency manifests, Dockerfiles, and GitHub Actions;
+keep its directories aligned with maintained projects. Renovate owns mise tools,
+Ansible dependencies, and the generic infrastructure release/image discovery below.
+Assign each dependency to one bot; disable Renovate managers covered by Dependabot.
+
 **New image declarations must be automatically discoverable without per-image changes to `renovate.json`.** Prefer built-in managers and generic structured-data discovery. Use complete `image: repository:tag` references, or declare `repository` alongside `tag`/`version` in Helm image objects; never leave a tag-only override whose repository exists only in chart defaults. Do not add image-specific extractors. Validate additions with `mise run renovate-configuration-checks`. Flux retains ownership of internally built application image updates.
 
 ### Latest Stable Preference
@@ -610,6 +616,12 @@ Use `my-website-build`, `my-website-run`, and `my-website-stop` for the maintain
 **Start daemons per task, not all at once.** A task declares what it needs with `daemons = ["<name>"]` (or `daemons = true` for every project daemon); mise starts them, waits for readiness, then runs the task body, and reuses anything already running. `auto = ["start", "stop"]` and `pitchfork activate` are gone — **nothing starts merely by entering the repo.** Prefer `mise run <app>-run` (which adds the `depends = ["<app>-build"]` it needs) over calling `mise daemons start` directly. Stop with `mise run <app>-stop` or `mise daemons stop`.
 
 **Version locking (Preference):** Prefer `"latest"` requests for local mise tools such as `uv`; keep exact resolved versions, checksums, and provenance in the committed `mise.lock`. Update a tool with `mise lock --bump <tool>` without replacing its floating request with an exact version. Use an explicit local tool pin only when the operator requests one or a verified compatibility constraint requires it, not merely to select a release or prevent bot branch rewrites. Deployed cluster components retain their explicit version declarations.
+
+For Aqua recipes that publish SLSA provenance but omit the signer, set both
+`slsa_signer_identity` and `slsa_signer_issuer` on the consuming tool, using the
+exact identity and issuer from its published certificate. Regenerate its lock
+entries with `mise lock <tool>`; never remove provenance to permit an update.
+See [Aqua signer options](https://mise.jdx.dev/dev-tools/backends/aqua.html#slsa-signer-identity-and-slsa-signer-issuer).
 
 **Declarative-only tooling (no imperative system installs):** The local environment must be fully reproducible from `mise.toml` alone — a Nix-like experience. Never run `sudo apt-get install`, `brew install`, or any imperative system package manager command to satisfy a build dependency. If a tool or library is needed:
 1. Check if mise provides it (add to `[tools]` in `mise.toml`).
