@@ -13,7 +13,7 @@ export const navigationMachine = setup({
     initializing: {
       on: {
         'component.mounted': [
-          { guard: ({ event }) => event.wide, target: 'ready.wide.open' },
+          { guard: ({ event }) => event.wide, target: 'ready.wide' },
           { target: 'ready.narrow.closed' }
         ]
       }
@@ -22,7 +22,7 @@ export const navigationMachine = setup({
       initial: 'narrow',
       on: {
         'viewport.changed': [
-          { guard: ({ event }) => event.wide, target: '.wide.open' },
+          { guard: ({ event }) => event.wide, target: '.wide' },
           { target: '.narrow.closed' }
         ]
       },
@@ -34,13 +34,7 @@ export const navigationMachine = setup({
             open: { on: { 'menu.toggle': 'closed', 'menu.escape': 'closed', 'navigation.completed': 'closed' } }
           }
         },
-        wide: {
-          initial: 'open',
-          states: {
-            closed: { on: { 'menu.toggle': 'open' } },
-            open: { on: { 'menu.toggle': 'closed', 'menu.escape': 'closed' } }
-          }
-        }
+        wide: {}
       }
     }
   }

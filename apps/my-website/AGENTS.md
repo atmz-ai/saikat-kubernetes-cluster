@@ -24,9 +24,15 @@ Production runs `node build` with production dependencies. Set `HOST`, `PORT` an
 - Blog dates sort descending by `date`; projects by `startDate`. Dates render in UTC to preserve historical date labels across build/server/browser timezones. Search is literal case-insensitive substring matching of title, description or individual tags, without trimming or regex interpretation.
 - Home and list routes prerender. Content routes use `prerender = 'auto'` with explicit entries, retaining server loaders to return HTTP 404 for unknown slugs. `/404` and unknown routes keep the pupper view and real 404 status.
 
+## Appearance and accessibility
+
+Shared color tokens live in `style/tailwind.css`. Native `prefers-color-scheme` selects light or dark colors; `color-scheme: light dark` also themes browser controls. Do not duplicate device appearance in an actor, store, cookie, or hydration script. Both themes must render correctly with JavaScript disabled and respond immediately to device changes. Respect `prefers-reduced-motion`, retain keyboard focus indicators, and verify readable text contrast and narrow-screen overflow in browser tests.
+
+Navigation uses the existing XState lifecycle, with always-visible desktop navigation at 768px and a collapsible mobile header below that breakpoint. Keep `aria-current`, the skip link, no-JavaScript navigation, and disabled-until-hydrated controls intact.
+
 ## Offline previews
 
-Presentation components use same-file typed fixture fallback props, so rendering them with no props works offline. Cards export their same-file fixtures for detail screens. The homepage, icons, metadata and not-found view are already static offline fixtures. `/previews` in development renders populated/empty lists and every screen, exercising nested components and icons. It returns HTTP 404 in production. No preview fetches an API or embeds the real project iframes. Navigation can receive `previewViewport="narrow"` or `"wide"`; normal rendering observes the browser breakpoint at 1536px. Do not replace fixtures with live credentials or network dependencies.
+Presentation components use same-file typed fixture fallback props, so rendering them with no props works offline. Cards export their same-file fixtures for detail screens. The homepage, icons, metadata and not-found view are already static offline fixtures. `/previews` in development renders populated/empty lists and every screen, exercising nested components and icons. It returns HTTP 404 in production. No preview fetches an API or embeds the real project iframes. Navigation can receive `previewViewport="narrow"` or `"wide"`; normal rendering observes the browser breakpoint at 768px. Do not replace fixtures with live credentials or network dependencies.
 
 ## Canonical tooling references
 
@@ -36,6 +42,7 @@ Presentation components use same-file typed fixture fallback props, so rendering
 - [Page options](https://svelte.dev/docs/kit/page-options): explicit `entries` and `prerender = 'auto'` retain SSR fallback.
 - [Svelte props and fixture defaults](https://svelte.dev/docs/svelte/$props).
 - [Svelte mount lifecycle](https://svelte.dev/docs/svelte/lifecycle-hooks#onMount), [Playwright hydration guidance](https://playwright.dev/docs/navigations#hydration).
+- [Device color preference](https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/At-rules/@media/prefers-color-scheme), [native color schemes](https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/Properties/color-scheme).
 - [Official XState Svelte integration](https://stately.ai/docs/xstate-svelte), [machines and pure transitions](https://stately.ai/docs/machines).
 - [Markdown-it](https://markdown-it.github.io/markdown-it/), [Vitest](https://vitest.dev/guide/), [Playwright webServer](https://playwright.dev/docs/test-webserver).
 - [npm install-script approvals](https://docs.npmjs.com/cli/v11/commands/npm-install-scripts), [selector parser release contracts](https://github.com/postcss/postcss-selector-parser/blob/master/CHANGELOG.md).
