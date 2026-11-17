@@ -566,6 +566,8 @@ The root `mise.toml` is the single source of truth for tool versions, plaintext 
 
 **mise (not direnv)** manages tools and environment values. Local secrets are native age values under root `[env]`, committed as ciphertext. No `.env` file is generated or loaded.
 
+For PyPI tools requiring a different Python minor, use mise's per-tool `python` option rather than downgrading the project interpreter or overriding installer arguments. This declares a private runtime dependency; refresh and commit `mise.lock` with the change. See [mise's interpreter selection](https://mise.jdx.dev/dev-tools/backends/pypi.html#choosing-python).
+
 **Never declare tool-standard credentials repo-wide (Hard Rule).** Native age values become ambient in activated shells and child processes; redaction is not process isolation. Store credentials under descriptive names such as `CLUSTER_GITHUB_TOKEN`, `CLUSTER_CLOUDFLARE_API_TOKEN`, `CLUSTER_GEMINI_API_KEY`, and `HETZNER_S3_SECRET_ACCESS_KEY`. Map them to standard names such as `GH_TOKEN` or `AWS_SECRET_ACCESS_KEY` only in the consuming task or command. CLIs often prefer environment credentials over saved accounts, so global standard-name exports can silently hijack unrelated tooling. Inspect ambient variables before diagnosing an authentication failure.
 
 **Local age secrets and Kubernetes SOPS use different identities.** Local mise values use the infrastructure SSH ed25519 identity extracted by `mise run bootstrap` into the gitignored `.saikat-machine-access-ed25519`. Its source is `vault_saikat_machine_access_ssh_private_key`; `age.ssh_identity_files` selects it. Do not substitute a personal SSH key or commit the private identity.

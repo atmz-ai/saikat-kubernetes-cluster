@@ -8,7 +8,8 @@ age.strict = false
 age = "latest"
 "aqua:WebAssembly/binaryen" = "131"
 aws-cli = "latest"
-azure-cli = "latest"
+# ! Azure CLI's macOS broker dependency has no CPython 3.15 wheels.
+azure-cli = { version = "latest", python = "3.14" }
 cargo-binstall = "latest"
 "cargo:cargo-leptos" = "latest"
 "cargo:trunk" = "latest"
