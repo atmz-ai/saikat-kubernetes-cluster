@@ -72,6 +72,7 @@ includes = [
   "mise/tasks/ansible.toml",
   "mise/tasks/infrastructure.toml",
   "mise/tasks/my-website.toml",
+  "mise/tasks/renovate.toml",
   "mise/tasks/sops.toml",
   "mise/tasks/workspace.toml",
 ]

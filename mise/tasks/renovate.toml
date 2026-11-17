@@ -1,0 +1,85 @@
+[renovate-configuration-checks]
+description = "Validate Renovate schema, generic bundle and image extraction, and check-gated merging"
+run = '''
+#!/usr/bin/env -S ./.venv/bin/python -u
+import json
+import subprocess
+import urllib.request
+from pathlib import Path
+
+import jsonschema
+import yaml
+
+configuration = json.loads(Path("renovate.json").read_text())
+with urllib.request.urlopen(configuration["$schema"], timeout=30) as response:
+    schema = json.load(response)
+jsonschema.validate(configuration, schema)
+print("PASS: Renovate configuration matches the published schema")
+release = next(resource for resource in yaml.safe_load_all(Path("kubernetes/infrastructure/rustfs/helmrelease.yaml").read_text()) if resource["kind"] == "HelmRelease")
+image = release["spec"]["values"]["image"]["rustfs"]
+assert image["repository"] == "rustfs/rustfs"
+assert isinstance(image["tag"], str) and image["tag"]
+print("PASS: RustFS declares its image repository and tag together")
+
+subprocess.run(["node", "--input-type=module", "-e", r"""
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+
+const configuration = JSON.parse(fs.readFileSync('renovate.json', 'utf8'));
+const manager = configuration.customManagers.find(manager => manager.customType === 'jsonata');
+assert.equal(manager.fileFormat, 'yaml');
+assert.equal(manager.datasourceTemplate, 'docker');
+assert.equal(manager.versioningTemplate, 'docker');
+for (const owner of [configuration.flux, configuration.kubernetes, manager]) {
+    const patterns = owner.managerFilePatterns.map(pattern => new RegExp(pattern.slice(1, -1)));
+    for (const path of ['kubernetes/infrastructure/rustfs/helmrelease.yaml', 'new-service/arbitrary.yml', 'another/previously-unknown.yaml']) {
+        assert(patterns.some(pattern => pattern.test(path)));
+    }
+    assert(!patterns.some(pattern => pattern.test('new-service/notes.md')));
+}
+assert(!configuration.customManagers.some(manager => manager.depNameTemplate === 'rustfs/rustfs'));
+console.log('PASS: existing and previously unknown YAML paths are discovered without per-image rules');
+assert.equal(configuration.automerge, true);
+assert.equal(configuration.platformAutomerge, false);
+assert.notEqual(configuration.ignoreTests, true);
+assert.notEqual(configuration.requiredStatusChecks, null);
+assert.equal(configuration.schedule, undefined);
+console.log('PASS: Renovate waits for checks instead of relying on unavailable branch protection');
+
+const tektonTemplate = 'tektoncd/' + '{'.repeat(2) + 'project' + '}'.repeat(2);
+const releaseManagers = configuration.customManagers.filter(manager => manager.datasourceTemplate === 'github-releases' && (manager.depNameTemplate === undefined || manager.depNameTemplate === tektonTemplate));
+for (const [address, repository, version] of [
+    ['https://github.com/new-owner/new-controller/releases/download/v2.3.4/release.yaml', 'new-owner/new-controller', 'v2.3.4'],
+    ['https://raw.githubusercontent.com/new-owner/new-controller/v2.3.4/config/crd.yaml', 'new-owner/new-controller', 'v2.3.4'],
+    ['https://infra.tekton.dev/tekton-releases/new-project/previous/v2.3.4/release.yaml', 'tektoncd/new-project', 'v2.3.4'],
+]) {
+    const extracted = releaseManagers.flatMap(manager => manager.matchStrings.flatMap(pattern => {
+        const match = new RegExp(pattern).exec(address);
+        if (!match) return [];
+        assert(new RegExp(manager.managerFilePatterns[0].slice(1, -1)).test('new-service/arbitrary.yml'));
+        let dependency = match.groups.depName ?? manager.depNameTemplate;
+        for (const [key, value] of Object.entries(match.groups)) dependency = dependency.replaceAll('{'.repeat(2) + key + '}'.repeat(2), value);
+        return [{repository: dependency, version: match.groups.currentValue}];
+    }));
+    assert.deepEqual(extracted, [{repository, version}]);
+    console.log('PASS: unknown release bundle is automatically discoverable', address);
+}
+for (const address of [
+    'https://github.com/new-owner/new-controller/releases/download/latest/release.yaml',
+    'https://raw.githubusercontent.com/new-owner/new-controller/main/config/crd.yaml',
+    'https://infra.tekton.dev/tekton-releases/pipeline/latest/release.yaml',
+]) {
+    assert(!releaseManagers.some(manager => manager.matchStrings.some(pattern => new RegExp(pattern).test(address))));
+    console.log('PASS: floating release reference is not accepted as a pinned version', address);
+}
+const floating = configuration.packageRules.find(rule => rule.pinDigests === true);
+assert.deepEqual(floating.matchDatasources, ['docker']);
+const floatingPattern = new RegExp(floating.matchCurrentValue.slice(1, -1));
+for (const tag of ['latest', 'alpine']) assert(floatingPattern.test(tag));
+for (const tag of ['1.0.1', 'v0.37.0', '20261102050204-5a17bbdf']) assert(!floatingPattern.test(tag));
+const privateImages = configuration.packageRules.find(rule => rule.enabled === false);
+assert(new RegExp(privateImages.matchDepNames[0].slice(1, -1)).test('harbor.saikat.dev/my-website/my-website'));
+assert(!new RegExp(privateImages.matchDepNames[0].slice(1, -1)).test('rustfs/rustfs'));
+console.log('PASS: floating public images get digest PRs; Flux-owned private images remain untouched');
+"""], check=True)
+'''

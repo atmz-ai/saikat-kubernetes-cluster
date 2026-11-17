@@ -48,3 +48,7 @@ run = "./.venv/bin/python -m unittest discover -s ansible/roles/certificate_reis
 [api-endpoint-checks]
 description = "Test administrative endpoint cutover preserves CA, credentials and unrelated contexts"
 run = "./.venv/bin/python -m unittest discover -s ansible/roles/kubeconfig_endpoint/tests -v"
+
+[dns-generate]
+description = "Regenerate the PowerDNS zone artifacts from the inventory's pdns_zones list"
+run = "./.venv/bin/ansible-playbook ansible/playbooks/operations/update-dns-zone-config.yml"

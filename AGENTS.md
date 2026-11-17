@@ -597,6 +597,8 @@ For multiline or Base64 input, use `--stdin` instead of `--prompt`, keeping plai
 
 **Task catalogs use mise's [included TOML format](https://mise.jdx.dev/tasks/task-discovery.html#included-toml-files):** write `[<task-name>]`, not `[tasks.<task-name>]`. Preserve app-prefixed task names. Included tasks inherit the root tools, environment, variables, and project working directory; retain explicit `dir` overrides. Register new catalogs in root `task_config.includes`; top-level `include` does not accept tasks. Code inspecting task declarations must read the selected catalogs rather than assume root `[tasks]` exists.
 
+Do not create task catalogs to assert snapshots of deployment configuration. Keep executable-logic regression tests beside their owning code and run them in CI; retain reusable release-contract and dependency-discovery validation.
+
 **Prefer existing mise tasks for recurring workflows.** Use the corresponding `mise run` task when its environment, secrets, dependency chain, or safety checks are needed. One-off tooling commands may run directly with the necessary prerequisites; do not create a task just to run them once.
 
 Use `my-website-build`, `my-website-run`, and `my-website-stop` for the maintained application; inspect daemon status with `mise daemons ls`. Do not duplicate these with generic `dev-*` tasks. Retain indirect tool dependencies: `uv` installs mise's PyPI tools, including Azure CLI. See [mise PyPI requirements](https://mise.jdx.dev/dev-tools/backends/pypi.html#requirements).
