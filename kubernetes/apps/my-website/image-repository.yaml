@@ -6,7 +6,7 @@ metadata:
   name: my-website
   namespace: flux-system
 spec:
-  image: harbor.yral.com/my-website/my-website
+  image: harbor.saikat.dev/my-website/my-website
   interval: 1m
   secretRef:
     name: harbor-scan-secret

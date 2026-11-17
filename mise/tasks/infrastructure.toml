@@ -439,7 +439,7 @@ const floatingPattern = new RegExp(floating.matchCurrentValue.slice(1, -1));
 for (const tag of ['latest', 'alpine']) assert(floatingPattern.test(tag));
 for (const tag of ['1.0.1', 'v0.37.0', '20261102050204-5a17bbdf']) assert(!floatingPattern.test(tag));
 const privateImages = configuration.packageRules.find(rule => rule.enabled === false);
-assert(new RegExp(privateImages.matchDepNames[0].slice(1, -1)).test('harbor.yral.com/my-website/my-website'));
+assert(new RegExp(privateImages.matchDepNames[0].slice(1, -1)).test('harbor.saikat.dev/my-website/my-website'));
 assert(!new RegExp(privateImages.matchDepNames[0].slice(1, -1)).test('rustfs/rustfs'));
 console.log('PASS: floating public images get digest PRs; Flux-owned private images remain untouched');
 """], check=True)

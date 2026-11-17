@@ -98,7 +98,7 @@ spec:
         build:
           name: my-website
         output:
-          image: harbor.yral.com/my-website/my-website:$(tt.params.image-tag)
+          image: harbor.saikat.dev/my-website/my-website:$(tt.params.image-tag)
 ---
 apiVersion: triggers.tekton.dev/v1beta1
 kind: EventListener

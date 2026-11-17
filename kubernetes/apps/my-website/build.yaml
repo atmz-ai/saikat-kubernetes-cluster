@@ -1,13 +1,3 @@
-# Shipwright Build CR for my-website.
-#
-# Builds the SvelteKit static site image from source using BuildKit.
-# Source: the monorepo (atmz-ai/saikat-kubernetes-cluster) at apps/my-website/
-# Strategy: buildkit (ClusterBuildStrategy, rootless BuildKit v0.31.1)
-# Output: harbor.yral.com/my-website/my-website
-# Push secret: harbor-pull-secret (robot$kubernetes-access with push+pull permissions)
-#
-# BuildRuns are created automatically by the Tekton EventListener on git push
-# to main (when changes touch apps/my-website/).
 ---
 apiVersion: shipwright.io/v1beta1
 kind: Build
@@ -18,8 +8,6 @@ spec:
   source:
     type: Git
     git:
-      # SSH URL so the machine-access SSH key (github-ssh-secret) works for both
-      # the main repo clone and submodule clones (submodules use SSH URLs).
       url: git@github.com:atmz-ai/saikat-kubernetes-cluster.git
       revision: main
       cloneSecret: github-ssh-secret
@@ -32,7 +20,7 @@ spec:
     - name: cache
       value: registry
   output:
-    image: harbor.yral.com/my-website/my-website
+    image: harbor.saikat.dev/my-website/my-website
     pushSecret: harbor-pull-secret
   retention:
     succeededLimit: 3

@@ -137,7 +137,7 @@
                 "docker"
             ],
             "matchDepNames": [
-                "/^harbor\\.yral\\.com\\//"
+                "/^harbor\\.saikat\\.dev\\//"
             ],
             "enabled": false
         },
