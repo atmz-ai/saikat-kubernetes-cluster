@@ -202,3 +202,41 @@ test('navigation identifies the current section and the keyboard skip link reach
   await page.goto('/blog-not-a-route');
   await expect(page.locator('.site-navigation [aria-current]')).toHaveCount(0);
 });
+
+test('wide pages fill the viewport while reading columns remain centered and readable', async ({ page }) => {
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  for (const path of ['/', '/blog', '/projects']) {
+    await page.goto(path);
+    const geometry = await page.evaluate(() => ({
+      viewport: document.documentElement.clientWidth,
+      sections: ['.header-inner', '.page-shell', '.site-footer'].map((selector) => {
+        const bounds = document.querySelector(selector)!.getBoundingClientRect();
+        return { left: bounds.left, width: bounds.width };
+      })
+    }));
+    for (const section of geometry.sections) {
+      expect(section.left, path).toBeCloseTo(0, 0);
+      expect(section.width, path).toBeCloseTo(geometry.viewport, 0);
+    }
+  }
+  await page.goto('/blog/posts/react-hooks-usestate');
+  const readingGeometry = await page.locator('.reading-shell').evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    return { width: bounds.width, left: bounds.left, right: document.documentElement.clientWidth - bounds.right };
+  });
+  expect(readingGeometry.width).toBeLessThanOrEqual(840);
+  expect(readingGeometry.left).toBeGreaterThan(0);
+  expect(readingGeometry.left).toBeCloseTo(readingGeometry.right, 0);
+});
+
+test('short pages keep the footer at the viewport bottom without adding scroll', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1600 });
+  await page.goto('/missing');
+  const geometry = await page.evaluate(() => ({
+    viewport: innerHeight,
+    document: document.documentElement.scrollHeight,
+    footerBottom: document.querySelector('footer')!.getBoundingClientRect().bottom
+  }));
+  expect(geometry.footerBottom).toBeCloseTo(geometry.viewport, 0);
+  expect(geometry.document).toBeLessThanOrEqual(geometry.viewport);
+});

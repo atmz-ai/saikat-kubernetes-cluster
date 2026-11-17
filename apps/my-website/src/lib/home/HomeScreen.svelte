@@ -16,15 +16,24 @@
     { href: 'https://www.linkedin.com/in/saikat-das-13674166/', label: 'LinkedIn', icon: LinkedinComponent },
     { href: 'https://stackoverflow.com/users/3462837/saikat-das', label: 'Stack Overflow', icon: StackOverflowComponent }
   ];
+
+  const skillAreas = [
+    { title: 'Services & systems', description: 'Rust services, asynchronous application integration, and authenticated APIs.', technologies: ['Rust', 'Python', 'Kotlin', 'HTTP APIs'] },
+    { title: 'Cloud-native infrastructure', description: 'Kubernetes platforms, declarative deployments, and Linux fleet automation.', technologies: ['Kubernetes', 'Flux', 'Ansible', 'Linux', 'Helm'] },
+    { title: 'Web interfaces', description: 'Server-rendered interfaces with typed state machines and browser-tested interactions.', technologies: ['TypeScript', 'SvelteKit', 'XState', 'Playwright'] },
+    { title: 'Data & integration', description: 'Storage clients, database operators, identity flows, and typed service contracts.', technologies: ['PostgreSQL', 'S3-compatible storage', 'OAuth / PKCE', 'OpenAPI'] },
+    { title: 'Developer workflows', description: 'Repeatable development environments and build, test, and deployment pipelines.', technologies: ['GitHub Actions', 'Devcontainers', 'mise', 'Automated testing'] },
+    { title: 'AI-enabled applications', description: 'Application and API integration, including compatibility work for generated clients.', technologies: ['FastAPI', 'API contracts', 'Typed clients'] }
+  ];
 </script>
 
-<MetadataComponent title="Saikat's Website" description="This is a website where I blog about full stack JavaScript including things like SvelteJS, TailwindCSS, NodeJS, Linux, PostgreSQL among a few and showcase projects I've worked on" />
+<MetadataComponent title="Saikat's Website" description="Saikat Das builds full-stack software and the infrastructure behind it: Rust services, Kubernetes GitOps, authenticated APIs, and TypeScript interfaces." />
 <main class="page-shell home-screen">
   <section class="home-hero">
     <div class="hero-copy">
       <p class="eyebrow"><span class="status-dot" aria-hidden="true"></span> Welcome to my corner of the internet</p>
       <h1>Hi, I'm Saikat<span class="heading-dot">.</span><span class="hero-wave" role="img" aria-label="Hi">👋</span></h1>
-      <p class="hero-description">A programmer based out of <span class="hero-location"><span role="img" aria-label="India"><IndiaFlagComponent className="inline h-5" /></span> India.</span><br />Curious about code. Always building something.</p>
+      <p class="hero-description">A full-stack systems engineer based out of <span class="hero-location"><span role="img" aria-label="India"><IndiaFlagComponent className="inline h-5" /></span> India.</span><br />I build software and the systems behind it.</p>
       <p class="hero-interests">I like <span role="img" aria-label="computers">🖥️</span> computers and <span role="img" aria-label="gaming">🎮</span> gaming.</p>
       <div class="hero-actions">
         <a class="button-link" href="/projects">Explore my work <span aria-hidden="true">↗</span></a>
@@ -45,34 +54,35 @@
       {/each}
     </ul>
   </section>
+  <section class="skills-section" aria-labelledby="skills-heading">
+    <div class="section-heading"><p class="eyebrow">Across application and infrastructure boundaries</p><h2 id="skills-heading">What I work with</h2></div>
+    <ul class="skills-grid">
+      {#each skillAreas as skillArea (skillArea.title)}
+        <li><h3>{skillArea.title}</h3><p>{skillArea.description}</p><div class="tag-list">{#each skillArea.technologies as technology}<span>{technology}</span>{/each}</div></li>
+      {/each}
+    </ul>
+  </section>
   <section class="profile-section">
   <div class="section-heading"><p class="eyebrow">The person behind the code</p><h2>A bit about me</h2></div>
   <article class="prose">
-    <p>I'm elated to have discovered SvelteJS last year and since then have dived headfirst into the SvelteJS, TypeScript and TailwindCSS ecosystems. Was tinkering with static site generation, ReactJS and GatsbyJS prior to that.</p>
-    <p>Have a decent amount of experience with NodeJS / ExpressJS. Have also gone through the docs on Apollo Server/GraphQL Nexus but haven't built any GraphQL servers yet. Understand the fundamentals though, so, shouldn't be difficult at all.</p>
-    <p>Used Firebase (BaaS) for various projects to rapidly accelerate initial time to market. Am also quite competent with Google Cloud as a whole and used their products extensively. Huge proponent of the entire serverless movement. Google Cloud Run is a goto choice for all kinds of deployments.</p>
-    <p>For databases, primarily used PostgreSQL and Firestore. Also used MongoDB and found it quite intuitive but haven't built any products on it as MongoDB Atlas costs are quite prohibitive at scale. Not a huge SQL fan but have working knowledge. Mostly use Prisma 2 to interact with PostgreSQL. Have also tinkered with Dgraph and FaunaDB but found them lacking.</p>
-    <section>Also quite conversant with CI/CD workflows which include pushing to a Git repository and that triggering a list of steps such as:
-      <ul><li>running DB migrations</li><li>running test suite</li><li>deploying to corresponding environment</li></ul>
-      Used Google Cloud Build for this primarily. Aware of Github Actions.
-    </section>
-    <p>Decent experience with Figma to be able to quickly do some wireframes to put thought into form that can be collaborated/ideated on with a team.</p>
+    <p>I build full-stack software and the infrastructure behind it, from Rust services and authenticated APIs to TypeScript and SvelteKit interfaces. My work spans Linux automation, Kubernetes GitOps, storage integrations, observability, and reproducible build and test pipelines.</p>
+    <p>Recent work has focused on declarative infrastructure with Flux and Ansible, typed service contracts, and explicit state machines. I care about making systems understandable, testable, and repeatable, not just getting them to run once.</p>
+    <p>I also contribute to AI-enabled applications and their API integrations. Earlier work includes Internet Computer applications, canister integration, and WebAssembly build and test workflows.</p>
   </article>
   </section>
   <section class="profile-section">
   <div class="section-heading"><p class="eyebrow">Beyond engineering</p><h2>Orthogonal Skills</h2></div>
-  <article class="prose"><p>Have worked as a product manager before, so I understand what it takes to build, manage, scale a product and the team behind it. Worked closely with customer support and on occasion, taken customer chats/calls to speak directly to end users and get feedback on products. Managed engineering teams with direct reportees, able to manage expectations and build rapport.</p></article>
+  <article class="prose"><p>I've also worked in product management and managed engineering teams. Working with customer support and speaking directly with users has shaped how I approach engineering: understand the problem, communicate clearly, and connect technical decisions to the people using the product.</p></article>
   </section>
   <section class="profile-section">
   <div class="section-heading"><p class="eyebrow">Forever a student</p><h2>What I'm Learning</h2></div>
   <article class="prose"><ul>
-    <li>Test driven development (TDD) especially in the context of testing frontend and backend apps. Exploring unit tests, integration tests and end-to-end (e2e) tests. As a library I'm favouring Jest for unit and integration and Playwright for end-to-end testing.</li>
-    <li>Blockchains and building decentralized tokenized apps and smart contracts. I'm favouring Dfinity's Internet Computer (ICP) for this.</li>
-    <li>WebAssembly and how to use them in web apps. Still exploring this space.</li>
+    <li>Native Apple-app development with Swift and SwiftUI. This is an active learning focus, rather than an established production specialty.</li>
+    <li>Applying typed states and events across interfaces and service workflows, building on my Rust and XState work.</li>
   </ul></article>
   </section>
   <section class="profile-section">
   <div class="section-heading"><p class="eyebrow">On the workbench</p><h2>What I'm Working On</h2></div>
-  <article class="prose"><p>I'm currently building the Go Bazzinga app as a progressive web app (PWA). You can check out what it's about <a href="/projects/entries/go-bazzinga" target="_blank" rel="noopener noreferrer">here</a> and the app <a href="https://gobazzinga.io" target="_blank" rel="noopener noreferrer">here</a></p></article>
+  <article class="prose"><p>I'm maintaining a self-hosted Kubernetes platform and the development workflows around it. This website is part of that work: SvelteKit and TypeScript for the interface, XState for interactive lifecycles, and automated tests and GitOps for delivery.</p><p>You can explore <a href="https://github.com/atmz-ai/saikat-kubernetes-cluster" target="_blank" rel="noopener noreferrer">the platform and this site's source</a>, browse <a href="https://github.com/saikatdas0790" target="_blank" rel="noopener noreferrer">my recent work on GitHub</a>, or look through <a href="/projects">earlier projects</a>.</p></article>
   </section>
 </main>
