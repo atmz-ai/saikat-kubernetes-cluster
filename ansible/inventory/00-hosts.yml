@@ -16,7 +16,7 @@ all:
     ansible_ssh_common_args: "-o StrictHostKeyChecking=no"
 
     # ! Changing the join endpoint does not change existing kubeconfigs.
-    control_plane_endpoint: "kubernetes-api.oleole.ai"
+    control_plane_endpoint: "kubernetes-api.saikat.dev"
     # ! Desired SANs do not change existing certificates. Verify every serving
     # ! endpoint before DNS regeneration or client cutover; retain old names meanwhile.
     api_server_cert_sans:

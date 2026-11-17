@@ -1,0 +1,30 @@
+---
+- name: Synchronize kubeadm metadata without changing serving files
+  hosts: "{{ groups['control_plane'][0] }}"
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+  roles:
+    - role: kubeadm_metadata
+
+- name: Migrate node administrative clients one node at a time
+  hosts: control_plane
+  gather_facts: false
+  become: true
+  serial: 1
+  any_errors_fatal: true
+  roles:
+    - role: kubeconfig_endpoint
+      kubeconfig_endpoint_paths:
+        - /etc/kubernetes/admin.conf
+        - /root/.kube/config
+
+- name: Migrate only the current administrative client on this machine
+  hosts: localhost
+  gather_facts: false
+  become: false
+  any_errors_fatal: true
+  roles:
+    - role: kubeconfig_endpoint
+      kubeconfig_endpoint_paths:
+        - "{{ lookup('env', 'KUBECONFIG') }}"

@@ -1,0 +1,85 @@
+---
+- name: Require the declared endpoint to be covered by the serving SANs
+  ansible.builtin.assert:
+    that:
+      - control_plane_endpoint in api_server_cert_sans
+      - inventory_hostname in groups['control_plane']
+
+- name: Verify the new endpoint through the existing administrative client
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - --kubeconfig=/etc/kubernetes/admin.conf
+      - "--server=https://{{ control_plane_endpoint }}:6443"
+      - get
+      - --raw=/readyz
+  changed_when: false
+  check_mode: false
+
+- name: Read the currently published kubeadm declaration
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: ConfigMap
+    name: kubeadm-config
+    namespace: kube-system
+  delegate_to: localhost
+  become: false
+  register: kubeadm_metadata_current
+
+- name: Require an existing kubeadm declaration
+  ansible.builtin.assert:
+    that:
+      - kubeadm_metadata_current.resources | length == 1
+
+- name: Render the canonical metadata declaration
+  ansible.builtin.set_fact:
+    kubeadm_metadata_desired: "{{ lookup('template', playbook_dir + '/../../manifests/kubeadm-cluster-configuration.yaml.j2') | from_yaml }}"
+    kubeadm_metadata_existing: "{{ kubeadm_metadata_current.resources[0].data.ClusterConfiguration | from_yaml }}"
+
+- name: Decide whether endpoint metadata requires publication
+  ansible.builtin.set_fact:
+    kubeadm_metadata_required: >-
+      {{ kubeadm_metadata_existing.controlPlaneEndpoint != kubeadm_metadata_desired.controlPlaneEndpoint
+         or kubeadm_metadata_desired.apiServer.certSANs
+            | difference(kubeadm_metadata_existing.apiServer.certSANs) | length > 0 }}
+
+- name: Publish only the canonical kubeadm metadata
+  when:
+    - kubeadm_metadata_required
+    - not ansible_check_mode
+  block:
+    - name: Save the canonical cluster configuration for kubeadm's supported upload phase
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../../manifests/kubeadm-cluster-configuration.yaml.j2"
+        dest: /etc/kubernetes/kubeadm-cluster-configuration.yaml
+        mode: "0600"
+
+    - name: Synchronize the existing ConfigMap using kubeadm without regenerating credentials
+      ansible.builtin.command:
+        argv:
+          - kubeadm
+          - init
+          - phase
+          - upload-config
+          - kubeadm
+          - --config
+          - /etc/kubernetes/kubeadm-cluster-configuration.yaml
+      changed_when: true
+
+    - name: Read back the published kubeadm configuration
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: ConfigMap
+        name: kubeadm-config
+        namespace: kube-system
+      delegate_to: localhost
+      become: false
+      register: kubeadm_metadata_verified
+
+    - name: Require the new endpoint and additive SAN declaration in the live metadata
+      ansible.builtin.assert:
+        that:
+          - (kubeadm_metadata_verified.resources[0].data.ClusterConfiguration | from_yaml).controlPlaneEndpoint == kubeadm_metadata_desired.controlPlaneEndpoint
+          - >-
+            kubeadm_metadata_desired.apiServer.certSANs
+            | difference((kubeadm_metadata_verified.resources[0].data.ClusterConfiguration | from_yaml).apiServer.certSANs) | length == 0

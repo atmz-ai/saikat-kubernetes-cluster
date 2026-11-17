@@ -34,3 +34,7 @@ run = "./.venv/bin/ansible-galaxy collection install -r ansible/requirements.yml
 [certificate-reissue-checks]
 description = "Test SAN preservation and real TLS certificate activation/rollback in local fixtures"
 run = "./.venv/bin/python -m unittest discover -s ansible/roles/certificate_reissue/tests -v"
+
+[api-endpoint-checks]
+description = "Test administrative endpoint cutover preserves CA, credentials and unrelated contexts"
+run = "./.venv/bin/python -m unittest discover -s ansible/roles/kubeconfig_endpoint/tests -v"
