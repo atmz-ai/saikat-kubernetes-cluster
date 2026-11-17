@@ -48,6 +48,11 @@ External traffic reaches the shared Cilium Gateway through inventory-generated D
 
 Add services through Gateway API routes attached to the appropriate existing listener, with an HTTP-to-HTTPS redirect where needed. Check the Gateway's actual hostname coverage and certificate references before assuming a new hostname is covered. TLS issuance and renewal are managed declaratively by cert-manager; never delete a live certificate Secret to force reissuance.
 
+The certificate shim deletes Gateway-controlled Certificates when their Secret
+names are no longer referenced by that Gateway. Retire the listener in Git and
+verify the unused Certificate is gone; do not delete it imperatively. Certificate
+deletion does not by itself establish that its Secret was garbage-collected.
+
 Cross-namespace backend references require a ReferenceGrant in the target namespace. Follow the root network-policy rules for gateway-originated traffic. Add every new route and grant to its owning Kustomize resource list.
 
 ## Validation and Retirement

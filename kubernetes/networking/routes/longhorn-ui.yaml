@@ -13,7 +13,6 @@ spec:
       sectionName: http
   hostnames:
     - longhorn-ui.saikat.dev
-    - longhorn-ui.saikat.oleole.ai
   rules:
     - filters:
         - type: RequestRedirect
@@ -30,13 +29,9 @@ spec:
   parentRefs:
     - name: web-gateway
       namespace: kube-system
-      sectionName: https-longhorn-ui
-    - name: web-gateway
-      namespace: kube-system
       sectionName: https-saikat-dev
   hostnames:
     - longhorn-ui.saikat.dev
-    - longhorn-ui.saikat.oleole.ai
   rules:
     - backendRefs:
         - name: oauth2-proxy-longhorn-ui

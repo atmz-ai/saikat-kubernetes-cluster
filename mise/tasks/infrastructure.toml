@@ -199,7 +199,7 @@ for application in ("grafana", "headlamp", "dashboard", "longhorn-ui"):
             print("PASS: operator-only mounted allowlist", application)
 longhorn_routes = [resource for resource in yaml.safe_load_all(Path("kubernetes/networking/routes/longhorn-ui.yaml").read_text()) if resource]
 longhorn_proxy = yaml.safe_load(Path("kubernetes/infrastructure/oauth2-proxy/deployment-longhorn-ui.yaml").read_text())
-for scenario in ("complete", "missing-new-host", "direct-frontend", "retired-callback", "missing-tls-listener"):
+for scenario in ("complete", "missing-new-host", "direct-frontend", "retired-callback", "missing-tls-listener", "retired-host-added", "retired-listener-added"):
     routes_candidate = copy.deepcopy(longhorn_routes)
     proxy_candidate = copy.deepcopy(longhorn_proxy)
     secure_route = next(route for route in routes_candidate if route["metadata"]["name"] == "longhorn-ui")
@@ -212,9 +212,13 @@ for scenario in ("complete", "missing-new-host", "direct-frontend", "retired-cal
         proxy_arguments[:] = ["--redirect-url=https://retired.example.invalid/oauth2/callback" if argument.startswith("--redirect-url=") else argument for argument in proxy_arguments]
     elif scenario == "missing-tls-listener":
         secure_route["spec"]["parentRefs"] = [parent for parent in secure_route["spec"]["parentRefs"] if parent["sectionName"] != "https-saikat-dev"]
+    elif scenario == "retired-host-added":
+        secure_route["spec"]["hostnames"].append("retired.example.invalid")
+    elif scenario == "retired-listener-added":
+        secure_route["spec"]["parentRefs"].append({"name": "web-gateway", "namespace": "kube-system", "sectionName": "https-retired"})
     try:
-        assert all("longhorn-ui.saikat.dev" in route["spec"]["hostnames"] for route in routes_candidate), "both Longhorn routes must serve the migrated origin"
-        assert "https-saikat-dev" in {parent["sectionName"] for parent in secure_route["spec"]["parentRefs"]}, "the new Longhorn origin requires its wildcard TLS listener"
+        assert all(route["spec"]["hostnames"] == ["longhorn-ui.saikat.dev"] for route in routes_candidate), "both Longhorn routes must serve only the migrated origin"
+        assert {parent["sectionName"] for parent in secure_route["spec"]["parentRefs"]} == {"https-saikat-dev"}, "the new Longhorn origin requires only its wildcard TLS listener"
         assert secure_route["spec"]["rules"] == [{"backendRefs": [{"name": "oauth2-proxy-longhorn-ui", "namespace": "oauth2-proxy", "port": 4180}]}], "Longhorn's frontend must never bypass authentication"
         assert "--redirect-url=https://longhorn-ui.saikat.dev/oauth2/callback" in proxy_arguments
         assert "--upstream=http://longhorn-frontend.longhorn-system.svc.cluster.local:80" in proxy_arguments
