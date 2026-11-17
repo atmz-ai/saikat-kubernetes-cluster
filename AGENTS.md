@@ -105,6 +105,12 @@ For **deployed cluster components**, always ask the user for an explicit version
 - Upgrade order: one CP at a time → workers → add-ons, one component at a time.
 
 ### Dependency Update Discovery
+
+Dependabot owns application dependency manifests, Dockerfiles, and GitHub Actions;
+keep its directories aligned with maintained projects. Renovate owns mise tools,
+Ansible dependencies, and the generic infrastructure release/image discovery below.
+Assign each dependency to one bot; disable Renovate managers covered by Dependabot.
+
 **New image declarations must be automatically discoverable without per-image changes to `renovate.json`.** Prefer built-in managers and generic structured-data discovery. Use complete `image: repository:tag` references, or declare `repository` alongside `tag`/`version` in Helm image objects; never leave a tag-only override whose repository exists only in chart defaults. Do not add image-specific extractors. Validate additions with `mise run renovate-configuration-checks`. Flux retains ownership of internally built application image updates.
 
 ### Latest Stable Preference
