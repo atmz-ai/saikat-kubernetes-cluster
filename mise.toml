@@ -86,9 +86,9 @@ env = { HOST = "127.0.0.1", PORT = "8081", ORIGIN = "http://localhost:8081" }
 [daemons.my-website-container]
 run = '''
 if [[ "$(uname)" == "Darwin" ]]; then
-  exec container run --rm --platform linux/amd64 -p 8083:8080 test/my-website
+  exec container run --rm --platform linux/amd64 -p 8083:8080 docker.io/test/my-website:latest
 else
-  exec podman run --rm --platform linux/amd64 -p 8083:8080 test/my-website
+  exec podman run --rm --platform linux/amd64 -p 8083:8080 docker.io/test/my-website:latest
 fi
 '''
 ready_http = "http://localhost:8083/"

@@ -38,9 +38,9 @@ description = "Build the my-website container image locally (container on macOS,
 depends = ["container-system-start"]
 run = '''
 if [[ "$(uname)" == "Darwin" ]]; then
-  exec container build -f apps/my-website/Dockerfile.buildkit -t test/my-website --platform linux/amd64 --cpus 17 --memory 40gb .
+  exec container build -f apps/my-website/Dockerfile.buildkit -t docker.io/test/my-website:latest --platform linux/amd64 --cpus 17 --memory 40gb .
 else
-  exec podman build -f apps/my-website/Dockerfile.buildkit -t test/my-website --platform linux/amd64 .
+  exec podman build -f apps/my-website/Dockerfile.buildkit -t docker.io/test/my-website:latest --platform linux/amd64 .
 fi
 '''
 
