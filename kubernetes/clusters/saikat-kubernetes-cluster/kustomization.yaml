@@ -25,6 +25,8 @@ resources:
   - infrastructure-loki.yaml
   - infrastructure-metrics-server.yaml
   - infrastructure-monitoring.yaml
+  - infrastructure-netbird.yaml
+  - infrastructure-netbird-exposure.yaml
   - infrastructure-oauth2-proxy.yaml
   - infrastructure-reloader.yaml
   - infrastructure-rustfs.yaml

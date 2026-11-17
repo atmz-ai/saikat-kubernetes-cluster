@@ -96,6 +96,16 @@ Only `yaml.compose_all` (which walks the node graph) or ansible-lint's own check
 
 ## Running things
 
+Azure firewall reconciliation uses `azure.azcollection.azure_rm_securitygroup`
+with `auth_source: cli` and an explicit subscription. Read the existing NSG first,
+preserve unlisted rules (the module's default), and verify after reconciliation.
+Do not run node provisioning merely to update an NSG. Run
+`mise run azure-ansible-setup` to install the pinned collection's own SDK
+requirements in `.venv-azure`; its SDK versions must not alter the root Python
+environment or the independently managed Azure CLI. The module's
+[requirements](https://docs.ansible.com/ansible/latest/collections/azure/azcollection/azure_rm_securitygroup_module.html)
+come from the selected collection, not a hand-maintained subset.
+
 Use the mise tasks, never `ansible-playbook` / `ansible-lint` / `ansible-vault`
 directly (the root `AGENTS.md` lists them). They ensure the `.venv` is used, the
 vault password file is found via `ansible.cfg`, and runs are reproducible.

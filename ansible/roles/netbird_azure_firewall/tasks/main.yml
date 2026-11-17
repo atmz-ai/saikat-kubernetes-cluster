@@ -1,0 +1,67 @@
+---
+- name: Read the existing Azure network security group
+  azure.azcollection.azure_rm_securitygroup_info:
+    auth_source: cli
+    subscription_id: "{{ netbird_azure_firewall_subscription_identifier }}"
+    resource_group: "{{ netbird_azure_firewall_resource_group }}"
+    name: "{{ netbird_azure_firewall_security_group }}"
+  register: netbird_azure_firewall_before
+
+- name: Require the declared existing network security group
+  ansible.builtin.assert:
+    that:
+      - netbird_azure_firewall_before.securitygroups | length == 1
+      - netbird_azure_firewall_before.securitygroups[0].name == netbird_azure_firewall_security_group
+      - >-
+        netbird_azure_firewall_before.securitygroups[0].rules
+        | rejectattr('name', 'equalto', netbird_azure_firewall_stun_rule.name)
+        | selectattr('priority', 'equalto', netbird_azure_firewall_stun_rule.priority)
+        | list | length == 0
+    fail_msg: The declared Azure NSG is missing or the NetBird rule priority is already occupied
+
+- name: Reconcile only NetBird public STUN ingress
+  azure.azcollection.azure_rm_securitygroup:
+    auth_source: cli
+    subscription_id: "{{ netbird_azure_firewall_subscription_identifier }}"
+    resource_group: "{{ netbird_azure_firewall_resource_group }}"
+    name: "{{ netbird_azure_firewall_security_group }}"
+    rules:
+      - "{{ netbird_azure_firewall_stun_rule }}"
+
+- name: Read the reconciled Azure network security group
+  azure.azcollection.azure_rm_securitygroup_info:
+    auth_source: cli
+    subscription_id: "{{ netbird_azure_firewall_subscription_identifier }}"
+    resource_group: "{{ netbird_azure_firewall_resource_group }}"
+    name: "{{ netbird_azure_firewall_security_group }}"
+  register: netbird_azure_firewall_after
+  when: not ansible_check_mode
+
+- name: Verify NetBird UDP ingress and retain every existing rule
+  ansible.builtin.assert:
+    that:
+      - netbird_azure_firewall_after.securitygroups | length == 1
+      - >-
+        netbird_azure_firewall_after.securitygroups[0].rules
+        | selectattr('name', 'equalto', netbird_azure_firewall_stun_rule.name)
+        | selectattr('protocol', 'equalto', 'Udp')
+        | selectattr('destination_port_range', 'equalto', '3478')
+        | selectattr('access', 'equalto', 'Allow')
+        | selectattr('direction', 'equalto', 'Inbound')
+        | list | length == 1
+      - >-
+        netbird_azure_firewall_before.securitygroups[0].rules
+        | rejectattr('name', 'equalto', netbird_azure_firewall_stun_rule.name)
+        | map(attribute='name') | sort ==
+        netbird_azure_firewall_after.securitygroups[0].rules
+        | rejectattr('name', 'equalto', netbird_azure_firewall_stun_rule.name)
+        | map(attribute='name') | sort
+      - >-
+        netbird_azure_firewall_before.securitygroups[0].rules
+        | selectattr('name', 'equalto', 'SSH')
+        | map(attribute='destination_port_range') | list ==
+        netbird_azure_firewall_after.securitygroups[0].rules
+        | selectattr('name', 'equalto', 'SSH')
+        | map(attribute='destination_port_range') | list
+    fail_msg: Azure did not preserve existing firewall rules or did not activate NetBird STUN ingress
+  when: not ansible_check_mode

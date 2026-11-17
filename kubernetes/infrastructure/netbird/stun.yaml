@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: netbird-stun
+  namespace: netbird
+spec:
+  selector:
+    matchLabels:
+      app: netbird-stun
+  template:
+    metadata:
+      labels:
+        app: netbird-stun
+    spec:
+      automountServiceAccountToken: false
+      # ! Cross-node Cilium SNAT would make STUN report node IPs instead of device IPs.
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          effect: NoSchedule
+      containers:
+        - name: stun
+          image: docker.io/coturn/coturn:4.19.1-r0
+          args:
+            - -n
+            - --stun-only
+            - --no-tls
+            - --no-dtls
+            - --no-cli
+            - --log-file=stdout
+          ports:
+            - name: stun
+              containerPort: 3478
+              protocol: UDP
+          readinessProbe:
+            tcpSocket:
+              port: 3478

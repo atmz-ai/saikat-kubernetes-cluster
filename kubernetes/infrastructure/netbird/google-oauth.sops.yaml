@@ -1,0 +1,24 @@
+apiVersion: v1
+kind: Secret
+metadata:
+    name: atmz-internal-apps-google-oauth
+    namespace: netbird
+type: Opaque
+stringData:
+    client-id: ENC[AES256_GCM,data:Fp56nPU4z2NmkZDBRzx6lWp83ABl6/5jWzhiI4gV/Jg/e4uRoJb8QlOIxGXv7D+gXCHT3D/29KAxrIUI3OOchfemGCz/jg==,iv:FP+RgMIUOgpxl3FIdvT4PoyiENQBLaHpbrrQUsMSBnE=,tag:eYgIvHdywEpDn/3CYtZKmQ==,type:str]
+    client-secret: ENC[AES256_GCM,data:3sDtaMqaQjpyT3kBHbjcTMfoYmr95Z4DPAv3gzh3DP96cd8=,iv:CSjhECgABdMnYsrndvL/pJZnIbmG/ZICr4cZ86q7JF0=,tag:MFdN0Za72M/62ikguhuyQQ==,type:str]
+sops:
+    age:
+        - enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBXanlsK3hMU1Z1aDF4SUZS
+            NW0rZHFWanoydmViUVRNUzF3WGROQUZ2eEZFCk9ZemwxekNkeUxZK1gzcXNKM25l
+            dUxjZmhoLzBGREtuKzZFS0NtL2RGYzgKLS0tIFZUcG5NK2IwY2ZTOUJQVG9NM2ZZ
+            cHNDZVk0SnRZTHdYMm1jM0pNNUQ4QW8KxrIAT28b9YNq+TFOSY0nIo/u5YhFdZjw
+            pfYHWZhi4SD7NSEL/kpGmKRFkCfbJkCFv4JTdZ9qZKwfkFlZD0bDkA==
+            -----END AGE ENCRYPTED FILE-----
+          recipient: age1pdqae3ffmt9rxtmn2758pxjqaaxnytg6mzx3wpepuhs7de2ttfkqk3z7hl
+    encrypted_regex: ^(data|stringData)$
+    lastmodified: "2026-11-17T13:44:31Z"
+    mac: ENC[AES256_GCM,data:W31tObU4RsjkidOKDlr1Pde8bXJ+ZkkMFaUl64WUfK3no4eNB1AMbDeiD5HOSyb7RskrXaT0pA1bemunE+rkwPtMquBab5nhkUHufyK1KXckdFT5kfskCnHIwjcrudQ+KewEGkhNtNQPcbezKLSnpA2MOxR+/zmvhtjHunz/oEQ=,iv:cDbWnZ/2j3U55Tc04ZRmWfVRHr26Z0DVFODmFkt/7FE=,tag:C9IKpFKcXl7oWMBkqoXROQ==,type:str]
+    version: 3.13.3

@@ -1,0 +1,24 @@
+apiVersion: v1
+kind: Secret
+metadata:
+    name: netbird-server
+    namespace: netbird
+type: Opaque
+stringData:
+    config.yaml: ENC[AES256_GCM,data:e2hnnl9gZrBpTvuTa2snhiqiJmmAuJuu/0fc4zSEI+jche410geVS+GWxCSSIqeac5Fa9wtXu/+v3WGalMV6Lk0VOzgpHg1SNQovu7PzObQvDnDpK3JXNfLCBmDJYqkfUoYGRDeV1BhOqdZZpmuQGtWXYILiulKiwbyqO5LExJ73HtevxB48jZVOxMMN2tDysUDS5XfNT963Qwcu+hY5BTUghWkzgiIgyPxeLNdZyzglu/nivi1D+xQBsAvPPp5sKRDv9jROpXW8Nk5n22wirR3ijmKXTs9HU0Hp1EyrG4aHpC17qCe795ijWLpAE44gabdcncGy9cWCEmF1zB/Uf3aezXmr1RXZjr86OIAhwH3kkEV+G+AxBPJtUmpJx4aRNM+cwMmOIuO/nD2ylHUaVJndKoR5LG6th1vGmS4Azuxu52AVYtzmTXS5Ma2uuEcNEsL52vsBheSssLgRwpuXqIrZ4YZhwjJdDr1zh1zbHg6OFtbZPmaj+iEDzy1IPbHB4/9876rmYo1WnD2te8zDX602nx9unuC16aPBe/yxrf7Tc+cLiwScjEXMz2QHlZ73LvpatNPgkEswffLN7ucE/12MuDW7GkCyFN6gPp8KC9Fx4wEbSTIG/mFaIcs9wKcq+oUVuFvXy7bu8dyJ+RE4/YCp5/ORwpGuN+HnJ1rRf+zfV05mg0FvcSbqOWg=,iv:IDQuew9bmvcumhKuSa8O0CsEaphnQwmksUy3r0gZtDI=,tag:T2cSRFEcrxtFGnxsvqrVEQ==,type:str]
+    bootstrap-password: ENC[AES256_GCM,data:nZEIoBY0vfwhWYkmazM3uPjLa5MzwVsiAO92TEjLQ4XgnY6tH7GtVP8VUmIkI4zCAR+v0ab1PAQU//T58MwrIg==,iv:DjWYrU+1tpEejn2alsksJ1dUGNC/w4RjyCRQdmIPNTc=,tag:6QMH7Wyb661t0seVHM0OYA==,type:str]
+sops:
+    age:
+        - enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSAwKzl4REcvN0F5bFEyeEc3
+            LzJnY3Vod3pERjQzOVowRUw5T1JxNjhzaXdNCkdLZzNLVDZnZE1UWjZ6Q2h3QVEy
+            L2FyODMrVjdJOGsyNGVKWTN5YU43Z3cKLS0tIGpIQkhwSllrQVB3Mnl6djltQ1h4
+            OU9DWFNKeGpPSGhBVUgxWnVQMndZelEK6KRxSDF39wm534tkPGlqBB9LEHS87f3D
+            k5jBagvoyMW6vvGNlANIvhwANGOG9BneMHrkmVHIk4JRzd7CdiGqww==
+            -----END AGE ENCRYPTED FILE-----
+          recipient: age1pdqae3ffmt9rxtmn2758pxjqaaxnytg6mzx3wpepuhs7de2ttfkqk3z7hl
+    encrypted_regex: ^(data|stringData)$
+    lastmodified: "2026-11-17T13:54:36Z"
+    mac: ENC[AES256_GCM,data:gsxKpggnwiLbaaytSTLPwHN/wl5jZmJ+IndAOl9JiOfedKKSMnDJUC3CMWt+tN6LubdF7HRFe7iamZNN8ImOXJPWE8NvVu1Rvyj2AoOhA1SCBZFydzQiGbacm5vltRNj5TGuTDA08dPGfzmGxKHXhckewqdFGlBNgl/jo2QOaLI=,iv:0xkrJW5VoCSMcHMUQrnYXfREBqluBLC7kP+X/II8bAI=,tag:lgz8R5WQWTCcFza9NbCwAw==,type:str]
+    version: 3.13.3

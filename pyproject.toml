@@ -15,6 +15,7 @@ requires-python = ">=3.11"
 dependencies = [
   "ansible-core>=2.21.4",
   "ansible-lint>=26.11.0",
+  "datamodel-code-generator>=0.97.0",
   "jsonpatch==1.47",
   "kubernetes==37.0.2",
   "pillow>=13.0.0",

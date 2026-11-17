@@ -31,6 +31,16 @@ exec ./.venv/bin/ansible-lint --project-dir . ansible/playbooks/operations/ ansi
 description = "Install the declared Ansible collections without changing infrastructure credentials"
 run = "./.venv/bin/ansible-galaxy collection install -r ansible/requirements.yml -p ansible/collections"
 
+[azure-ansible-setup]
+description = "Install the Azure collection's version-matched SDK requirements in an isolated Python environment"
+depends = ["python-setup", "ansible-collections-install"]
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+./.venv/bin/python -m venv .venv-azure
+./.venv-azure/bin/pip install -r ansible/collections/ansible_collections/azure/azcollection/requirements.txt
+'''
+
 [certificate-reissue-checks]
 description = "Test SAN preservation and real TLS certificate activation/rollback in local fixtures"
 run = "./.venv/bin/python -m unittest discover -s ansible/roles/certificate_reissue/tests -v"
