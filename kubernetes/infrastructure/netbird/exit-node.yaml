@@ -1,0 +1,187 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: netbird-exit-data
+  namespace: netbird
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: longhorn
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: netbird-exit-node
+  namespace: netbird
+spec:
+  replicas: 1
+  # ! One persisted WireGuard identity must never run in overlapping pods.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: netbird-exit-node
+  template:
+    metadata:
+      labels:
+        app: netbird-exit-node
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        fsGroup: 1000
+      # ! The initializer reads the existing bootstrap PAT from its RWO volume.
+      affinity:
+        podAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app: netbird-server
+              topologyKey: kubernetes.io/hostname
+      initContainers:
+        - name: enroll-exit-peer
+          image: docker.io/library/python:3.15.2-slim
+          command: [python, -u, -B, /configuration/exit_node.py, --prepare]
+          volumeMounts:
+            - name: configuration
+              mountPath: /configuration
+              readOnly: true
+            - name: management
+              mountPath: /management
+              readOnly: true
+            - name: data
+              mountPath: /var/lib/netbird
+      containers:
+        - name: peer
+          image: docker.io/netbirdio/netbird:0.83.1-rootless
+          env:
+            - name: NB_MANAGEMENT_URL
+              value: https://netbird.saikat.dev
+            - name: NB_HOSTNAME
+              value: azure-cloud-vpn
+            - name: NB_SETUP_KEY_FILE
+              value: /var/lib/netbird/exit-setup.key
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          readinessProbe:
+            exec:
+              command: [netbird, status, --check, ready]
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/netbird
+      volumes:
+        - name: configuration
+          configMap:
+            name: netbird-exit-configuration
+        - name: management
+          persistentVolumeClaim:
+            claimName: netbird-data
+        - name: data
+          persistentVolumeClaim:
+            claimName: netbird-exit-data
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: netbird-exit-configuration-v1
+  namespace: netbird
+  annotations:
+    # ! Generated configuration changes require recreating the immutable Job template.
+    kustomize.toolkit.fluxcd.io/force: enabled
+spec:
+  activeDeadlineSeconds: 600
+  template:
+    spec:
+      automountServiceAccountToken: false
+      restartPolicy: Never
+      affinity:
+        podAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app: netbird-server
+              topologyKey: kubernetes.io/hostname
+      containers:
+        - name: configure-exit-route
+          image: docker.io/library/python:3.15.2-slim
+          command: [python, -u, -B, /configuration/exit_node.py]
+          volumeMounts:
+            - name: configuration
+              mountPath: /configuration
+              readOnly: true
+            - name: management
+              mountPath: /management
+              readOnly: true
+      volumes:
+        - name: configuration
+          configMap:
+            name: netbird-exit-configuration
+        - name: management
+          persistentVolumeClaim:
+            claimName: netbird-data
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: netbird-exit-internet-only
+  namespace: netbird
+spec:
+  podSelector:
+    matchLabels:
+      app: netbird-exit-node
+  policyTypes: [Egress]
+  egress:
+    # ! A default route must not expose the cluster, Azure metadata, or private LANs.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 169.254.0.0/16
+              - 100.64.0.0/10
+              - 127.0.0.0/8
+              - 20.219.32.205/32
+              - 20.198.74.224/32
+              - 20.235.109.17/32
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    - to:
+        - podSelector:
+            matchLabels:
+              app: netbird-server
+      ports:
+        - port: 80
+    # ! Control/relay traffic must still reach the public host-network Gateway and STUN.
+    - to:
+        - ipBlock:
+            cidr: 20.219.32.205/32
+        - ipBlock:
+            cidr: 20.198.74.224/32
+        - ipBlock:
+            cidr: 20.235.109.17/32
+        - ipBlock:
+            cidr: 172.16.0.4/32
+        - ipBlock:
+            cidr: 172.16.0.5/32
+        - ipBlock:
+            cidr: 172.16.0.6/32
+      ports:
+        - port: 443
+          protocol: TCP
+        - port: 3478
+          protocol: UDP

@@ -45,3 +45,24 @@ device address. The operator-approved Ansible firewall fallback uses
 Verify STUN binding responses at every authoritative public address,
 not only DaemonSet readiness. gRPC uses a separate h2c Service; relay WebSockets
 and signal streams require unlimited request timeouts on their routes.
+
+## Internet Exit Peer
+
+The [official rootless client](https://docs.netbird.io/get-started/install/docker#rootless-image)
+supports routing through its userspace stack. Use it for the dedicated exit pod
+without host networking, privileged capabilities, or node sysctl changes.
+Its encrypted Longhorn PVC preserves the WireGuard identity across restarts;
+its single-use setup key is stored there without printing credentials.
+
+Exit nodes still require the [Routes API](https://docs.netbird.io/use-cases/remote-access/exit-nodes),
+not the operator's service-oriented NetworkRouter/NetworkResource CRDs.
+The configuration Job owns only its named route and groups. Distribution is
+limited to the existing operator Mac; Auto Apply is disabled to offer a choice
+without interrupting an existing connection. Masquerading remains enabled.
+Keep pod egress blocked from private networks and Azure metadata except the
+specific DNS and NetBird control/relay endpoints needed for operation.
+
+No account-wide DNS or device policy is changed by exit-peer deployment.
+Before claiming full public-Wi-Fi leak protection, verify DNS, IPv6, and
+disconnect behavior on the actual client; an available exit-node option alone
+does not establish those properties.

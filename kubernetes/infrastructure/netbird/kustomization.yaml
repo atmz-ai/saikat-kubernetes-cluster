@@ -10,9 +10,15 @@ resources:
   - stun.yaml
   - bootstrap.yaml
   - reference-grant.yaml
+  - exit-node.yaml
 configMapGenerator:
   - name: netbird-bootstrap
     namespace: netbird
     files:
       - bootstrap.py
+      - api_models.py
+  - name: netbird-exit-configuration
+    namespace: netbird
+    files:
+      - exit_node.py
       - api_models.py
