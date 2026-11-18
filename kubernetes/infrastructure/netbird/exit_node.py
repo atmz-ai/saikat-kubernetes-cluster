@@ -52,8 +52,8 @@ def select_mac(users: list, peers: list) -> str:
     candidates = [
         peer
         for peer in peers
-        if peer.get("dns_label") == "saikats-macbook-pro"
-        and peer.get("os", "").startswith("Darwin")
+        if peer.get("dns_label", "").partition(".")[0] == "saikats-macbook-pro"
+        and peer.get("os", "").casefold().startswith("darwin")
         and peer.get("user_id") == operators[0]
     ]
     if (

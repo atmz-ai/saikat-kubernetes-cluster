@@ -35,6 +35,19 @@ class ExitNodeTests(unittest.TestCase):
 
     def test_selects_only_the_existing_operator_mac(self):
         self.assertEqual(select_mac([self.user], [self.mac]), "existing-mac")
+        self.assertEqual(
+            select_mac(
+                [self.user],
+                [
+                    dict(
+                        self.mac,
+                        dns_label="saikats-macbook-pro.netbird.saikat.dev",
+                        os="darwin 27.2.1",
+                    )
+                ],
+            ),
+            "existing-mac",
+        )
         for peer in (
             dict(self.mac, user_id="someone-else"),
             dict(self.mac, os="Linux"),
