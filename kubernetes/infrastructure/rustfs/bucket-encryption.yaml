@@ -1,0 +1,77 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: rustfs-bucket-sse-s3-1
+  namespace: rustfs
+spec:
+  backoffLimit: 6
+  activeDeadlineSeconds: 1200
+  template:
+    spec:
+      automountServiceAccountToken: false
+      restartPolicy: Never
+      containers:
+        - name: configure-bucket-encryption
+          image: rustfs/rustfs:1.0.5
+          command: [/bin/sh, -ec]
+          args:
+            - |
+              s3_request() {
+                curl --fail-with-body --show-error --connect-timeout 10 --max-time 60 \
+                  --aws-sigv4 aws:amz:us-east-1:s3 \
+                  --variable '%RUSTFS_ACCESS_KEY' --variable '%RUSTFS_SECRET_KEY' \
+                  --expand-user '{{RUSTFS_ACCESS_KEY}}:{{RUSTFS_SECRET_KEY}}' "$@"
+              }
+              service_url='http://rustfs-svc:9000'
+              probe_bucket='saikat-kubernetes-cluster-longhorn-volume-snapshot-backups'
+              probe_path="$probe_bucket/.rustfs-sse-s3-probe-$PROBE_POD_NAME"
+              encryption_configuration='<ServerSideEncryptionConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>AES256</SSEAlgorithm></ApplyServerSideEncryptionByDefault></Rule></ServerSideEncryptionConfiguration>'
+              trap 's3_request --request DELETE "$service_url/$probe_path" || true' EXIT
+
+              for ordinal in 0 1 2; do
+                replica_url="http://rustfs-$ordinal.rustfs-headless:9000"
+                printf 'Verifying RustFS replica %s can encrypt a rollout probe\n' "$ordinal"
+                applied_encryption=$(s3_request --request PUT --header 'x-amz-server-side-encryption: AES256' \
+                  --output /dev/null --write-out '%header{x-amz-server-side-encryption}' \
+                  --data-binary "$PROBE_POD_NAME" "$replica_url/$probe_path")
+                if [ "$applied_encryption" != AES256 ]; then
+                  printf 'Expected AES256 on a probe write through replica %s; got %s\n' "$ordinal" "$applied_encryption" >&2
+                  exit 1
+                fi
+                printf 'Verifying the next replica can decrypt that probe\n'
+                reader_url="http://rustfs-$(((ordinal + 1) % 3)).rustfs-headless:9000"
+                if [ "$(s3_request "$reader_url/$probe_path")" != "$PROBE_POD_NAME" ]; then
+                  printf 'Cross-replica encrypted read failed for writer %s\n' "$ordinal" >&2
+                  exit 1
+                fi
+              done
+              s3_request --request DELETE "$service_url/$probe_path"
+
+              for bucket in \
+                saikat-kubernetes-cluster-longhorn-volume-snapshot-backups \
+                saikat-kubernetes-cluster-postgresql-base-backups-and-wal \
+                saikat-kubernetes-loki-log-chunks-index-and-rules
+              do
+                printf 'Enabling SSE-S3 for new writes to %s\n' "$bucket"
+                s3_request --request PUT --header 'Content-Type: application/xml' \
+                  --data-binary "$encryption_configuration" "$service_url/$bucket?encryption"
+                probe_path="$bucket/.rustfs-sse-s3-probe-$PROBE_POD_NAME"
+                applied_encryption=$(s3_request --request PUT --output /dev/null \
+                  --write-out '%header{x-amz-server-side-encryption}' \
+                  --data-binary "$PROBE_POD_NAME" "$service_url/$probe_path")
+                if [ "$applied_encryption" != AES256 ]; then
+                  printf 'Expected AES256 on a default-encrypted write to %s; got %s\n' "$bucket" "$applied_encryption" >&2
+                  exit 1
+                fi
+                test "$(s3_request "$service_url/$probe_path")" = "$PROBE_POD_NAME"
+                s3_request --request DELETE "$service_url/$probe_path"
+              done
+              trap - EXIT
+          env:
+            - name: PROBE_POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          envFrom:
+            - secretRef:
+                name: rustfs-credentials

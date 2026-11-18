@@ -38,6 +38,11 @@ spec:
     localEndpointHost:
       autoInject: true
     extraEnv:
+      - name: RUSTFS_SSE_S3_MASTER_KEY
+        valueFrom:
+          secretKeyRef:
+            name: rustfs-sse-s3-master-key
+            key: RUSTFS_SSE_S3_MASTER_KEY
       - name: RUSTFS_BROWSER_REDIRECT_URL
         value: https://rust-fs.saikat.dev
       - name: RUSTFS_IDENTITY_OPENID_CONFIG_URL_google
