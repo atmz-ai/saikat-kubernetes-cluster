@@ -13,6 +13,7 @@ from exit_node import (
     request,
     route_operation,
     select_mac,
+    select_exit_peer,
     verify_route,
 )
 
@@ -80,6 +81,24 @@ class ExitNodeTests(unittest.TestCase):
         )
         with self.assertRaises(ValueError):
             group_operation([existing, existing], existing["name"])
+
+    def test_exit_identity_uses_stable_peer_name_not_pod_hostname(self):
+        peer = {
+            "id": "exit",
+            "name": "azure-cloud-vpn",
+            "hostname": "netbird-exit-node-56d94d8c58-s9d8t",
+            "user_id": "",
+            "groups": [{"id": "routers"}],
+        }
+        self.assertEqual(select_exit_peer([peer], "routers"), peer)
+        for peers in (
+            [peer, peer],
+            [dict(peer, name="another-server")],
+            [dict(peer, user_id="operator")],
+            [dict(peer, groups=[])],
+        ):
+            with self.subTest(peers=peers), self.assertRaises(ValueError):
+                select_exit_peer(peers, "routers")
 
     def test_exit_route_is_opt_in_and_not_distributed_to_all(self):
         desired = exit_route("routers", "only-the-mac")

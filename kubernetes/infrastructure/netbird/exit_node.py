@@ -81,6 +81,21 @@ def exit_route(exit_group: str, client_group: str) -> RouteRequest:
     )
 
 
+def select_exit_peer(peers: list, exit_group: str):
+    candidates = [
+        peer
+        for peer in peers
+        if any(group.get("id") == exit_group for group in peer.get("groups", []))
+    ]
+    if (
+        len(candidates) != 1
+        or candidates[0].get("name") != "azure-cloud-vpn"
+        or candidates[0].get("user_id") != ""
+    ):
+        raise ValueError("Expected exactly one enrolled Kubernetes exit peer")
+    return candidates[0]
+
+
 def route_operation(routes: list, desired: RouteRequest):
     candidates = [
         route for route in routes if route.get("network_id") == desired["network_id"]
@@ -184,21 +199,7 @@ def main():
             case Phase.PEERS:
                 peers = request("GET", "/api/peers", token)
                 mac_peer = select_mac(users, peers)
-                routing_peers = [
-                    peer
-                    for peer in peers
-                    if any(
-                        group.get("id") == exit_group
-                        for group in peer.get("groups", [])
-                    )
-                ]
-                if (
-                    len(routing_peers) != 1
-                    or routing_peers[0].get("hostname") != "azure-cloud-vpn"
-                ):
-                    raise ValueError(
-                        "Expected exactly one enrolled Kubernetes exit peer"
-                    )
+                select_exit_peer(peers, exit_group)
                 phase = Phase.CLIENT_GROUP
             case Phase.CLIENT_GROUP:
                 groups = request("GET", "/api/groups", token)
