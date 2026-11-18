@@ -1,0 +1,24 @@
+apiVersion: v1
+kind: Secret
+metadata:
+    name: rustfs-sse-s3-master-key
+    namespace: rustfs
+type: Opaque
+immutable: true
+data:
+    RUSTFS_SSE_S3_MASTER_KEY: ENC[AES256_GCM,data:3DzEmDQ71Mjuw+6Ie1BjOkub/l+7Q7OiJM2lzbjZb9Gjc0rxcSoiaLzTtgVF1JRX9Sk6+Cledp8Q2YPK,iv:Ws4/ZcyftuWS3xl5Ir8sl4Vk9L+Tf28NnWwf2v76Xpw=,tag:8LFE4uH8xzv3Ba7J8fGElw==,type:str]
+sops:
+    age:
+        - enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBWU3JKanlxN25OTjBmek1G
+            ekx3bWRGUUljZUhLNnFWelBxOXJYSk5UeEFRClBRcDJYNFFYcmZGL2FudGtRVTJP
+            bWFiNGxrRzJ2WGRtVDVRQ0ZWQ3Z0YU0KLS0tIHRLSmNha0h4N3ZOWnZncWhQUUg0
+            aVdTbWtmdkRYWDQxWHV3dkUySGVYWU0K5JI13j35ScKoruJXRMvPEraOammc7S0x
+            AQn5jI9CHRFGJY2EW2J4795RedO6mEiKpskLXDbR/2eiZEUaTMfoJg==
+            -----END AGE ENCRYPTED FILE-----
+          recipient: age1pdqae3ffmt9rxtmn2758pxjqaaxnytg6mzx3wpepuhs7de2ttfkqk3z7hl
+    encrypted_regex: ^(data)$
+    lastmodified: "2026-11-18T08:54:49Z"
+    mac: ENC[AES256_GCM,data:w5NBNzCXUWHLfUlUE+dEEUo+KqweOvdRHzstyjMr81M7yKJGS0ohKQtBIr/5/9uXTMWVjZM3graZAnafRC0Bryx5izV+B7HmSqINQBnKeK3pyIe636DbR1dPqwahjJl93ikOrPMgE2VGMyvxtL29NH/JkHvjilLK+hU83JjdmuY=,iv:CnaOU6YSFWlH1SQHX8h4yaNecVykI0zPuW7r+jupCzY=,tag:9z5kiBkIFMSg9KvmXiLOfg==,type:str]
+    version: 3.13.3

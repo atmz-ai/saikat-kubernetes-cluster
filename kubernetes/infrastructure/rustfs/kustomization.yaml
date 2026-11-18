@@ -5,8 +5,10 @@ resources:
   - storage.yaml
   - helmrelease.yaml
   - credentials.sops.yaml
+  - sse-s3-master-key.sops.yaml
   - atmz-internal-apps-google-oauth.sops.yaml
   - google-authorization.yaml
   - loki-bucket.yaml
   - backup-buckets.yaml
+  - bucket-encryption.yaml
   - route.yaml
