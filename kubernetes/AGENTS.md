@@ -20,6 +20,8 @@ repository with `Contents: Read and write` before resuming writebacks. If
 bootstrap still co-owns `spec.secretRef`, point it at an empty HTTPS Secret
 instead of omitting it; server-side apply can preserve a co-owned field.
 Customize Flux-generated sync manifests with the adjacent Kustomize overlay.
+Enable SOPS decryption on the root Flux Kustomization and verify it reconciles
+before adding its first encrypted Secret; it cannot apply both in one pass.
 
 When moving the reconciliation entry point, retain a forwarding Kustomize
 directory at the old path until the root Flux CR has reconciled its new
