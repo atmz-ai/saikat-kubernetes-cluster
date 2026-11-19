@@ -11,6 +11,14 @@ This tree owns Kubernetes workload, networking, operator, and GitOps declaration
 
 Ordering is declared through the individual Flux Kustomizations' `dependsOn` fields. Do not substitute manual apply sequences or forced reconciliation for those dependencies.
 
+When transferring a public GitOps repository across GitHub owners, first let
+Flux reconcile without HTTPS credentials and suspend image writebacks in Git.
+[Fine-grained tokens](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens)
+are scoped to one owner. Keep anonymous reads working through the transfer,
+then reconcile a SOPS-encrypted Flux Git credential scoped to the destination
+repository with `Contents: Read and write` before resuming writebacks. Customize
+Flux-generated sync manifests with the adjacent Kustomize overlay.
+
 When moving the reconciliation entry point, retain a forwarding Kustomize
 directory at the old path until the root Flux CR has reconciled its new
 `spec.path`. Removing the only readable source path prevents Flux from applying
