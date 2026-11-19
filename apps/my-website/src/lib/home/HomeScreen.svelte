@@ -83,6 +83,6 @@
   </section>
   <section class="profile-section">
   <div class="section-heading"><p class="eyebrow">On the workbench</p><h2>What I'm Working On</h2></div>
-  <article class="prose"><p>I'm maintaining a self-hosted Kubernetes platform and the development workflows around it. This website is part of that work: SvelteKit and TypeScript for the interface, XState for interactive lifecycles, and automated tests and GitOps for delivery.</p><p>You can explore <a href="https://github.com/atmz-ai/saikat-kubernetes-cluster" target="_blank" rel="noopener noreferrer">the platform and this site's source</a>, browse <a href="https://github.com/saikatdas0790" target="_blank" rel="noopener noreferrer">my recent work on GitHub</a>, or look through <a href="/projects">earlier projects</a>.</p></article>
+  <article class="prose"><p>I'm maintaining a self-hosted Kubernetes platform and the development workflows around it. This website is part of that work: SvelteKit and TypeScript for the interface, XState for interactive lifecycles, and automated tests and GitOps for delivery.</p><p>You can explore <a href="https://github.com/saikatdas0790/saikat-kubernetes-cluster" target="_blank" rel="noopener noreferrer">the platform and this site's source</a>, browse <a href="https://github.com/saikatdas0790" target="_blank" rel="noopener noreferrer">my recent work on GitHub</a>, or look through <a href="/projects">earlier projects</a>.</p></article>
   </section>
 </main>

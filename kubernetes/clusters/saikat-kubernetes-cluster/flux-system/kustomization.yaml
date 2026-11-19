@@ -12,3 +12,6 @@ patches:
     - op: replace
       path: /spec/secretRef/name
       value: flux-git-https
+    - op: replace
+      path: /spec/url
+      value: https://github.com/saikatdas0790/saikat-kubernetes-cluster.git

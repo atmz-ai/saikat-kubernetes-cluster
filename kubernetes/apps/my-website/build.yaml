@@ -8,9 +8,8 @@ spec:
   source:
     type: Git
     git:
-      url: git@github.com:atmz-ai/saikat-kubernetes-cluster.git
+      url: https://github.com/saikatdas0790/saikat-kubernetes-cluster.git
       revision: main
-      cloneSecret: github-ssh-secret
   strategy:
     name: buildkit
     kind: ClusterBuildStrategy
