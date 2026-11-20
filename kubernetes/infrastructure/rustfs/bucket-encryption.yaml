@@ -12,7 +12,7 @@ spec:
       restartPolicy: Never
       containers:
         - name: configure-bucket-encryption
-          image: rustfs/rustfs:1.0.5
+          image: rustfs/rustfs:1.0.6
           command: [/bin/sh, -ec]
           args:
             - |
