@@ -336,44 +336,44 @@ checksum = "sha256:e2edda75bfb089654705cf65a13b58933bfd5f57148e8ebda916f58a2474f
 url = "https://nodejs.org/dist/v26.13.1/node-v26.13.1-win-x64.zip"
 
 [[tools.pitchfork]]
-version = "2.34.0"
+version = "2.35.0"
 backend = "aqua:jdx/pitchfork"
 
 [tools.pitchfork."platforms.linux-arm64"]
-checksum = "sha256:1fd3a99061b41744a3c77725c86ad16a1ce6b325c336723352eddc38f5c6f98e"
+checksum = "sha256:92f53082163514f4f1ab6e228a1264a2d98f685f8605863b75277c4298dfb3d5"
 checksum_source = "mise-versions"
-url = "https://github.com/jdx/pitchfork/releases/download/v2.34.0/pitchfork-aarch64-unknown-linux-gnu.tar.gz"
-url_api = "https://api.github.com/repos/jdx/pitchfork/releases/assets/728862155"
+url = "https://github.com/jdx/pitchfork/releases/download/v2.35.0/pitchfork-aarch64-unknown-linux-gnu.tar.gz"
+url_api = "https://api.github.com/repos/jdx/pitchfork/releases/assets/756263718"
 
 [tools.pitchfork."platforms.linux-arm64-musl"]
-checksum = "sha256:1fd3a99061b41744a3c77725c86ad16a1ce6b325c336723352eddc38f5c6f98e"
+checksum = "sha256:92f53082163514f4f1ab6e228a1264a2d98f685f8605863b75277c4298dfb3d5"
 checksum_source = "mise-versions"
-url = "https://github.com/jdx/pitchfork/releases/download/v2.34.0/pitchfork-aarch64-unknown-linux-gnu.tar.gz"
-url_api = "https://api.github.com/repos/jdx/pitchfork/releases/assets/728862155"
+url = "https://github.com/jdx/pitchfork/releases/download/v2.35.0/pitchfork-aarch64-unknown-linux-gnu.tar.gz"
+url_api = "https://api.github.com/repos/jdx/pitchfork/releases/assets/756263718"
 
 [tools.pitchfork."platforms.linux-x64"]
-checksum = "sha256:2e5182e32909ff259357c6761b0e8c8c68d3b352223f72bfba6683e702031ad3"
+checksum = "sha256:dc361973279b2ba0f76fab0e8423125870c0747263be0a1e7b165fb41317e837"
 checksum_source = "mise-versions"
-url = "https://github.com/jdx/pitchfork/releases/download/v2.34.0/pitchfork-x86_64-unknown-linux-gnu.tar.gz"
-url_api = "https://api.github.com/repos/jdx/pitchfork/releases/assets/728855772"
+url = "https://github.com/jdx/pitchfork/releases/download/v2.35.0/pitchfork-x86_64-unknown-linux-gnu.tar.gz"
+url_api = "https://api.github.com/repos/jdx/pitchfork/releases/assets/756264117"
 
 [tools.pitchfork."platforms.linux-x64-musl"]
-checksum = "sha256:2e5182e32909ff259357c6761b0e8c8c68d3b352223f72bfba6683e702031ad3"
+checksum = "sha256:dc361973279b2ba0f76fab0e8423125870c0747263be0a1e7b165fb41317e837"
 checksum_source = "mise-versions"
-url = "https://github.com/jdx/pitchfork/releases/download/v2.34.0/pitchfork-x86_64-unknown-linux-gnu.tar.gz"
-url_api = "https://api.github.com/repos/jdx/pitchfork/releases/assets/728855772"
+url = "https://github.com/jdx/pitchfork/releases/download/v2.35.0/pitchfork-x86_64-unknown-linux-gnu.tar.gz"
+url_api = "https://api.github.com/repos/jdx/pitchfork/releases/assets/756264117"
 
 [tools.pitchfork."platforms.macos-arm64"]
-checksum = "sha256:27dad04ac4cf54cd3315ca6ac1948fb811a8c02a1a83ba5213a137618b535a0a"
+checksum = "sha256:e1f0a9e233559af12f9d636b1959c3c5b0a24ae255ea36799892da3f35c30f79"
 checksum_source = "mise-versions"
-url = "https://github.com/jdx/pitchfork/releases/download/v2.34.0/pitchfork-aarch64-apple-darwin.tar.gz"
-url_api = "https://api.github.com/repos/jdx/pitchfork/releases/assets/728869896"
+url = "https://github.com/jdx/pitchfork/releases/download/v2.35.0/pitchfork-aarch64-apple-darwin.tar.gz"
+url_api = "https://api.github.com/repos/jdx/pitchfork/releases/assets/756277807"
 
 [tools.pitchfork."platforms.windows-x64"]
-checksum = "sha256:960e81bc08adfa8b0d21897590475c07660f1eb72f44daeb55ba36f5ff778436"
+checksum = "sha256:584b23cf2dd97337389711e675ff2cc9de88104874781e80afe0acb5308ee92b"
 checksum_source = "mise-versions"
-url = "https://github.com/jdx/pitchfork/releases/download/v2.34.0/pitchfork-x86_64-pc-windows-msvc.zip"
-url_api = "https://api.github.com/repos/jdx/pitchfork/releases/assets/728870949"
+url = "https://github.com/jdx/pitchfork/releases/download/v2.35.0/pitchfork-x86_64-pc-windows-msvc.zip"
+url_api = "https://api.github.com/repos/jdx/pitchfork/releases/assets/756286078"
 
 [[tools.python]]
 version = "3.15.2"
